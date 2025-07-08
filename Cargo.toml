@@ -1,0 +1,17 @@
+[package]
+name = "xmj"
+version = "0.1.0"
+edition = "2021"
+authors = ["kako-jun"]
+description = "邪雀 Xtreme Mahjong - A mahjong game with occult and extreme rules"
+
+[dependencies]
+rand = "0.8"
+
+[[bin]]
+name = "xmj"
+path = "src/main.rs"
+
+[lib]
+name = "xmj_core"
+path = "src/lib.rs"
