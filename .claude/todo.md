@@ -86,6 +86,39 @@
   - [x] ゲームログ機能
   - [x] レスポンシブデザイン
 
+### フェーズ4: Web版P2P対戦基盤（進行中: 2025-11-17）
+
+- [x] WASM Nostr統合
+  - [x] WasmNostrKeys構造体（ブラウザlocalStorage対応）
+  - [x] WasmNostrClient構造体
+  - [x] ゲームイベント型定義（WasmGameEvent, WasmGameEventType）
+  - [x] マッチング募集・参加イベント作成
+  - [x] WASMバインディング（WasmNostrKeyManager, WasmNostrP2PClient）
+- [x] WebRTC通信基盤
+  - [x] WasmWebRtcManager構造体
+  - [x] ピア接続管理（createPeerConnection）
+  - [x] データチャネル作成
+  - [x] オファー・アンサー生成（SDP交換）
+  - [x] ICE候補追加
+  - [x] データ送受信（send_data, broadcast）
+  - [x] WASMバインディング（WasmWebRtcP2PManager）
+- [x] マッチング画面UI
+  - [x] Nostr鍵表示・管理UI
+  - [x] マッチ作成ボタン（3人/4人）
+  - [x] マッチ一覧表示
+  - [x] マッチ参加UI
+  - [x] リレー接続状態表示
+  - [x] ログ表示
+- [ ] P2Pゲーム状態同期（進行中）
+  - [ ] ゲームイベントのシリアライズ
+  - [ ] WebRTC経由でのイベント送受信
+  - [ ] 受信イベントの検証
+  - [ ] 状態の一貫性チェック
+- [ ] 4人対戦メッシュトポロジー
+  - [ ] 全ピア間接続の確立
+  - [ ] イベントのブロードキャスト
+  - [ ] 接続状態の監視
+
 ---
 
 ## 優先度1: コアゲーム機能の完成 🔥 ✅ COMPLETED

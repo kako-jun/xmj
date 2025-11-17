@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>邪雀 - オンラインマッチング</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #eee;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            max-width: 800px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            background: linear-gradient(45deg, #f093fb, #f5576c);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .section {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .section h2 {
+            color: #4facfe;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+
+        .key-info {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 8px;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            background: linear-gradient(45deg, #4facfe, #00f2fe);
+            border: none;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s;
+            flex: 1;
+            min-width: 150px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(79, 172, 254, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button.secondary {
+            background: linear-gradient(45deg, #f093fb, #f5576c);
+        }
+
+        button.danger {
+            background: linear-gradient(45deg, #ff6b6b, #c92a2a);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .match-list {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+
+        .match-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s;
+        }
+
+        .match-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: #4facfe;
+        }
+
+        .match-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .match-details {
+            flex: 1;
+        }
+
+        .match-id {
+            font-family: monospace;
+            font-size: 0.85em;
+            color: #888;
+        }
+
+        .player-count {
+            color: #4facfe;
+            font-weight: bold;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            margin-top: 5px;
+        }
+
+        .status.waiting {
+            background: rgba(79, 172, 254, 0.2);
+            color: #4facfe;
+        }
+
+        .status.starting {
+            background: rgba(76, 209, 55, 0.2);
+            color: #4cd137;
+        }
+
+        .status.full {
+            background: rgba(245, 87, 108, 0.2);
+            color: #f5576c;
+        }
+
+        .log {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 15px;
+            border-radius: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.85em;
+        }
+
+        .log-entry {
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+        .log-entry.info {
+            color: #4facfe;
+        }
+
+        .log-entry.success {
+            color: #4cd137;
+        }
+
+        .log-entry.error {
+            color: #f5576c;
+        }
+
+        .relay-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #888;
+        }
+
+        .status-dot.connected {
+            background: #4cd137;
+            box-shadow: 0 0 10px #4cd137;
+        }
+
+        .status-dot.disconnected {
+            background: #f5576c;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.3);
+            color: white;
+            font-size: 1em;
+            margin-bottom: 10px;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #4facfe;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🀄 邪雀 Xtreme Mahjong</h1>
+
+        <!-- Nostr鍵情報 -->
+        <div class="section">
+            <h2>🔑 あなたの識別子</h2>
+            <div class="key-info" id="publicKey">鍵を生成中...</div>
+            <div class="relay-status">
+                <span class="status-dot" id="relayStatus"></span>
+                <span id="relayText">リレー: 未接続</span>
+            </div>
+            <div class="button-group">
+                <button onclick="regenerateKeys()" class="danger">🔄 鍵を再生成</button>
+                <button onclick="copyPublicKey()">📋 コピー</button>
+            </div>
+        </div>
+
+        <!-- マッチング作成 -->
+        <div class="section">
+            <h2>🎮 新しいマッチを作成</h2>
+            <div class="button-group">
+                <button onclick="createMatch(4)" class="secondary">4人麻雀を開始</button>
+                <button onclick="createMatch(3)" class="secondary">3人麻雀を開始</button>
+            </div>
+        </div>
+
+        <!-- マッチング参加 -->
+        <div class="section">
+            <h2>🔍 マッチを検索</h2>
+            <button onclick="refreshMatches()">🔄 更新</button>
+            <div class="match-list" id="matchList">
+                <p style="text-align: center; color: #888; padding: 20px;">
+                    「更新」を押してマッチを検索
+                </p>
+            </div>
+        </div>
+
+        <!-- マッチIDで直接参加 -->
+        <div class="section">
+            <h2>🎯 マッチIDで参加</h2>
+            <input type="text" id="matchIdInput" placeholder="マッチIDを入力">
+            <button onclick="joinMatchById()">参加</button>
+        </div>
+
+        <!-- ログ -->
+        <div class="section">
+            <h2>📋 ログ</h2>
+            <div class="log" id="log">
+                <div class="log-entry info">システム起動</div>
+            </div>
+        </div>
+
+        <!-- ローカルゲーム -->
+        <div class="section">
+            <h2>🏠 ローカルゲーム</h2>
+            <button onclick="startLocalGame()">CPU対戦を開始</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import init, {
+            WasmNostrKeyManager,
+            WasmNostrP2PClient,
+            WasmWebRtcP2PManager
+        } from './pkg/xmj_core.js';
+
+        let nostrClient = null;
+        let webrtcManager = null;
+        let myPublicKey = null;
+
+        // ログ追加関数
+        window.addLog = function(message, type = 'info') {
+            const log = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        };
+
+        // 鍵の初期化
+        async function initKeys() {
+            try {
+                if (WasmNostrKeyManager.hasKeys()) {
+                    myPublicKey = WasmNostrKeyManager.loadKeys();
+                    addLog('既存の鍵を読み込みました', 'success');
+                } else {
+                    myPublicKey = WasmNostrKeyManager.generateAndSave();
+                    addLog('新しい鍵を生成しました', 'success');
+                }
+
+                document.getElementById('publicKey').textContent = myPublicKey;
+
+                // Nostrクライアントの初期化
+                const relayUrl = 'ws://localhost:7777'; // ローカルリレー
+                nostrClient = new WasmNostrP2PClient(relayUrl);
+
+                // WebRTCマネージャーの初期化
+                webrtcManager = new WasmWebRtcP2PManager(myPublicKey);
+
+                updateRelayStatus(true);
+                addLog('Nostrリレーに接続しました', 'success');
+            } catch (e) {
+                addLog(`エラー: ${e}`, 'error');
+                updateRelayStatus(false);
+            }
+        }
+
+        // リレー状態の更新
+        function updateRelayStatus(connected) {
+            const dot = document.getElementById('relayStatus');
+            const text = document.getElementById('relayText');
+
+            if (connected) {
+                dot.className = 'status-dot connected';
+                text.textContent = 'リレー: 接続済み (ws://localhost:7777)';
+            } else {
+                dot.className = 'status-dot disconnected';
+                text.textContent = 'リレー: 未接続';
+            }
+        }
+
+        // 公開鍵のコピー
+        window.copyPublicKey = function() {
+            navigator.clipboard.writeText(myPublicKey).then(() => {
+                addLog('公開鍵をコピーしました', 'success');
+            });
+        };
+
+        // 鍵の再生成
+        window.regenerateKeys = function() {
+            if (confirm('本当に新しい鍵を生成しますか？現在の鍵は失われます。')) {
+                try {
+                    WasmNostrKeyManager.deleteKeys();
+                    myPublicKey = WasmNostrKeyManager.generateAndSave();
+                    document.getElementById('publicKey').textContent = myPublicKey;
+                    addLog('新しい鍵を生成しました', 'success');
+                } catch (e) {
+                    addLog(`エラー: ${e}`, 'error');
+                }
+            }
+        };
+
+        // マッチ作成
+        window.createMatch = function(maxPlayers) {
+            if (!nostrClient) {
+                addLog('Nostrクライアントが初期化されていません', 'error');
+                return;
+            }
+
+            try {
+                const eventJson = nostrClient.createMatchSeekEvent(maxPlayers);
+                const event = JSON.parse(eventJson);
+                addLog(`${maxPlayers}人麻雀マッチを作成しました`, 'success');
+                addLog(`マッチID: ${event.match_id}`, 'info');
+
+                // TODO: NostrリレーにイベントをPublish
+                // この部分は実際のNostr実装が必要
+            } catch (e) {
+                addLog(`エラー: ${e}`, 'error');
+            }
+        };
+
+        // マッチ一覧の更新
+        window.refreshMatches = function() {
+            addLog('マッチを検索中...', 'info');
+
+            // TODO: Nostrリレーからマッチ一覧を取得
+            // デモ用のダミーデータ
+            const matches = [
+                {
+                    match_id: 'demo-match-001',
+                    host_pubkey: 'npub1234...5678',
+                    players: ['Player1', 'Player2'],
+                    max_players: 4,
+                    status: 'waiting'
+                }
+            ];
+
+            displayMatches(matches);
+        };
+
+        // マッチ一覧の表示
+        function displayMatches(matches) {
+            const list = document.getElementById('matchList');
+
+            if (matches.length === 0) {
+                list.innerHTML = '<p style="text-align: center; color: #888; padding: 20px;">マッチが見つかりません</p>';
+                return;
+            }
+
+            list.innerHTML = '';
+            matches.forEach(match => {
+                const item = document.createElement('div');
+                item.className = 'match-item';
+
+                const playerCount = match.players.length;
+                const statusClass = playerCount >= match.max_players ? 'full' :
+                                  playerCount > 0 ? 'starting' : 'waiting';
+                const statusText = playerCount >= match.max_players ? '満席' :
+                                 playerCount > 0 ? '募集中' : '待機中';
+
+                item.innerHTML = `
+                    <div class="match-info">
+                        <div class="match-details">
+                            <div class="match-id">ID: ${match.match_id}</div>
+                            <div class="player-count">
+                                ${playerCount} / ${match.max_players} 人
+                            </div>
+                            <div class="status ${statusClass}">${statusText}</div>
+                        </div>
+                        ${playerCount < match.max_players ?
+                            `<button onclick="joinMatch('${match.match_id}')">参加</button>` :
+                            `<button disabled>満席</button>`}
+                    </div>
+                `;
+
+                list.appendChild(item);
+            });
+        }
+
+        // マッチに参加
+        window.joinMatch = function(matchId) {
+            if (!nostrClient) {
+                addLog('Nostrクライアントが初期化されていません', 'error');
+                return;
+            }
+
+            try {
+                const eventJson = nostrClient.createMatchJoinEvent(matchId);
+                addLog(`マッチ ${matchId} に参加リクエストを送信しました`, 'success');
+
+                // TODO: NostrリレーにイベントをPublish
+                // TODO: WebRTC接続の確立
+            } catch (e) {
+                addLog(`エラー: ${e}`, 'error');
+            }
+        };
+
+        // IDでマッチに参加
+        window.joinMatchById = function() {
+            const matchId = document.getElementById('matchIdInput').value.trim();
+            if (!matchId) {
+                addLog('マッチIDを入力してください', 'error');
+                return;
+            }
+
+            joinMatch(matchId);
+        };
+
+        // ローカルゲーム開始
+        window.startLocalGame = function() {
+            window.location.href = 'index.html';
+        };
+
+        // 初期化
+        init().then(() => {
+            addLog('WASMモジュールを読み込みました', 'success');
+            initKeys();
+        }).catch(e => {
+            addLog(`初期化エラー: ${e}`, 'error');
+        });
+    </script>
+</body>
+</html>

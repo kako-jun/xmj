@@ -12,7 +12,13 @@ if ! command -v wasm-pack &> /dev/null; then
 fi
 
 # WASMビルド
-wasm-pack build --target web --features wasm --out-dir web/pkg
+wasm-pack build --target web --features wasm
+
+# 出力ディレクトリを移動
+if [ -d "pkg" ]; then
+    rm -rf web/pkg
+    mv pkg web/pkg
+fi
 
 echo "✅ WASM build completed!"
 echo "Output: web/pkg/"
