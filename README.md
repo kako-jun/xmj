@@ -69,7 +69,17 @@ cd web
 python3 -m http.server 8000
 ```
 
-ブラウザで `http://localhost:8000` にアクセスしてください。
+ブラウザで各モードにアクセス:
+- `http://localhost:8000` - 4人CPU対戦（観戦モード）
+- `http://localhost:8000/hybrid.html` - **ハイブリッドモード（1人間 + 3CPU）** ⭐おすすめ
+- `http://localhost:8000/matchmaking.html` - P2Pマッチング画面
+- `http://localhost:8000/debug.html` - 開発者デバッグツール
+
+**ハイブリッドモードの特徴**:
+- 👤 あなた1人 vs 🤖 CPU 3人で対戦
+- 🎯 東家・南家・西家・北家から席を選択可能
+- ⚡ P2P通信なしで即座にプレイ開始
+- 🐛 1台のPCでデバッグ・テストが可能
 
 #### オンラインP2P対戦（開発中）
 
@@ -125,8 +135,10 @@ xmj/
 │   ├── wasm_nostr.rs   # Nostr P2P通信（WASM）
 │   └── wasm_webrtc.rs  # WebRTC P2P通信（WASM）
 ├── web/                # Webクライアント
-│   ├── index.html      # ローカルCPU対戦
+│   ├── index.html      # CPU対戦（観戦モード）
+│   ├── hybrid.html     # ハイブリッドモード（1人間+3CPU）
 │   ├── matchmaking.html # P2Pマッチング画面
+│   ├── debug.html      # 開発者デバッグツール
 │   ├── pkg/            # WASMビルド出力
 │   └── README.md       # Web版説明
 ├── .claude/            # 開発ドキュメント
