@@ -56,21 +56,48 @@ cargo run
 - 赤ドラ: `5mr`, `5pr`, `5sr`
 - 字牌: `to`（東）, `na`（南）, `sa`（西）, `pe`（北）, `hk`（白）, `ht`（発）, `cn`（中）
 
-### Web版（開発中）
+### Web版
+
+#### ローカルCPU対戦
 
 ```bash
+# WASMビルド
+./build-wasm.sh
+
+# ローカルサーバー起動
 cd web
-npm install
-npm run dev
+python3 -m http.server 8000
 ```
 
-ブラウザで `http://localhost:5173` にアクセスしてください。
+ブラウザで `http://localhost:8000` にアクセスしてください。
+
+#### オンラインP2P対戦（開発中）
+
+```bash
+# マッチング画面
+# ブラウザで http://localhost:8000/matchmaking.html にアクセス
+```
+
+**P2P対戦の特徴**:
+- 🔑 Nostr鍵ペアによる匿名認証
+- 🌐 Nostrリレーでのマッチング
+- 🔗 WebRTCによる低遅延P2P通信
+- 🎮 4人対戦対応（メッシュトポロジー）
+- 🏠 サーバーレス（中央サーバー不要）
+
+**注意**: 現在P2P機能は基礎実装のみで、実際のゲームプレイはまだ実装されていません。
 
 ## ゲームモード
 
 ### 実装済み
 
 - ✅ **通常麻雀**: 標準的なリーチ麻雀（開発・デバッグ用）
+  - ✅ 完全な和了判定（4面子1雀頭、七対子、国士無双）
+  - ✅ 全役判定（一飜～役満）
+  - ✅ シャンテン数計算
+  - ✅ 鳴き（チー・ポン・カン）
+  - ✅ リーチシステム
+  - ✅ AIエンジン（3レベル）
 
 ### 実装予定
 
@@ -92,12 +119,21 @@ xmj/
 │   ├── player.rs       # プレイヤー管理
 │   ├── game.rs         # ゲーム進行
 │   ├── scoring.rs      # 役判定・点数計算
-│   └── ai.rs           # AI思考エンジン（予定）
-├── web/                # Webクライアント（予定）
+│   ├── ai.rs           # AI思考エンジン
+│   ├── nostr.rs        # Nostr P2P通信（ネイティブ）
+│   ├── wasm.rs         # WASMバインディング
+│   ├── wasm_nostr.rs   # Nostr P2P通信（WASM）
+│   └── wasm_webrtc.rs  # WebRTC P2P通信（WASM）
+├── web/                # Webクライアント
+│   ├── index.html      # ローカルCPU対戦
+│   ├── matchmaking.html # P2Pマッチング画面
+│   ├── pkg/            # WASMビルド出力
+│   └── README.md       # Web版説明
 ├── .claude/            # 開発ドキュメント
 │   ├── vision.md       # プロジェクトビジョン
 │   ├── design.md       # 技術設計
 │   └── todo.md         # 実装TODOリスト
+├── build-wasm.sh       # WASMビルドスクリプト
 ├── CLAUDE.md           # 総合プロジェクトドキュメント
 ├── Cargo.toml          # Rust設定
 └── README.md           # このファイル
