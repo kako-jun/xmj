@@ -11,4 +11,4 @@ pub use hand::Hand;
 pub use game::Game;
 pub use player::Player;
 pub use ai::{AiEngine, AiLevel};
-pub use nostr::{NostrClient, NostrKeys, GameEvent, GameEventType};
+pub use nostr::{NostrClient, NostrKeys, GameEvent, GameEventType, MatchState};
