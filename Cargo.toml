@@ -13,10 +13,14 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 dirs = "5.0"
 uuid = { version = "1.0", features = ["v4"] }
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true }
 
 [features]
 default = []
 nostr = ["nostr-sdk", "tokio"]
+wasm = ["wasm-bindgen", "js-sys", "web-sys"]
 
 [[bin]]
 name = "xmj"
@@ -25,3 +29,4 @@ path = "src/main.rs"
 [lib]
 name = "xmj_core"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]

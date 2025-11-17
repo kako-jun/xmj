@@ -2314,12 +2314,15 @@ name = "xmj"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "js-sys",
  "nostr-sdk",
  "rand 0.8.5",
  "serde",
  "serde_json",
  "tokio",
  "uuid",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
