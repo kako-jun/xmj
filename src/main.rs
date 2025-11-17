@@ -1,4 +1,4 @@
-use xmj_core::{Game, Tile};
+use xmj_core::{Game, Tile, AiEngine, AiLevel};
 use std::io::{self, Write};
 
 fn main() {
@@ -87,18 +87,23 @@ fn handle_player_turn(game: &mut Game) {
 
 fn handle_cpu_turn(game: &mut Game) {
     let player_name = game.get_current_player().name.clone();
-    
+
     // ツモ
     if !game.current_player_draw() {
         println!("山牌がありません");
         return;
     }
-    
-    // 簡単なCPU思考：最初の牌を打つ
-    let tiles = game.get_current_player().hand.get_tiles().clone();
-    if !tiles.is_empty() {
-        let discard_tile = tiles[0];
+
+    // AIエンジンで打牌を選択（レベル3: シャンテン数ベース）
+    let ai = AiEngine::new(AiLevel::Intermediate);
+    let hand = &game.get_current_player().hand;
+
+    if let Some(discard_tile) = ai.select_discard(hand) {
         game.discard_tile(discard_tile);
-        println!("{} が {} を打牌", player_name, discard_tile.to_string());
+        println!("{} が {} を打牌 [シャンテン数: {}]",
+            player_name,
+            discard_tile.to_string(),
+            game.get_current_player().hand.shanten()
+        );
     }
 }
