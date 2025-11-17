@@ -10,6 +10,7 @@ use crate::{Game, Tile, Hand, Player, AiEngine, AiLevel};
 #[wasm_bindgen]
 pub struct WasmGame {
     game: Game,
+    human_player_index: Option<usize>, // ハイブリッドモード用：人間プレイヤーの位置（0-3）
 }
 
 #[cfg(feature = "wasm")]
@@ -23,6 +24,42 @@ impl WasmGame {
 
         Self {
             game: Game::new(player_names),
+            human_player_index: None, // 通常モードは全員人間
+        }
+    }
+
+    /// ハイブリッドゲームを作成（1人間 + 3CPU）
+    #[wasm_bindgen(js_name = newHybrid)]
+    pub fn new_hybrid(human_name: String, human_position: usize) -> Self {
+        // パニック時にコンソールにログを出力
+        #[cfg(feature = "console_error_panic_hook")]
+        console_error_panic_hook::set_once();
+
+        let mut names = vec![
+            "CPU 東".to_string(),
+            "CPU 南".to_string(),
+            "CPU 西".to_string(),
+            "CPU 北".to_string(),
+        ];
+
+        // 人間プレイヤーの位置を設定（0=東, 1=南, 2=西, 3=北）
+        let position = human_position % 4;
+        names[position] = human_name;
+
+        let game = Game::new(names);
+
+        Self {
+            game,
+            human_player_index: Some(position),
+        }
+    }
+
+    /// 現在のプレイヤーが人間かどうか
+    #[wasm_bindgen(js_name = isCurrentPlayerHuman)]
+    pub fn is_current_player_human(&self) -> bool {
+        match self.human_player_index {
+            Some(human_idx) => self.game.current_player == human_idx,
+            None => true, // ハイブリッドモードでない場合は全員人間扱い
         }
     }
 
@@ -138,7 +175,10 @@ impl WasmGame {
     /// 現在のプレイヤーがCPUかどうか
     #[wasm_bindgen(js_name = isCurrentPlayerCpu)]
     pub fn is_current_player_cpu(&self) -> bool {
-        self.game.current_player != 0
+        match self.human_player_index {
+            Some(human_idx) => self.game.current_player != human_idx,
+            None => self.game.current_player != 0, // 通常モード（後方互換性）
+        }
     }
 
     /// プレイヤーの点数を取得

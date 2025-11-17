@@ -300,7 +300,24 @@
         <!-- ローカルゲーム -->
         <div class="section">
             <h2>🏠 ローカルゲーム</h2>
-            <button onclick="startLocalGame()">CPU対戦を開始</button>
+            <div class="button-group">
+                <button onclick="location.href='hybrid.html'">👤+🤖 ハイブリッド (1人間+3CPU)</button>
+                <button onclick="startLocalGame()">🤖 CPU対戦 (4CPU)</button>
+            </div>
+            <p style="margin-top: 10px; color: #888; font-size: 0.9em;">
+                ※ハイブリッドモード: 1台のPCで3人のCPUと対戦できます（P2P機能のデバッグにも最適）
+            </p>
+        </div>
+
+        <!-- デバッグツール -->
+        <div class="section">
+            <h2>🐛 開発者ツール</h2>
+            <button onclick="location.href='debug.html'" style="background: linear-gradient(45deg, #667eea, #764ba2);">
+                デバッグコンソールを開く
+            </button>
+            <p style="margin-top: 10px; color: #888; font-size: 0.9em;">
+                ※開発者向け: Nostr/WebRTC接続状態の確認、テストツールなど
+            </p>
         </div>
     </div>
 
