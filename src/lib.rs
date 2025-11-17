@@ -9,6 +9,12 @@ pub mod nostr;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
+#[cfg(feature = "wasm")]
+pub mod wasm_nostr;
+
+#[cfg(feature = "wasm")]
+pub mod wasm_webrtc;
+
 pub use tile::{Tile, TileType, Suit};
 pub use hand::Hand;
 pub use game::Game;
