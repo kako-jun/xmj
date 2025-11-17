@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>邪雀 - ハイブリッド対戦（1人間 + 3CPU）</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 2em;
+            background: linear-gradient(45deg, #f093fb, #f5576c);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .setup-screen {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 600px;
+            margin: 50px auto;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+
+        .setup-section {
+            margin-bottom: 30px;
+        }
+
+        .setup-section h2 {
+            color: #4facfe;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.3);
+            color: white;
+            font-size: 1.1em;
+            margin-bottom: 15px;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #4facfe;
+        }
+
+        .position-selector {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .position-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .position-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: #4facfe;
+        }
+
+        .position-btn.selected {
+            background: linear-gradient(45deg, #4facfe, #00f2fe);
+            border-color: #4facfe;
+            box-shadow: 0 5px 20px rgba(79, 172, 254, 0.4);
+        }
+
+        button {
+            background: linear-gradient(45deg, #4facfe, #00f2fe);
+            border: none;
+            color: white;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 1.2em;
+            cursor: pointer;
+            transition: all 0.3s;
+            width: 100%;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(79, 172, 254, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button.secondary {
+            background: linear-gradient(45deg, #f093fb, #f5576c);
+        }
+
+        .game-screen {
+            display: none;
+        }
+
+        .players-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .player-card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s;
+        }
+
+        .player-card.active {
+            border-color: #4cd137;
+            box-shadow: 0 0 20px rgba(76, 209, 55, 0.3);
+        }
+
+        .player-card.riichi {
+            border-color: #f5576c;
+            box-shadow: 0 0 20px rgba(245, 87, 108, 0.3);
+        }
+
+        .player-card.human {
+            background: rgba(79, 172, 254, 0.1);
+        }
+
+        .player-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .player-name {
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+
+        .player-name.cpu::after {
+            content: " 🤖";
+        }
+
+        .player-name.human::after {
+            content: " 👤";
+        }
+
+        .player-score {
+            font-size: 1.1em;
+            color: #4facfe;
+        }
+
+        .hand-tiles {
+            font-family: monospace;
+            font-size: 1.1em;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .discards {
+            font-family: monospace;
+            font-size: 0.9em;
+            color: #888;
+            padding: 8px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 5px;
+            max-height: 60px;
+            overflow-y: auto;
+        }
+
+        .game-info {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .controls {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .button-group button {
+            flex: 1;
+        }
+
+        .log {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 15px;
+            border-radius: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+
+        .log-entry {
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+        .log-entry.player {
+            color: #4cd137;
+        }
+
+        .log-entry.cpu {
+            color: #4facfe;
+        }
+
+        .log-entry.system {
+            color: #ffa502;
+        }
+
+        .auto-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #4cd137;
+            border-radius: 50%;
+            margin-left: 10px;
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🀄 邪雀 Xtreme Mahjong - ハイブリッド対戦</h1>
+
+        <!-- セットアップ画面 -->
+        <div class="setup-screen" id="setupScreen">
+            <div class="setup-section">
+                <h2>👤 あなたの名前</h2>
+                <input type="text" id="playerName" placeholder="プレイヤー名を入力" value="Player 1">
+            </div>
+
+            <div class="setup-section">
+                <h2>🎯 あなたの席</h2>
+                <div class="position-selector">
+                    <div class="position-btn selected" data-position="0">
+                        <div>東家 (親)</div>
+                        <div style="font-size: 0.9em; color: #888;">あなた vs CPU3人</div>
+                    </div>
+                    <div class="position-btn" data-position="1">
+                        <div>南家</div>
+                        <div style="font-size: 0.9em; color: #888;">CPU vs あなた vs CPU2人</div>
+                    </div>
+                    <div class="position-btn" data-position="2">
+                        <div>西家</div>
+                        <div style="font-size: 0.9em; color: #888;">CPU2人 vs あなた vs CPU</div>
+                    </div>
+                    <div class="position-btn" data-position="3">
+                        <div>北家</div>
+                        <div style="font-size: 0.9em; color: #888;">CPU3人 vs あなた</div>
+                    </div>
+                </div>
+            </div>
+
+            <button onclick="startGame()">🎮 ゲーム開始</button>
+            <button onclick="location.href='index.html'" class="secondary" style="margin-top: 10px;">← 通常モードに戻る</button>
+        </div>
+
+        <!-- ゲーム画面 -->
+        <div class="game-screen" id="gameScreen">
+            <div class="game-info" id="gameInfo">
+                <div>局: <span id="round">東1局</span></div>
+                <div>残り牌: <span id="wallCount">70</span></div>
+                <div>ドラ: <span id="doraIndicators">-</span></div>
+            </div>
+
+            <div class="players-grid" id="playersGrid">
+                <!-- プレイヤーカードが動的に追加される -->
+            </div>
+
+            <div class="controls">
+                <h3>操作</h3>
+                <div class="button-group">
+                    <button id="drawBtn" onclick="playerDraw()">🀫 ツモ</button>
+                    <button id="riichiBtn" onclick="playerRiichi()">🔴 リーチ</button>
+                </div>
+                <div style="margin-top: 15px;">
+                    <input type="text" id="discardInput" placeholder="打牌する牌を入力 (例: 1m, 5p, to)">
+                    <button onclick="playerDiscard()" style="margin-top: 10px;">🀄 打牌</button>
+                </div>
+                <div class="button-group">
+                    <button id="autoBtn" onclick="toggleAutoPlay()">⏯️ 自動進行</button>
+                    <button onclick="location.reload()" class="secondary">🔄 リセット</button>
+                </div>
+            </div>
+
+            <div class="log" id="log">
+                <div class="log-entry system">ゲーム開始</div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import init, { WasmGame } from './pkg/xmj_core.js';
+
+        let game = null;
+        let selectedPosition = 0;
+        let autoPlay = false;
+        let autoPlayInterval = null;
+
+        // 席選択
+        document.querySelectorAll('.position-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.position-btn').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                selectedPosition = parseInt(btn.dataset.position);
+            });
+        });
+
+        // ログ追加
+        window.addLog = function(message, type = 'system') {
+            const log = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        };
+
+        // ゲーム開始
+        window.startGame = async function() {
+            const playerName = document.getElementById('playerName').value || 'Player 1';
+
+            try {
+                await init();
+                game = WasmGame.newHybrid(playerName, selectedPosition);
+
+                document.getElementById('setupScreen').style.display = 'none';
+                document.getElementById('gameScreen').style.display = 'block';
+
+                addLog(`${playerName} が ${['東家', '南家', '西家', '北家'][selectedPosition]} でゲーム開始`, 'system');
+
+                updateDisplay();
+
+                // 最初のプレイヤーがCPUなら自動的に進める
+                if (game.isCurrentPlayerCpu()) {
+                    setTimeout(executeCpuTurn, 1000);
+                }
+            } catch (e) {
+                addLog(`エラー: ${e}`, 'system');
+                console.error(e);
+            }
+        };
+
+        // 画面更新
+        function updateDisplay() {
+            // ゲーム情報
+            const state = JSON.parse(game.getGameState());
+            document.getElementById('wallCount').textContent = game.getWallCount();
+
+            const dora = game.getDoraIndicators();
+            document.getElementById('doraIndicators').textContent = dora || '-';
+
+            // プレイヤー情報更新
+            const grid = document.getElementById('playersGrid');
+            grid.innerHTML = '';
+
+            for (let i = 0; i < 4; i++) {
+                const card = document.createElement('div');
+                const isHuman = i === selectedPosition;
+                const isCurrent = game.getCurrentPlayerId() === i;
+                const isRiichi = game.isPlayerRiichi(i);
+
+                card.className = 'player-card';
+                if (isHuman) card.classList.add('human');
+                if (isCurrent) card.classList.add('active');
+                if (isRiichi) card.classList.add('riichi');
+
+                const name = game.getPlayerName(i);
+                const score = game.getPlayerScore(i);
+                const hand = isHuman && isCurrent ? game.getCurrentHand() : '[ 非表示 ]';
+                const discards = game.getPlayerDiscards(i);
+
+                card.innerHTML = `
+                    <div class="player-header">
+                        <div class="player-name ${isHuman ? 'human' : 'cpu'}">
+                            ${name} ${isRiichi ? '🔴' : ''}
+                        </div>
+                        <div class="player-score">${score}点</div>
+                    </div>
+                    <div class="hand-tiles">${hand}</div>
+                    <div class="discards">河: ${discards || '-'}</div>
+                `;
+
+                grid.appendChild(card);
+            }
+
+            // ボタンの有効/無効
+            const isPlayerTurn = game.isCurrentPlayerHuman();
+            document.getElementById('drawBtn').disabled = !isPlayerTurn;
+            document.getElementById('riichiBtn').disabled = !isPlayerTurn || !game.canRiichi();
+            document.getElementById('discardInput').disabled = !isPlayerTurn;
+        }
+
+        // プレイヤーのツモ
+        window.playerDraw = function() {
+            if (!game.isCurrentPlayerHuman()) {
+                addLog('あなたのターンではありません', 'system');
+                return;
+            }
+
+            if (game.drawTile()) {
+                addLog('ツモ', 'player');
+                updateDisplay();
+            } else {
+                addLog('山牌がありません', 'system');
+            }
+        };
+
+        // プレイヤーの打牌
+        window.playerDiscard = function() {
+            if (!game.isCurrentPlayerHuman()) {
+                addLog('あなたのターンではありません', 'system');
+                return;
+            }
+
+            const tile = document.getElementById('discardInput').value.trim();
+            if (!tile) {
+                addLog('牌を入力してください', 'system');
+                return;
+            }
+
+            if (game.discardTile(tile)) {
+                addLog(`${tile} を打牌`, 'player');
+                document.getElementById('discardInput').value = '';
+                updateDisplay();
+
+                // 次がCPUならAI実行
+                if (game.isCurrentPlayerCpu() && !game.isGameOver()) {
+                    setTimeout(executeCpuTurn, 500);
+                }
+            } else {
+                addLog('その牌は打牌できません', 'system');
+            }
+        };
+
+        // プレイヤーのリーチ
+        window.playerRiichi = function() {
+            if (!game.isCurrentPlayerHuman()) {
+                addLog('あなたのターンではありません', 'system');
+                return;
+            }
+
+            if (game.declareRiichi()) {
+                addLog('リーチ！', 'player');
+                updateDisplay();
+            } else {
+                addLog('リーチできません', 'system');
+            }
+        };
+
+        // CPUのターン実行
+        function executeCpuTurn() {
+            if (!game.isCurrentPlayerCpu() || game.isGameOver()) {
+                return;
+            }
+
+            const cpuName = game.getPlayerName((game.getCurrentPlayerId()));
+            const discardedTile = game.executeCpuTurn();
+            addLog(`${cpuName} が ${discardedTile} を打牌`, 'cpu');
+            updateDisplay();
+
+            if (game.isGameOver()) {
+                addLog('ゲーム終了', 'system');
+                stopAutoPlay();
+                return;
+            }
+
+            // 次もCPUなら続行
+            if (game.isCurrentPlayerCpu()) {
+                if (autoPlay) {
+                    setTimeout(executeCpuTurn, 800);
+                }
+            }
+        }
+
+        // 自動進行の切り替え
+        window.toggleAutoPlay = function() {
+            autoPlay = !autoPlay;
+            const btn = document.getElementById('autoBtn');
+
+            if (autoPlay) {
+                btn.innerHTML = '⏸️ 停止 <span class="auto-indicator"></span>';
+                if (game.isCurrentPlayerCpu()) {
+                    executeCpuTurn();
+                }
+            } else {
+                btn.innerHTML = '⏯️ 自動進行';
+            }
+        };
+
+        function stopAutoPlay() {
+            autoPlay = false;
+            document.getElementById('autoBtn').innerHTML = '⏯️ 自動進行';
+        }
+
+        // Enterキーで打牌
+        document.getElementById('discardInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                playerDiscard();
+            }
+        });
+    </script>
+</body>
+</html>
