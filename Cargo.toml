@@ -7,6 +7,22 @@ description = "邪雀 Xtreme Mahjong - A mahjong game with occult and extreme ru
 
 [dependencies]
 rand = "0.8"
+nostr-sdk = { version = "0.36", optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "5.0"
+uuid = { version = "1.0", features = ["v4", "serde", "js"] }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", features = ["Window", "Storage", "RtcPeerConnection", "RtcDataChannel", "RtcSessionDescription", "RtcSessionDescriptionInit", "RtcIceCandidate", "RtcIceCandidateInit", "RtcConfiguration", "RtcSdpType", "MessageEvent", "RtcDataChannelEvent"], optional = true }
+getrandom = { version = "0.2", features = ["js"], optional = true }
+
+[features]
+default = []
+nostr = ["nostr-sdk", "tokio"]
+wasm = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys", "getrandom"]
 
 [[bin]]
 name = "xmj"
@@ -15,3 +31,4 @@ path = "src/main.rs"
 [lib]
 name = "xmj_core"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]

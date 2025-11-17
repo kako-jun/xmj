@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>邪雀 - デバッグツール</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1a1a1a;
+            color: #0f0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #0f0;
+            margin-bottom: 20px;
+            text-align: center;
+            text-shadow: 0 0 10px #0f0;
+        }
+
+        .panel {
+            background: rgba(0, 255, 0, 0.05);
+            border: 2px solid #0f0;
+            border-radius: 5px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .panel h2 {
+            color: #0ff;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            overflow-x: auto;
+        }
+
+        .tab {
+            background: rgba(0, 255, 0, 0.1);
+            border: 1px solid #0f0;
+            color: #0f0;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+
+        .tab:hover {
+            background: rgba(0, 255, 0, 0.2);
+        }
+
+        .tab.active {
+            background: #0f0;
+            color: #000;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .info-item {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 5px;
+            border: 1px solid #0f0;
+        }
+
+        .info-label {
+            color: #0ff;
+            font-size: 0.9em;
+            margin-bottom: 5px;
+        }
+
+        .info-value {
+            color: #0f0;
+            font-size: 1.2em;
+            word-break: break-all;
+        }
+
+        .log {
+            background: #000;
+            padding: 15px;
+            border-radius: 5px;
+            border: 1px solid #0f0;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 0.9em;
+        }
+
+        .log-entry {
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(0, 255, 0, 0.1);
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+        .log-entry.success {
+            color: #0f0;
+        }
+
+        .log-entry.error {
+            color: #f00;
+        }
+
+        .log-entry.warn {
+            color: #ff0;
+        }
+
+        .log-entry.info {
+            color: #0ff;
+        }
+
+        button {
+            background: rgba(0, 255, 0, 0.2);
+            border: 1px solid #0f0;
+            color: #0f0;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            transition: all 0.3s;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        button:hover {
+            background: rgba(0, 255, 0, 0.3);
+        }
+
+        button.danger {
+            border-color: #f00;
+            color: #f00;
+        }
+
+        button.danger:hover {
+            background: rgba(255, 0, 0, 0.2);
+        }
+
+        input[type="text"],
+        input[type="number"],
+        select {
+            background: #000;
+            border: 1px solid #0f0;
+            color: #0f0;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        input:focus,
+        select:focus {
+            outline: none;
+            box-shadow: 0 0 10px #0f0;
+        }
+
+        .command-box {
+            background: #000;
+            border: 1px solid #0f0;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+
+        .command-box pre {
+            color: #0ff;
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #f00;
+            margin-right: 8px;
+        }
+
+        .status-indicator.online {
+            background: #0f0;
+            box-shadow: 0 0 10px #0f0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🐛 邪雀 デバッグツール</h1>
+
+        <!-- タブナビゲーション -->
+        <div class="tabs">
+            <div class="tab active" onclick="showTab('overview')">概要</div>
+            <div class="tab" onclick="showTab('nostr')">Nostr</div>
+            <div class="tab" onclick="showTab('webrtc')">WebRTC</div>
+            <div class="tab" onclick="showTab('game')">ゲーム状態</div>
+            <div class="tab" onclick="showTab('tools')">テストツール</div>
+        </div>
+
+        <!-- 概要タブ -->
+        <div class="panel" id="tab-overview">
+            <h2>🔍 システム概要</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">WASM バージョン</div>
+                    <div class="info-value" id="wasmVersion">-</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">ゲーム名</div>
+                    <div class="info-value" id="gameName">-</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">ブラウザ</div>
+                    <div class="info-value" id="browser">-</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">接続状態</div>
+                    <div class="info-value">
+                        <span class="status-indicator" id="connectionStatus"></span>
+                        <span id="connectionText">未接続</span>
+                    </div>
+                </div>
+            </div>
+
+            <h2 style="margin-top: 20px;">📋 クイックスタートガイド</h2>
+            <div class="command-box">
+                <pre>1. ハイブリッドモードで単独テスト:
+   → hybrid.html を開く（1人間 + 3CPU）
+
+2. P2P通信のローカルテスト:
+   → 複数のブラウザタブでmatchmaking.htmlを開く
+   → 各タブで異なるNostr鍵が自動生成される
+   → 1つのタブで「マッチ作成」、他のタブで「参加」
+
+3. デバッグコンソールの活用:
+   開発者ツール (F12) → コンソールタブ
+   以下のグローバル変数が利用可能:
+   - window.debugNostrKeys  // Nostr鍵情報
+   - window.debugWebRTC     // WebRTC接続状態
+   - window.debugGameState  // ゲーム状態
+
+4. ローカルNostrリレーの起動:
+   docker run -p 7777:8080 scsibug/nostr-rs-relay
+   または
+   ws://localhost:7777 に接続可能なリレーを用意</pre>
+            </div>
+        </div>
+
+        <!-- Nostrタブ -->
+        <div class="panel" id="tab-nostr" style="display: none;">
+            <h2>🔑 Nostr 鍵管理</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">公開鍵 (npub)</div>
+                    <div class="info-value" id="nostrPubkey">-</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">秘密鍵 (nsec)</div>
+                    <div class="info-value" id="nostrSeckey">********</div>
+                </div>
+            </div>
+            <button onclick="generateNewKeys()">新しい鍵を生成</button>
+            <button onclick="showSecretKey()">秘密鍵を表示</button>
+            <button class="danger" onclick="deleteKeys()">鍵を削除</button>
+
+            <h2 style="margin-top: 20px;">📡 イベントログ</h2>
+            <div class="log" id="nostrLog">
+                <div class="log-entry info">Nostrログ準備完了</div>
+            </div>
+        </div>
+
+        <!-- WebRTCタブ -->
+        <div class="panel" id="tab-webrtc" style="display: none;">
+            <h2>🔗 WebRTC 接続状態</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">アクティブ接続数</div>
+                    <div class="info-value" id="webrtcConnections">0</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">データチャネル</div>
+                    <div class="info-value" id="webrtcChannels">0</div>
+                </div>
+            </div>
+
+            <h2 style="margin-top: 20px;">📊 接続ログ</h2>
+            <div class="log" id="webrtcLog">
+                <div class="log-entry info">WebRTCログ準備完了</div>
+            </div>
+        </div>
+
+        <!-- ゲーム状態タブ -->
+        <div class="panel" id="tab-game" style="display: none;">
+            <h2>🎮 ゲーム状態</h2>
+            <button onclick="loadGameState()">状態を読み込み</button>
+            <button onclick="exportGameState()">エクスポート</button>
+
+            <div style="margin-top: 20px;">
+                <h3 style="color: #0ff; margin-bottom: 10px;">JSON 状態</h3>
+                <div class="log" id="gameStateLog">
+                    <div class="log-entry info">ゲーム状態を読み込んでください</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- テストツールタブ -->
+        <div class="panel" id="tab-tools" style="display: none;">
+            <h2>🧪 テストツール</h2>
+
+            <h3 style="color: #0ff; margin: 20px 0 10px 0;">マッチングシミュレーション</h3>
+            <div>
+                <label>プレイヤー数:</label>
+                <select id="playerCount">
+                    <option value="2">2人</option>
+                    <option value="3">3人</option>
+                    <option value="4" selected>4人</option>
+                </select>
+            </div>
+            <button onclick="simulateMatching()">マッチングをシミュレート</button>
+
+            <h3 style="color: #0ff; margin: 20px 0 10px 0;">ログ出力テスト</h3>
+            <div style="display: flex; gap: 10px;">
+                <button onclick="testLog('success')">Success</button>
+                <button onclick="testLog('error')">Error</button>
+                <button onclick="testLog('warn')">Warning</button>
+                <button onclick="testLog('info')">Info</button>
+            </div>
+
+            <h3 style="color: #0ff; margin: 20px 0 10px 0;">テストログ</h3>
+            <div class="log" id="testLog">
+                <div class="log-entry info">テストツール準備完了</div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import init, {
+            WasmNostrKeyManager,
+            WasmNostrP2PClient,
+            WasmWebRtcP2PManager,
+            version,
+            gameName
+        } from './pkg/xmj_core.js';
+
+        // グローバル変数（デバッグ用）
+        window.debugNostrKeys = null;
+        window.debugWebRTC = null;
+        window.debugGameState = null;
+
+        // タブ切り替え
+        window.showTab = function(tabName) {
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.panel').forEach(panel => panel.style.display = 'none');
+
+            event.target.classList.add('active');
+            document.getElementById(`tab-${tabName}`).style.display = 'block';
+        };
+
+        // ログ追加
+        function addLog(logId, message, type = 'info') {
+            const log = document.getElementById(logId);
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        // 初期化
+        init().then(async () => {
+            document.getElementById('wasmVersion').textContent = version();
+            document.getElementById('gameName').textContent = gameName();
+            document.getElementById('browser').textContent = navigator.userAgent.split(' ').slice(-1)[0];
+
+            // Nostr鍵の読み込み
+            if (WasmNostrKeyManager.hasKeys()) {
+                const pubkey = WasmNostrKeyManager.loadKeys();
+                document.getElementById('nostrPubkey').textContent = pubkey;
+                window.debugNostrKeys = { public: pubkey };
+                addLog('nostrLog', '既存の鍵を読み込みました', 'success');
+            } else {
+                addLog('nostrLog', '鍵が見つかりません。生成してください。', 'warn');
+            }
+
+            addLog('testLog', 'WASM初期化完了', 'success');
+        });
+
+        // Nostr鍵管理
+        window.generateNewKeys = function() {
+            try {
+                const pubkey = WasmNostrKeyManager.generateAndSave();
+                document.getElementById('nostrPubkey').textContent = pubkey;
+                window.debugNostrKeys = { public: pubkey };
+                addLog('nostrLog', '新しい鍵を生成しました', 'success');
+            } catch (e) {
+                addLog('nostrLog', `エラー: ${e}`, 'error');
+            }
+        };
+
+        window.showSecretKey = function() {
+            if (confirm('秘密鍵を表示しますか？（他人に見せないでください）')) {
+                // TODO: 秘密鍵の取得機能を実装
+                alert('秘密鍵の表示機能は未実装です');
+            }
+        };
+
+        window.deleteKeys = function() {
+            if (confirm('本当に鍵を削除しますか？')) {
+                try {
+                    WasmNostrKeyManager.deleteKeys();
+                    document.getElementById('nostrPubkey').textContent = '-';
+                    document.getElementById('nostrSeckey').textContent = '********';
+                    addLog('nostrLog', '鍵を削除しました', 'success');
+                } catch (e) {
+                    addLog('nostrLog', `エラー: ${e}`, 'error');
+                }
+            }
+        };
+
+        // ゲーム状態
+        window.loadGameState = function() {
+            addLog('gameStateLog', 'ゲーム状態の読み込み機能は未実装です', 'warn');
+        };
+
+        window.exportGameState = function() {
+            addLog('gameStateLog', 'エクスポート機能は未実装です', 'warn');
+        };
+
+        // テストツール
+        window.simulateMatching = function() {
+            const count = document.getElementById('playerCount').value;
+            addLog('testLog', `${count}人マッチングをシミュレート開始`, 'info');
+            addLog('testLog', 'シミュレーション機能は未実装です', 'warn');
+        };
+
+        window.testLog = function(type) {
+            addLog('testLog', `これは${type}ログのテストです`, type);
+        };
+    </script>
+</body>
+</html>

@@ -147,6 +147,265 @@ impl Game {
         winners
     }
 
+    /// チー可能かチェック（下家のみ）
+    pub fn can_chi(&self, player_idx: usize) -> bool {
+        if self.last_discard.is_none() {
+            return false;
+        }
+
+        // チーは下家（前のプレイヤー）のみ可能
+        let prev_player = (self.current_player + 3) % 4;
+        if player_idx != prev_player {
+            return false;
+        }
+
+        let tile = self.last_discard.unwrap();
+
+        // 数牌のみチー可能
+        if let TileType::Number { suit, value } = tile.tile_type {
+            let hand = &self.players[player_idx].hand;
+            let tiles = hand.get_tiles();
+
+            // パターン1: n-2, n-1, n（鳴き牌がn）
+            if value >= 3 {
+                let t1 = Tile::new_number(suit, value - 2, false);
+                let t2 = Tile::new_number(suit, value - 1, false);
+                if tiles.contains(&t1) && tiles.contains(&t2) {
+                    return true;
+                }
+            }
+
+            // パターン2: n-1, n, n+1（鳴き牌がn）
+            if value >= 2 && value <= 8 {
+                let t1 = Tile::new_number(suit, value - 1, false);
+                let t2 = Tile::new_number(suit, value + 1, false);
+                if tiles.contains(&t1) && tiles.contains(&t2) {
+                    return true;
+                }
+            }
+
+            // パターン3: n, n+1, n+2（鳴き牌がn）
+            if value <= 7 {
+                let t1 = Tile::new_number(suit, value + 1, false);
+                let t2 = Tile::new_number(suit, value + 2, false);
+                if tiles.contains(&t1) && tiles.contains(&t2) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// ポン可能かチェック
+    pub fn can_pon(&self, player_idx: usize) -> bool {
+        if self.last_discard.is_none() || player_idx == self.current_player {
+            return false;
+        }
+
+        let tile = self.last_discard.unwrap();
+        let hand = &self.players[player_idx].hand;
+        let tiles = hand.get_tiles();
+
+        // 同じ牌が2枚以上あればポン可能
+        tiles.iter().filter(|&&t| t == tile).count() >= 2
+    }
+
+    /// カン可能かチェック（明槓）
+    pub fn can_kan(&self, player_idx: usize) -> bool {
+        if self.last_discard.is_none() || player_idx == self.current_player {
+            return false;
+        }
+
+        let tile = self.last_discard.unwrap();
+        let hand = &self.players[player_idx].hand;
+        let tiles = hand.get_tiles();
+
+        // 同じ牌が3枚あれば明槓可能
+        tiles.iter().filter(|&&t| t == tile).count() >= 3
+    }
+
+    /// 暗槓可能な牌のリストを取得
+    pub fn can_ankan(&self, player_idx: usize) -> Vec<Tile> {
+        let hand = &self.players[player_idx].hand;
+        let tiles = hand.get_tiles();
+        let mut ankan_tiles = Vec::new();
+
+        use std::collections::HashMap;
+        let mut tile_counts = HashMap::new();
+        for tile in tiles {
+            *tile_counts.entry(*tile).or_insert(0) += 1;
+        }
+
+        for (tile, count) in tile_counts {
+            if count >= 4 {
+                ankan_tiles.push(tile);
+            }
+        }
+
+        ankan_tiles
+    }
+
+    /// チーを実行
+    pub fn do_chi(&mut self, player_idx: usize, pattern: usize) -> bool {
+        if !self.can_chi(player_idx) {
+            return false;
+        }
+
+        let tile = self.last_discard.unwrap();
+
+        if let TileType::Number { suit, value } = tile.tile_type {
+            let (t1, t2) = match pattern {
+                0 => {
+                    // n-2, n-1, n
+                    if value < 3 {
+                        return false;
+                    }
+                    (
+                        Tile::new_number(suit, value - 2, false),
+                        Tile::new_number(suit, value - 1, false),
+                    )
+                }
+                1 => {
+                    // n-1, n, n+1
+                    if value < 2 || value > 8 {
+                        return false;
+                    }
+                    (
+                        Tile::new_number(suit, value - 1, false),
+                        Tile::new_number(suit, value + 1, false),
+                    )
+                }
+                2 => {
+                    // n, n+1, n+2
+                    if value > 7 {
+                        return false;
+                    }
+                    (
+                        Tile::new_number(suit, value + 1, false),
+                        Tile::new_number(suit, value + 2, false),
+                    )
+                }
+                _ => return false,
+            };
+
+            let player = &mut self.players[player_idx];
+            if !player.hand.remove_tile(&t1) || !player.hand.remove_tile(&t2) {
+                return false;
+            }
+
+            let meld = crate::hand::Meld {
+                meld_type: crate::hand::MeldType::Chi,
+                tiles: vec![t1, tile, t2],
+                is_open: true,
+            };
+
+            player.hand.add_meld(meld);
+            self.last_discard = None;
+            self.current_player = player_idx;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// ポンを実行
+    pub fn do_pon(&mut self, player_idx: usize) -> bool {
+        if !self.can_pon(player_idx) {
+            return false;
+        }
+
+        let tile = self.last_discard.unwrap();
+        let player = &mut self.players[player_idx];
+
+        // 同じ牌を2枚削除
+        if !player.hand.remove_tile(&tile) || !player.hand.remove_tile(&tile) {
+            return false;
+        }
+
+        let meld = crate::hand::Meld {
+            meld_type: crate::hand::MeldType::Pon,
+            tiles: vec![tile, tile, tile],
+            is_open: true,
+        };
+
+        player.hand.add_meld(meld);
+        self.last_discard = None;
+        self.current_player = player_idx;
+        true
+    }
+
+    /// 明槓を実行
+    pub fn do_kan(&mut self, player_idx: usize) -> bool {
+        if !self.can_kan(player_idx) {
+            return false;
+        }
+
+        let tile = self.last_discard.unwrap();
+        let player = &mut self.players[player_idx];
+
+        // 同じ牌を3枚削除
+        for _ in 0..3 {
+            if !player.hand.remove_tile(&tile) {
+                return false;
+            }
+        }
+
+        let meld = crate::hand::Meld {
+            meld_type: crate::hand::MeldType::Kan,
+            tiles: vec![tile, tile, tile, tile],
+            is_open: true,
+        };
+
+        player.hand.add_meld(meld);
+        self.last_discard = None;
+
+        // 槓ドラ追加
+        if let Some(dora_indicator) = self.wall.pop() {
+            self.dora_indicators.push(dora_indicator);
+        }
+
+        // 嶺上牌をツモ
+        if let Some(rinshan_tile) = self.wall.pop() {
+            self.players[player_idx].draw_tile(rinshan_tile);
+        }
+
+        self.current_player = player_idx;
+        true
+    }
+
+    /// 暗槓を実行
+    pub fn do_ankan(&mut self, player_idx: usize, tile: Tile) -> bool {
+        let player = &mut self.players[player_idx];
+
+        // 同じ牌を4枚削除
+        for _ in 0..4 {
+            if !player.hand.remove_tile(&tile) {
+                return false;
+            }
+        }
+
+        let meld = crate::hand::Meld {
+            meld_type: crate::hand::MeldType::Kan,
+            tiles: vec![tile, tile, tile, tile],
+            is_open: false,
+        };
+
+        player.hand.add_meld(meld);
+
+        // 槓ドラ追加
+        if let Some(dora_indicator) = self.wall.pop() {
+            self.dora_indicators.push(dora_indicator);
+        }
+
+        // 嶺上牌をツモ
+        if let Some(rinshan_tile) = self.wall.pop() {
+            self.players[player_idx].draw_tile(rinshan_tile);
+        }
+
+        true
+    }
+
     pub fn is_game_over(&self) -> bool {
         self.wall.is_empty() || self.players.iter().any(|p| p.score <= 0)
     }
