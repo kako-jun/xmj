@@ -6,6 +6,9 @@ pub mod scoring;
 pub mod ai;
 pub mod nostr;
 
+#[cfg(feature = "wasm")]
+pub mod wasm;
+
 pub use tile::{Tile, TileType, Suit};
 pub use hand::Hand;
 pub use game::Game;
