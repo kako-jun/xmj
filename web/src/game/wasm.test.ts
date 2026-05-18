@@ -15,9 +15,10 @@ import type { Tile } from './types'
 class MockWasmGame {
   static newHybridArgs: [string, number] | null = null
   static constructorArgs: string[] | null = null
+  /** 最後に discardTile に渡された CUI コード。WasmGameBridge.discardTile の検証用。 */
+  static lastDiscardArg: string | null = null
 
   drawCalled = 0
-  discardArg: string | null = null
 
   static newHybrid(name: string, position: number): MockWasmGame {
     MockWasmGame.newHybridArgs = [name, position]
@@ -33,7 +34,7 @@ class MockWasmGame {
     return true
   }
   discardTile(code: string): boolean {
-    this.discardArg = code
+    MockWasmGame.lastDiscardArg = code
     return true
   }
   executeCpuTurn(): string {
@@ -101,6 +102,7 @@ describe('WasmGameBridge', () => {
     __resetWasmForTest()
     MockWasmGame.newHybridArgs = null
     MockWasmGame.constructorArgs = null
+    MockWasmGame.lastDiscardArg = null
     __setWasmModuleForTest(fakeModule)
   })
 
@@ -117,13 +119,23 @@ describe('WasmGameBridge', () => {
 
   it('discardTile は Tile を CUI 文字列に変換して渡す', () => {
     const bridge = WasmGameBridge.createHybrid('me', 0)
-    const tile: Tile = { suit: 'man', value: 5, isRed: true }
-    bridge.discardTile(tile)
-    // 内部 mock を直接覗くため bridge から再取得
-    // (注: bridge.game は private なので、テストでは MockWasmGame 側に
-    //  最後の discard 引数を残す手段がない。ここでは drawTile / discardTile が
-    //  例外なく呼ばれることだけ確認する)
-    expect(bridge.discardTile(tile)).toBe(true)
+
+    // 赤ドラの 5m は "5mr"
+    const red: Tile = { suit: 'man', value: 5, isRed: true }
+    expect(bridge.discardTile(red)).toBe(true)
+    expect(MockWasmGame.lastDiscardArg).toBe('5mr')
+
+    // 風牌 (東) は "to"
+    bridge.discardTile({ suit: 'wind', value: 1 })
+    expect(MockWasmGame.lastDiscardArg).toBe('to')
+
+    // 三元 (中) は "cn"
+    bridge.discardTile({ suit: 'dragon', value: 3 })
+    expect(MockWasmGame.lastDiscardArg).toBe('cn')
+
+    // 通常数牌 (3p) は "3p"
+    bridge.discardTile({ suit: 'pin', value: 3 })
+    expect(MockWasmGame.lastDiscardArg).toBe('3p')
   })
 
   it('drawTile / executeCpuTurn / 状態取得 API が呼べる', () => {

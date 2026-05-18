@@ -151,7 +151,7 @@ export const createTileBackGraphics = (): Container => {
  */
 export const enumerateAllTiles = (): Tile[] => {
   const tiles: Tile[] = []
-  const numberSuits: Suit[] = ['man', 'pin', 'sou']
+  const numberSuits = ['man', 'pin', 'sou'] as const satisfies readonly Suit[]
   for (const suit of numberSuits) {
     for (let v = 1; v <= 9; v++) tiles.push({ suit, value: v })
   }

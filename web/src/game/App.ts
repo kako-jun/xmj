@@ -5,6 +5,7 @@
 import { Application, Container, Graphics } from 'pixi.js'
 import { STAGE_WIDTH, STAGE_HEIGHT, TABLE_BG_COLOR, TILE } from './constants'
 import { createTileGraphics, enumerateAllTiles } from './tile'
+import type { Tile, Suit } from './types'
 
 export class App {
   app: Application
@@ -35,13 +36,10 @@ export class App {
     const cols = 9
     const padX = 8
     const padY = 12
-    const tiles = [
-      ...enumerateAllTiles(),
-      // 赤ドラ
-      { suit: 'man', value: 5, isRed: true } as const,
-      { suit: 'pin', value: 5, isRed: true } as const,
-      { suit: 'sou', value: 5, isRed: true } as const,
-    ]
+    // 赤ドラは 5m / 5p / 5s の 3 枚。Suit 型を再利用して型安全に並べる。
+    const RED_SUITS: readonly Suit[] = ['man', 'pin', 'sou']
+    const redTiles: Tile[] = RED_SUITS.map(suit => ({ suit, value: 5, isRed: true }))
+    const tiles: Tile[] = [...enumerateAllTiles(), ...redTiles]
 
     tiles.forEach((tile, i) => {
       const col = i % cols

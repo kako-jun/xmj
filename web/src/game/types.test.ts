@@ -40,5 +40,15 @@ describe('tileToCuiCode / tileFromCuiCode', () => {
     expect(tileFromCuiCode('99m')).toBeNull()
     expect(tileFromCuiCode('xx')).toBeNull()
     expect(tileFromCuiCode('')).toBeNull()
+    expect(tileFromCuiCode('0m')).toBeNull()
+    expect(tileFromCuiCode('1z')).toBeNull()
+  })
+
+  it('字牌の value が範囲外なら "?" を返す (防御フォールバック)', () => {
+    expect(tileToCuiCode({ suit: 'wind', value: 0 })).toBe('?')
+    expect(tileToCuiCode({ suit: 'wind', value: 5 })).toBe('?')
+    expect(tileToCuiCode({ suit: 'dragon', value: 4 })).toBe('?')
+    // '?' を再パースしても null
+    expect(tileFromCuiCode('?')).toBeNull()
   })
 })

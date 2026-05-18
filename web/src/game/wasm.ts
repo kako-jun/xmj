@@ -178,4 +178,8 @@ export class WasmGameBridge {
   destroy(): void {
     this.game.free()
   }
+
+  // TODO(Issue #5/#6): 鳴き系 API (canChi / canPon / canKan / doChi / doPon / doKan)
+  // は Rust 側 (src/wasm.rs) では実装済みだが、GameScene 実装と入力ハンドラが
+  // 揃ってからラップする。現状の Bridge はターン進行・状態取得・リーチに絞っている。
 }

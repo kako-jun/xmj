@@ -44,8 +44,9 @@ const main = async (): Promise<void> => {
 
   const app = new App(pixiApp)
   app.showTableBackground()
-  // Issue #4: 全 34 種類 + 赤ドラ 3 枚を一覧表示する確認用ステージ。
-  // Issue #5 で GameScene に置き換える。
+  // TODO(Issue #5): GameScene に置き換える。
+  // 現状は Issue #4 の確認用デモを表示しており、本番ビルドにもデモが露出する。
+  // SceneManager 導入時にタイトルシーン → GameScene 遷移へ差し替える。
   app.showAllTilesDemo()
 
   setLoadingProgress(1)
