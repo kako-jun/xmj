@@ -17,16 +17,21 @@ npm run dev       # http://localhost:3000
 
 ```
 web/
-├── index.html        # PixiJS マウントポイント
+├── index.html        # PixiJS マウントポイント + ローディングバー
 ├── src/
 │   ├── main.ts       # Pixi.Application 起動
 │   └── game/
-│       ├── App.ts        # SceneManager (Issue #5+)
-│       ├── constants.ts  # ステージ・牌サイズ
-│       └── wasm.ts       # pkg ラッパ
+│       ├── App.ts        # シーン基盤 (Issue #5 で SceneManager 化予定)
+│       ├── constants.ts  # ステージ・牌サイズ・色
+│       ├── types.ts      # Tile / GameState / CUI 文字列変換
+│       ├── state.ts      # createInitialGameState / initWithState
+│       ├── wasm.ts       # initWasm + WasmGameBridge
+│       └── tile.ts       # createTileGraphics / 裏向き / 全牌列挙
 ├── pkg/              # wasm-pack 出力 (gitignore)
 └── legacy/           # 旧 HTML プロトタイプ (参照用、ビルド対象外)
 ```
+
+詳細は ルート `CLAUDE.md` の「6. Web 版」セクション、移植進捗は `../docs/migration-pixijs.md` を参照。
 
 ## テスト
 

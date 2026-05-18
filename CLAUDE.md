@@ -220,3 +220,86 @@
 ## デザインシステム
 
 UIの生成・修正時は `DESIGN.md` に定義されたデザインシステムに従うこと。定義外の色・フォント・スペーシングを勝手に使わない。
+
+---
+
+## 6. Web 版 (PixiJS v8 + Wasm)
+
+Web 版クライアントは `web/` 配下にあり、Rust コアを WebAssembly 経由で呼び出す PixiJS v8 + Vite + TypeScript の SPA 構成。
+
+### ディレクトリ構成
+
+```
+xmj/
+├── src/                 # Rust コア (CUI / Wasm 共通)。本ドキュメントの Web 版セクションでは触らない
+├── build-wasm.sh        # wasm-pack --target web で web/pkg/ を生成するスクリプト
+├── web/
+│   ├── index.html       # PixiJS マウントポイント + ローディングバー
+│   ├── package.json     # npm scripts (predev/prebuild/prelint/pretypecheck/pretest で sync-wasm)
+│   ├── vite.config.ts   # vite-plugin-wasm + top-level-await
+│   ├── pkg/             # wasm-pack 出力 (gitignore、build-wasm.sh で再生成)
+│   ├── legacy/          # 旧 HTML/JS プロトタイプ (参照用、ビルド対象外)
+│   └── src/
+│       ├── main.ts          # Pixi.Application 起動エントリ
+│       └── game/
+│           ├── App.ts        # シーン基盤 (Issue #5 で SceneManager 化予定)
+│           ├── constants.ts  # ステージサイズ・牌サイズ・色定数
+│           ├── types.ts      # Tile / GameState / CUI 文字列変換
+│           ├── state.ts      # createInitialGameState / initWithState
+│           ├── wasm.ts       # initWasm + WasmGameBridge
+│           └── tile.ts       # createTileGraphics / 裏向き / 全牌列挙
+```
+
+### 起動・テスト
+
+```bash
+cd web
+npm install
+npm run dev        # http://localhost:3000 で起動
+npm run typecheck  # tsc --noEmit
+npm run lint       # eslint
+npm run test       # vitest run (jsdom)
+npm run build      # tsc && vite build
+```
+
+全 npm script の前段に `sync-wasm` (= `../build-wasm.sh`) が `pre*` フックで仕込んであり、`web/pkg/` を自動再生成する (name-name 流)。`wasm-pack` のインストールが前提。
+
+### Wasm 連携
+
+- `build-wasm.sh` が `wasm-pack build --target web --features wasm` を呼び、ルートの `pkg/` を `web/pkg/` に移動する
+- `vite.config.ts` で `vite-plugin-wasm` + `vite-plugin-top-level-await` を有効化し、`web/src/game/wasm.ts` から `../../pkg/xmj_core.js` を動的 import
+- TS 側のラッパは `WasmGameBridge` (`web/src/game/wasm.ts`)。Rust 側 `WasmGame` の API (drawTile / discardTile / executeCpuTurn / canRiichi / declareRiichi / 各種 getter) を 1:1 で公開する
+- 牌の Wasm 受け渡しは CUI 文字列表記 (`5mr` / `to` / `hk` 等) を介する。TS 側変換は `tileToCuiCode` / `tileFromCuiCode` (`web/src/game/types.ts`)。Rust 側 `Tile::to_string` / `Tile::from_string` (`src/tile.rs`) と整合させる
+
+### テスト戦略
+
+`web/src/game/*.test.ts` を vitest + jsdom で実行する。PixiJS の WebGL レンダラは jsdom で起動できないため:
+
+- `App.test.ts`: stage を `Container` で差し替えて子追加だけ検証
+- `tile.test.ts`: `Container.children` を直接走査して構造を検証 (label / Text 内容 / 文字色)
+- `wasm.test.ts`: `__setWasmModuleForTest` で WasmGame を差し替え、引数の素通しを検証
+- `types.test.ts` / `state.test.ts`: 純粋関数のラウンドトリップ
+
+### 移植進捗
+
+- [x] **#2 / PR #10**: PixiJS v8 + Vite + Wasm 連携の土台
+- [x] **#3 / PR #11**: GameState 型 + `initWithState` + `WasmGameBridge`
+- [x] **#4 / PR #12**: 牌の PixiJS Graphics 実装 (34 種 + 裏 + 赤ドラ)
+- [ ] **#5**: GameScene の本実装 (山・河・手牌の配置)
+- [ ] **#6**: 入力ハンドラ (打牌・ツモ・リーチ宣言)
+- [ ] **#7**: CPU ターンの進行ループ + 演出
+- [ ] **#8**: 和了画面 / 流局表示
+- [ ] **#9**: タイトルシーン + モード選択
+
+詳細は `docs/migration-pixijs.md` を参照。
+
+### DESIGN.md との関係
+
+`DESIGN.md` の "Don't: Use tile graphics or images" は旧 HTML プロトタイプ (現 `web/legacy/`) の方針。PixiJS 版では `createTileGraphics` で Graphics + Text を組み合わせて描画するが、ビットマップアセットは使わずベクター + テキストでレンダリングする。グラスモーフィズム等の DESIGN.md 規定は今後 GameScene / UI レイヤを実装する際に参照する。
+
+### ルール
+
+- **Rust コア (`src/*.rs`) は Web 版作業中は触らない**。Wasm シグネチャ変更が必要な場合は別 Issue で
+- npm scripts は必ず `web/` 配下で実行する (root には Node プロジェクトは無い)
+- `web/pkg/` は git 管理外。CI でも `build-wasm.sh` 経由で生成する
+- 旧 HTML プロトタイプ (`web/legacy/`) は参照のみ、ビルド対象外。新規開発はしない
