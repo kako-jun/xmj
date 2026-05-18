@@ -18,4 +18,16 @@ describe('App', () => {
     app.showTableBackground()
     expect(stage.children.length).toBe(1)
   })
+
+  it('showAllTilesDemo は label="tile-demo" の Container を stage に 1 つ追加する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    app.showAllTilesDemo()
+    expect(stage.children.length).toBe(1)
+    const grid = stage.children[0] as Container
+    expect(grid.label).toBe('tile-demo')
+    // 34 種 + 赤ドラ 3 枚 = 37 子
+    expect(grid.children.length).toBe(37)
+  })
 })

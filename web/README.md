@@ -13,6 +13,13 @@ npm run dev       # http://localhost:3000
 `npm run dev` / `build` / `lint` / `typecheck` / `test` の前段で自動的に
 `../build-wasm.sh` が走り、`web/pkg/` を再生成する (name-name 流の sync-wasm)。
 
+### 前提ツール
+
+- Node.js 20+ / npm
+- Rust toolchain (stable)
+- `wasm-pack` — `cargo install wasm-pack` でインストール
+  - 全 `pre*` フックが `../build-wasm.sh` 経由で `wasm-pack build --target web --features wasm` を呼ぶため、未インストールだと typecheck / lint / test / build / dev のいずれも失敗する
+
 ## ディレクトリ構成
 
 ```

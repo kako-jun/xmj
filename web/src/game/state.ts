@@ -56,8 +56,10 @@ export const initWithState = (partial: Partial<GameState> = {}): GameState => {
   }
 
   if (partial.players) {
-    // 4 人未満で渡されたら base から補う。多すぎたら 4 で切る。
-    const ps = partial.players
+    // GameState.players の型は 4-tuple 固定だが、テストや復元処理から
+    // 短い配列をキャストして渡されるケースを想定し、index アクセスで
+    // 安全に補完する。多すぎたら 4 で切る (ps[4] 以降は単に参照されない)。
+    const ps = partial.players as readonly (PlayerState | undefined)[]
     merged.players = [
       ps[0] ?? base.players[0],
       ps[1] ?? base.players[1],
