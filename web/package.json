@@ -1,0 +1,47 @@
+{
+  "name": "xmj-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "author": "kako-jun",
+  "license": "MIT",
+  "description": "邪雀 Xtreme Mahjong - Web (PixiJS v8 + Wasm) client",
+  "scripts": {
+    "sync-wasm": "cd .. && ./build-wasm.sh",
+    "prelint": "npm run sync-wasm",
+    "pretypecheck": "npm run sync-wasm",
+    "pretest": "npm run sync-wasm",
+    "prebuild": "npm run sync-wasm",
+    "predev": "npm run sync-wasm",
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "pixi.js": "^8.6.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@typescript-eslint/eslint-plugin": "^8.20.0",
+    "@typescript-eslint/parser": "^8.20.0",
+    "@vitest/coverage-v8": "^4.1.6",
+    "eslint": "^9.18.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^16.5.0",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.46.3",
+    "vite": "^6.0.11",
+    "vite-plugin-wasm": "^3.4.1",
+    "vite-plugin-top-level-await": "^1.4.4",
+    "vitest": "^4.1.6"
+  }
+}

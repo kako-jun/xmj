@@ -1,70 +1,38 @@
-# 邪雀 Xtreme Mahjong - Web版
+# xmj Web (PixiJS v8 + Wasm)
 
-WebAssemblyを使用したブラウザ版麻雀ゲームです。
+邪雀 Xtreme Mahjong の Web フロントエンド。Rust 製のゲームロジック (`../src/`) を
+WebAssembly 経由で呼び出し、PixiJS v8 で描画する。
 
-## 必要な環境
-
-- Rust 1.70+
-- wasm-pack
-
-## セットアップ
+## 開発
 
 ```bash
-# wasm-packのインストール
-cargo install wasm-pack
-
-# WASMビルド
-cd /path/to/xmj
-./build-wasm.sh
-
-# または手動でビルド
-wasm-pack build --target web --features wasm --out-dir web/pkg
+npm install
+npm run dev       # http://localhost:3000
 ```
 
-## 実行方法
+`npm run dev` / `build` / `lint` / `typecheck` / `test` の前段で自動的に
+`../build-wasm.sh` が走り、`web/pkg/` を再生成する (name-name 流の sync-wasm)。
 
-ローカルサーバーを起動してブラウザでアクセス：
-
-```bash
-# Pythonの場合
-cd web
-python3 -m http.server 8000
-
-# Node.jsの場合
-npx http-server web -p 8000
-```
-
-ブラウザで `http://localhost:8000` にアクセス
-
-## ファイル構成
+## ディレクトリ構成
 
 ```
 web/
-├── index.html          # メインHTML
-├── pkg/                # WASM出力ディレクトリ（ビルド時に生成）
-│   ├── xmj_core.js
-│   ├── xmj_core_bg.wasm
-│   └── ...
-├── src/                # TypeScriptソース（将来的に使用）
-└── public/             # 静的アセット
+├── index.html        # PixiJS マウントポイント
+├── src/
+│   ├── main.ts       # Pixi.Application 起動
+│   └── game/
+│       ├── App.ts        # SceneManager (Issue #5+)
+│       ├── constants.ts  # ステージ・牌サイズ
+│       └── wasm.ts       # pkg ラッパ
+├── pkg/              # wasm-pack 出力 (gitignore)
+└── legacy/           # 旧 HTML プロトタイプ (参照用、ビルド対象外)
 ```
 
-## 機能
+## テスト
 
-- ✅ 基本的な麻雀ゲームプレイ
-- ✅ ツモ・打牌
-- ✅ シャンテン数表示
-- ✅ 手牌表示
-- ✅ ゲームログ
-- 🚧 CPU対戦
-- 🚧 鳴き（チー・ポン・カン）
-- 🚧 リーチ
-- 🚧 和了判定・点数計算
+```bash
+npm run test
+```
 
-## 今後の実装予定
-
-- UIフレームワーク統合（React/Svelte）
-- 牌の画像表示
-- アニメーション効果
-- サウンド効果
-- オンライン対戦（Nostr + WebRTC）
+vitest + jsdom。PixiJS の WebGL レンダラは jsdom では起動しないため、
+ロジック層 (state / wasm ラッパ / tile factory) を中心にテストする。

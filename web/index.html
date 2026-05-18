@@ -1,570 +1,65 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>邪雀 Xtreme Mahjong</title>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>邪雀 Xtreme Mahjong - xmj</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #fff;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-
-        header {
-            background: rgba(0, 0, 0, 0.3);
-            padding: 1.5rem;
-            text-align: center;
-            border-bottom: 2px solid rgba(255, 255, 255, 0.2);
-        }
-
-        h1 {
-            font-size: 2.5rem;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-            margin-bottom: 0.5rem;
-        }
-
-        .subtitle {
-            font-size: 1.2rem;
-            opacity: 0.9;
-        }
-
-        main {
-            flex: 1;
-            padding: 2rem;
-            max-width: 1400px;
-            margin: 0 auto;
-            width: 100%;
-        }
-
-        .game-container {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 2rem;
-            backdrop-filter: blur(10px);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-        }
-
-        .players-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 1rem;
-            margin-bottom: 2rem;
-        }
-
-        .player-card {
-            background: rgba(0, 0, 0, 0.3);
-            padding: 1rem;
-            border-radius: 8px;
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            transition: all 0.3s;
-        }
-
-        .player-card.active {
-            border-color: #10b981;
-            box-shadow: 0 0 20px rgba(16, 185, 129, 0.5);
-        }
-
-        .player-card.riichi {
-            border-color: #ef4444;
-        }
-
-        .player-name {
-            font-size: 1.2rem;
-            font-weight: bold;
-            margin-bottom: 0.5rem;
-        }
-
-        .player-score {
-            font-size: 1.5rem;
-            color: #10b981;
-        }
-
-        .player-discards {
-            margin-top: 0.5rem;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
-            opacity: 0.8;
-            min-height: 40px;
-        }
-
-        .status {
-            background: rgba(0, 0, 0, 0.3);
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1.5rem;
-        }
-
-        .game-info {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-        }
-
-        .info-card {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 1rem;
-            border-radius: 8px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .info-label {
-            font-size: 0.9rem;
-            opacity: 0.8;
-            margin-bottom: 0.5rem;
-        }
-
-        .info-value {
-            font-size: 1.5rem;
-            font-weight: bold;
-        }
-
-        .hand-container {
-            background: rgba(0, 0, 0, 0.2);
-            padding: 1.5rem;
-            border-radius: 8px;
-            margin-bottom: 1.5rem;
-        }
-
-        .hand-title {
-            font-size: 1.2rem;
-            margin-bottom: 1rem;
-        }
-
-        .tiles {
-            font-family: 'Courier New', monospace;
-            font-size: 1.3rem;
-            letter-spacing: 0.3rem;
-            white-space: pre-wrap;
-            line-height: 1.8;
-        }
-
-        .controls {
-            display: flex;
-            gap: 1rem;
-            margin-top: 1.5rem;
-            flex-wrap: wrap;
-        }
-
-        button {
-            padding: 0.8rem 1.5rem;
-            font-size: 1rem;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-weight: bold;
-        }
-
-        .btn-primary {
-            background: #10b981;
-            color: white;
-        }
-
-        .btn-primary:hover:not(:disabled) {
-            background: #059669;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
-        }
-
-        .btn-secondary {
-            background: #6366f1;
-            color: white;
-        }
-
-        .btn-secondary:hover:not(:disabled) {
-            background: #4f46e5;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
-        }
-
-        .btn-danger {
-            background: #ef4444;
-            color: white;
-        }
-
-        .btn-danger:hover:not(:disabled) {
-            background: #dc2626;
-        }
-
-        .btn-warning {
-            background: #f59e0b;
-            color: white;
-        }
-
-        .btn-warning:hover:not(:disabled) {
-            background: #d97706;
-        }
-
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none !important;
-        }
-
-        input[type="text"] {
-            padding: 0.8rem;
-            border-radius: 6px;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            background: rgba(255, 255, 255, 0.1);
-            color: white;
-            font-size: 1rem;
-            flex: 1;
-        }
-
-        input[type="text"]::placeholder {
-            color: rgba(255, 255, 255, 0.6);
-        }
-
-        .log-container {
-            background: rgba(0, 0, 0, 0.3);
-            padding: 1rem;
-            border-radius: 8px;
-            max-height: 250px;
-            overflow-y: auto;
-            font-size: 0.9rem;
-            line-height: 1.6;
-        }
-
-        .log-entry {
-            padding: 0.3rem 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .log-entry.cpu {
-            color: #93c5fd;
-        }
-
-        .log-entry.player {
-            color: #86efac;
-        }
-
-        .log-entry.system {
-            color: #fde047;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 3rem;
-            font-size: 1.2rem;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .spinner {
-            display: inline-block;
-            width: 40px;
-            height: 40px;
-            border: 4px solid rgba(255, 255, 255, 0.3);
-            border-top-color: white;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 1rem;
-        }
-
-        .auto-play-indicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            background: #10b981;
-            border-radius: 50%;
-            margin-left: 0.5rem;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
-        }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #003300;
+        overflow: hidden;
+      }
+      body {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+      }
+      canvas {
+        display: block;
+        max-width: 100vw;
+        max-height: 100vh;
+      }
+      #loading {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        background: #001a00;
+        color: #fff;
+        font-family: sans-serif;
+        z-index: 10;
+      }
+      #loading-bar {
+        width: 60%;
+        height: 8px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+        margin-top: 12px;
+        overflow: hidden;
+      }
+      #loading-bar > div {
+        height: 100%;
+        width: 0%;
+        background: #fff;
+        transition: width 0.2s;
+      }
     </style>
-</head>
-<body>
-    <header>
-        <h1>邪雀 Xtreme Mahjong</h1>
-        <div class="subtitle">WebAssembly Edition - AI対戦</div>
-    </header>
-
-    <main>
-        <div class="game-container">
-            <div id="loading" class="loading">
-                <div class="spinner"></div>
-                <div>WASMを読み込み中...</div>
-            </div>
-
-            <div id="game" style="display: none;">
-                <!-- プレイヤー情報 -->
-                <div class="players-grid" id="players">
-                    <!-- Dynamic -->
-                </div>
-
-                <div class="status">
-                    <div class="game-info">
-                        <div class="info-card">
-                            <div class="info-label">現在のプレイヤー</div>
-                            <div class="info-value" id="current-player">-</div>
-                        </div>
-                        <div class="info-card">
-                            <div class="info-label">シャンテン数</div>
-                            <div class="info-value" id="shanten">-</div>
-                        </div>
-                        <div class="info-card">
-                            <div class="info-label">残り牌</div>
-                            <div class="info-value" id="wall-count">-</div>
-                        </div>
-                        <div class="info-card">
-                            <div class="info-label">ドラ表示牌</div>
-                            <div class="info-value tiles" id="dora" style="font-size: 1.2rem;">-</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="hand-container">
-                    <div class="hand-title">あなたの手牌</div>
-                    <div class="tiles" id="hand">-</div>
-                </div>
-
-                <div class="controls">
-                    <button class="btn-primary" id="draw-btn">ツモ</button>
-                    <input type="text" id="discard-input" placeholder="打牌する牌 (例: 1m, 5p, to)">
-                    <button class="btn-secondary" id="discard-btn">打牌</button>
-                    <button class="btn-warning" id="riichi-btn">リーチ</button>
-                    <button class="btn-primary" id="auto-btn">自動進行
-                        <span id="auto-indicator" style="display: none;" class="auto-play-indicator"></span>
-                    </button>
-                </div>
-
-                <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
-                    <button onclick="location.href='hybrid.html'" style="flex: 1; padding: 0.8rem; background: linear-gradient(45deg, #667eea, #764ba2); border: none; color: white; border-radius: 8px; cursor: pointer;">
-                        👤+🤖 ハイブリッドモード
-                    </button>
-                    <button onclick="location.href='matchmaking.html'" style="flex: 1; padding: 0.8rem; background: linear-gradient(45deg, #f093fb, #f5576c); border: none; color: white; border-radius: 8px; cursor: pointer;">
-                        🌐 オンライン対戦
-                    </button>
-                </div>
-
-                <div class="log-container" id="log" style="margin-top: 1.5rem;">
-                    <div class="log-entry system">ゲーム開始</div>
-                </div>
-            </div>
-        </div>
-    </main>
-
-    <script type="module">
-        import init, { WasmGame, gameName, version } from './pkg/xmj_core.js';
-
-        async function run() {
-            try {
-                await init();
-
-                console.log(`${gameName()} v${version()}`);
-
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('game').style.display = 'block';
-
-                // ゲーム初期化
-                const game = new WasmGame([
-                    "あなた",
-                    "CPU1",
-                    "CPU2",
-                    "CPU3"
-                ]);
-
-                let autoPlay = false;
-                let autoPlayInterval = null;
-
-                function updateDisplay() {
-                    const currentId = game.getCurrentPlayerId();
-                    document.getElementById('current-player').textContent =
-                        currentId === 0 ? 'あなた' : `CPU${currentId}`;
-                    document.getElementById('shanten').textContent = game.getShanten();
-                    document.getElementById('wall-count').textContent = game.getWallCount();
-                    document.getElementById('hand').textContent = game.getCurrentHand();
-                    document.getElementById('dora').textContent = game.getDoraIndicators();
-
-                    // プレイヤー情報更新
-                    updatePlayers();
-
-                    // ボタン状態更新
-                    const isPlayer = currentId === 0;
-                    const canRiichi = game.canRiichi();
-
-                    document.getElementById('draw-btn').disabled = !isPlayer || game.isGameOver();
-                    document.getElementById('discard-btn').disabled = !isPlayer || game.isGameOver();
-                    document.getElementById('riichi-btn').disabled = !isPlayer || !canRiichi || game.isGameOver();
-                }
-
-                function updatePlayers() {
-                    const container = document.getElementById('players');
-                    container.innerHTML = '';
-                    const currentId = game.getCurrentPlayerId();
-
-                    for (let i = 0; i < 4; i++) {
-                        const card = document.createElement('div');
-                        card.className = 'player-card';
-                        if (i === currentId) card.classList.add('active');
-                        if (game.isPlayerRiichi(i)) card.classList.add('riichi');
-
-                        const name = document.createElement('div');
-                        name.className = 'player-name';
-                        name.textContent = game.getPlayerName(i);
-                        if (game.isPlayerRiichi(i)) {
-                            name.textContent += ' 🔴';
-                        }
-
-                        const score = document.createElement('div');
-                        score.className = 'player-score';
-                        score.textContent = `${game.getPlayerScore(i)}点`;
-
-                        const discards = document.createElement('div');
-                        discards.className = 'player-discards';
-                        const discardsStr = game.getPlayerDiscards(i);
-                        discards.textContent = discardsStr || '(河: なし)';
-
-                        card.appendChild(name);
-                        card.appendChild(score);
-                        card.appendChild(discards);
-                        container.appendChild(card);
-                    }
-                }
-
-                function addLog(message, type = 'system') {
-                    const log = document.getElementById('log');
-                    const entry = document.createElement('div');
-                    entry.className = `log-entry ${type}`;
-                    entry.textContent = message;
-                    log.appendChild(entry);
-                    log.scrollTop = log.scrollHeight;
-                }
-
-                function executeCpuTurn() {
-                    if (game.isCurrentPlayerCpu()) {
-                        const discardedTile = game.executeCpuTurn();
-                        const cpuName = game.getPlayerName((game.getCurrentPlayerId() + 3) % 4);
-                        addLog(`${cpuName} が ${discardedTile} を打牌`, 'cpu');
-                        updateDisplay();
-
-                        if (game.isGameOver()) {
-                            addLog('ゲーム終了', 'system');
-                            stopAutoPlay();
-                        }
-                    }
-                }
-
-                function startAutoPlay() {
-                    autoPlay = true;
-                    document.getElementById('auto-indicator').style.display = 'inline-block';
-                    document.getElementById('auto-btn').textContent = '自動停止 ';
-                    document.getElementById('auto-btn').appendChild(document.getElementById('auto-indicator'));
-
-                    autoPlayInterval = setInterval(() => {
-                        if (game.isCurrentPlayerCpu() && !game.isGameOver()) {
-                            executeCpuTurn();
-                        }
-                    }, 1000);
-                }
-
-                function stopAutoPlay() {
-                    autoPlay = false;
-                    document.getElementById('auto-indicator').style.display = 'none';
-                    document.getElementById('auto-btn').textContent = '自動進行';
-                    if (autoPlayInterval) {
-                        clearInterval(autoPlayInterval);
-                        autoPlayInterval = null;
-                    }
-                }
-
-                // ツモボタン
-                document.getElementById('draw-btn').addEventListener('click', () => {
-                    if (game.drawTile()) {
-                        addLog('ツモしました', 'player');
-                        updateDisplay();
-
-                        // CPUターンを実行
-                        if (autoPlay) {
-                            // 自動進行中は自動的にCPUターンを実行
-                            setTimeout(executeCpuTurn, 500);
-                        }
-                    } else {
-                        addLog('山牌がありません', 'system');
-                    }
-                });
-
-                // 打牌ボタン
-                document.getElementById('discard-btn').addEventListener('click', () => {
-                    const input = document.getElementById('discard-input');
-                    const tile = input.value.trim();
-
-                    if (game.discardTile(tile)) {
-                        addLog(`${tile} を打牌しました`, 'player');
-                        input.value = '';
-                        updateDisplay();
-
-                        // CPUターンを実行
-                        if (autoPlay) {
-                            setTimeout(executeCpuTurn, 500);
-                        }
-                    } else {
-                        addLog(`${tile} は手牌にありません`, 'system');
-                    }
-                });
-
-                // リーチボタン
-                document.getElementById('riichi-btn').addEventListener('click', () => {
-                    if (game.declareRiichi()) {
-                        addLog('リーチ宣言しました！', 'player');
-                        updateDisplay();
-                    } else {
-                        addLog('リーチできません', 'system');
-                    }
-                });
-
-                // 自動進行ボタン
-                document.getElementById('auto-btn').addEventListener('click', () => {
-                    if (autoPlay) {
-                        stopAutoPlay();
-                        addLog('自動進行を停止しました', 'system');
-                    } else {
-                        startAutoPlay();
-                        addLog('自動進行を開始しました', 'system');
-                        executeCpuTurn();
-                    }
-                });
-
-                // Enterキーで打牌
-                document.getElementById('discard-input').addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        document.getElementById('discard-btn').click();
-                    }
-                });
-
-                updateDisplay();
-                addLog('ゲームを開始しました', 'system');
-                addLog('「自動進行」ボタンでCPUのターンを自動実行できます', 'system');
-
-                // 初期表示でCPUのターンなら自動実行を提案
-                if (game.isCurrentPlayerCpu()) {
-                    addLog('CPUのターンです。「自動進行」を押すと自動的に進行します', 'system');
-                }
-
-            } catch (err) {
-                console.error('Error:', err);
-                document.getElementById('loading').innerHTML =
-                    `<div style="color: #ef4444;">エラー: ${err.message}</div>`;
-            }
-        }
-
-        run();
-    </script>
-</body>
+  </head>
+  <body>
+    <div id="loading">
+      <div>Loading…</div>
+      <div id="loading-bar"><div></div></div>
+    </div>
+    <div id="game"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
 </html>
