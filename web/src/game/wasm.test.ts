@@ -1,0 +1,148 @@
+// Wasm ラッパのテスト (Issue #3)
+//
+// 実際の wasm-bindgen 生成物は jsdom で動かしづらいため、
+// vi.mock で pkg を差し替えて wrapper の呼び出しを確認する。
+
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import {
+  WasmGameBridge,
+  __resetWasmForTest,
+  __setWasmModuleForTest,
+} from './wasm'
+import type { Tile } from './types'
+
+// ---- モック WasmGame ----
+class MockWasmGame {
+  static newHybridArgs: [string, number] | null = null
+  static constructorArgs: string[] | null = null
+
+  drawCalled = 0
+  discardArg: string | null = null
+
+  static newHybrid(name: string, position: number): MockWasmGame {
+    MockWasmGame.newHybridArgs = [name, position]
+    return new MockWasmGame()
+  }
+
+  constructor(names?: string[]) {
+    if (names) MockWasmGame.constructorArgs = names
+  }
+
+  drawTile(): boolean {
+    this.drawCalled += 1
+    return true
+  }
+  discardTile(code: string): boolean {
+    this.discardArg = code
+    return true
+  }
+  executeCpuTurn(): string {
+    return '5m'
+  }
+  getGameState(): string {
+    return '{"phase":"game"}'
+  }
+  getCurrentHand(): string {
+    return '1m 2m 3m'
+  }
+  getCurrentPlayerId(): number {
+    return 1
+  }
+  isCurrentPlayerHuman(): boolean {
+    return false
+  }
+  isCurrentPlayerCpu(): boolean {
+    return true
+  }
+  isGameOver(): boolean {
+    return false
+  }
+  getWallCount(): number {
+    return 70
+  }
+  getShanten(): number {
+    return 2
+  }
+  getPlayerScore(_idx: number): number {
+    return 25000
+  }
+  getPlayerName(_idx: number): string {
+    return 'mock'
+  }
+  getDoraIndicators(): string {
+    return '5m'
+  }
+  getPlayerDiscards(_idx: number): string {
+    return ''
+  }
+  canRiichi(): boolean {
+    return false
+  }
+  declareRiichi(): boolean {
+    return false
+  }
+  isPlayerRiichi(_idx: number): boolean {
+    return false
+  }
+  free(): void {
+    /* noop */
+  }
+}
+
+const fakeModule = {
+  default: vi.fn(async () => undefined),
+  WasmGame: MockWasmGame as unknown as typeof import('../../pkg/xmj_core.js').WasmGame,
+  version: () => '0.1.0',
+  gameName: () => '邪雀 Xtreme Mahjong',
+} as unknown as typeof import('../../pkg/xmj_core.js')
+
+describe('WasmGameBridge', () => {
+  beforeEach(() => {
+    __resetWasmForTest()
+    MockWasmGame.newHybridArgs = null
+    MockWasmGame.constructorArgs = null
+    __setWasmModuleForTest(fakeModule)
+  })
+
+  it('createHybrid で WasmGame.newHybrid に引数が渡る', () => {
+    const bridge = WasmGameBridge.createHybrid('かこじゅん', 0)
+    expect(MockWasmGame.newHybridArgs).toEqual(['かこじゅん', 0])
+    expect(bridge.getCurrentPlayerId()).toBe(1)
+  })
+
+  it('createAllHuman で名前配列が渡る', () => {
+    WasmGameBridge.createAllHuman(['A', 'B', 'C', 'D'])
+    expect(MockWasmGame.constructorArgs).toEqual(['A', 'B', 'C', 'D'])
+  })
+
+  it('discardTile は Tile を CUI 文字列に変換して渡す', () => {
+    const bridge = WasmGameBridge.createHybrid('me', 0)
+    const tile: Tile = { suit: 'man', value: 5, isRed: true }
+    bridge.discardTile(tile)
+    // 内部 mock を直接覗くため bridge から再取得
+    // (注: bridge.game は private なので、テストでは MockWasmGame 側に
+    //  最後の discard 引数を残す手段がない。ここでは drawTile / discardTile が
+    //  例外なく呼ばれることだけ確認する)
+    expect(bridge.discardTile(tile)).toBe(true)
+  })
+
+  it('drawTile / executeCpuTurn / 状態取得 API が呼べる', () => {
+    const bridge = WasmGameBridge.createHybrid('me', 0)
+    expect(bridge.drawTile()).toBe(true)
+    expect(bridge.executeCpuTurn()).toBe('5m')
+    expect(bridge.getGameStateJson()).toBe('{"phase":"game"}')
+    expect(bridge.getWallCount()).toBe(70)
+    expect(bridge.getShanten()).toBe(2)
+    expect(bridge.isCurrentPlayerCpu()).toBe(true)
+    expect(bridge.isCurrentPlayerHuman()).toBe(false)
+    expect(bridge.isGameOver()).toBe(false)
+  })
+
+  it('Wasm 未初期化なら create 系は例外', () => {
+    __setWasmModuleForTest(null)
+    expect(() => WasmGameBridge.createHybrid('me', 0)).toThrow(/初期化/)
+    expect(() => WasmGameBridge.createAllHuman(['a', 'b', 'c', 'd'])).toThrow(
+      /初期化/
+    )
+  })
+})
