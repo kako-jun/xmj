@@ -44,6 +44,9 @@ const main = async (): Promise<void> => {
 
   const app = new App(pixiApp)
   app.showTableBackground()
+  // Issue #4: 全 34 種類 + 赤ドラ 3 枚を一覧表示する確認用ステージ。
+  // Issue #5 で GameScene に置き換える。
+  app.showAllTilesDemo()
 
   setLoadingProgress(1)
   removeLoading()
