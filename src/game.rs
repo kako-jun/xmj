@@ -202,7 +202,7 @@ impl Game {
         observer_idx: usize,
         target_idx: usize,
     ) -> Vec<Tile> {
-        if target_idx >= self.players.len() {
+        if observer_idx >= self.players.len() || target_idx >= self.players.len() {
             return Vec::new();
         }
         let target_hand = self.players[target_idx].hand.get_tiles();
@@ -759,8 +759,8 @@ mod tests {
 
     /// Washizu モードでは wall + 配牌 + dora indicator の合計のうち
     /// **3/4 が glass** になっていること。
-    /// シャッフル後に先頭 75% を塗る単純実装なので、毎回ぴったり 102 枚 glass。
-    /// 念のため許容幅 ±5 で確認（将来確率的実装に変えても通る幅）。
+    /// シャッフル後に先頭 75% を塗る決定的な整数演算実装なので、毎回ぴったり 102 枚 glass。
+    /// exact 比較で固定。将来確率的実装（サンプリング等）に変えたら許容幅を緩める。
     #[test]
     fn test_washizu_wall_has_3_4_glass_tiles() {
         let game = Game::new_with_mode(washizu_names(), GameMode::Washizu);
@@ -796,8 +796,8 @@ mod tests {
         let expected = 136 * 3 / 4; // 102
         let diff = (glass as i32 - expected as i32).abs();
         assert!(
-            diff <= 5,
-            "glass 牌は約 102 (3/4 of 136) 枚であるべき。実測 {} / 期待 {} (許容 ±5)",
+            diff <= 1,
+            "glass 牌は 102 (3/4 of 136) 枚であるべき。実測 {} / 期待 {} (exact 比較)",
             glass,
             expected
         );

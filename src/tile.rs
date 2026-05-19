@@ -78,13 +78,13 @@ impl Tile {
 
     /// 透明牌フラグを立てたコピーを返す（builder スタイル）。
     /// 鷲巣麻雀の wall 初期化で使う。
+    ///
+    /// builder 用途では `true` を渡す。`false` は試験用
+    /// （`with_glass(false)` で元に戻す経路をテストするためにシグネチャを残している）。
+    /// 互換性のため引数 `is_glass: bool` は維持する。
     pub fn with_glass(mut self, is_glass: bool) -> Self {
         self.is_glass = is_glass;
         self
-    }
-
-    pub fn is_glass(&self) -> bool {
-        self.is_glass
     }
 
     pub fn to_string(&self) -> String {
@@ -217,17 +217,17 @@ mod tests {
     #[test]
     fn test_with_glass_setter() {
         let t = Tile::new_number(Suit::Sou, 3, false);
-        assert!(!t.is_glass());
+        assert!(!t.is_glass);
 
         let g = t.with_glass(true);
-        assert!(g.is_glass());
+        assert!(g.is_glass);
 
         // 元の値以外は変わらない
         assert_eq!(g.tile_type, t.tile_type);
         assert_eq!(g.is_red, t.is_red);
 
-        // false に戻せる
+        // false に戻せる（試験用途）
         let back = g.with_glass(false);
-        assert!(!back.is_glass());
+        assert!(!back.is_glass);
     }
 }

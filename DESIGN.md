@@ -288,6 +288,7 @@ cargo run -- --mode seikyo
 | -------- | ----------- | --------------------------------------------------------------------- |
 | 透明牌   | **3/4 (102/136)** | 山牌初期化時にシャッフル後の先頭 3/4 を `is_glass=true` にする  |
 | 可視性   | 自家全可視 + 他家 glass のみ | 不透明な 1/4 は他家から見えない                                |
+| ドラ表示牌 | 常に opaque | wall 末尾から取るため、シャッフル後の先頭 3/4 塗り実装上ドラ表示牌は必ず非 glass になる |
 
 #### 同値性の扱い
 
@@ -307,9 +308,8 @@ cargo run -- --mode seikyo
 
 #### API（`src/tile.rs`）
 
-- `Tile.is_glass: bool` — 透明牌フラグ（同値比較に含まれない）
-- `Tile::with_glass(bool) -> Tile` — ビルダー
-- `Tile::is_glass() -> bool` — getter
+- `Tile.is_glass: bool` — 透明牌フラグ（pub フィールド、同値比較に含まれない）
+- `Tile::with_glass(bool) -> Tile` — ビルダー（`true` で透明化、`false` は試験用）
 
 #### API（`src/game.rs`）
 
