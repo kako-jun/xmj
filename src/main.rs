@@ -32,6 +32,12 @@ fn main() {
             println!("  例: `?1m` で 1m を闇牌として河に置く（1000 点支払い）");
             println!("  闇牌は他家からはロン・鳴き不可。照射 API で公開できる");
         }
+        GameMode::RealTime => {
+            println!("ルール: リアルタイム麻雀（全員同時打牌、5 秒タイムアウト）");
+            println!("  鳴き優先順位: Ron > Pon > Kan > Chi（同優先は先勝ち）");
+            println!("  ※ CLI 版は同期入力のため完全な同時打牌は web/wasm follow-up");
+            println!("  本モードは Rust core API のみ提供（tick_timers / auto_discard_for 等）");
+        }
     }
 
     let player_names = vec![
@@ -118,6 +124,7 @@ fn parse_mode_from_args() -> GameMode {
             "five-tile" | "five_tile" | "fivetile" => GameMode::FiveTile,
             "east-west" | "east_west" | "eastwest" => GameMode::EastWest,
             "yamima" => GameMode::Yamima,
+            "realtime" | "real-time" | "real_time" => GameMode::RealTime,
             other => {
                 eprintln!("[warn] 未知のモード '{}'、standard で起動します", other);
                 GameMode::Standard

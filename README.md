@@ -170,9 +170,18 @@ PR #21 時点の実装は API レベル完備 + CLI からの最低限の動線�
 - **場代の親回収帰属**: 標準解釈を採用（誰が和了しても pot は和了者が回収）。親回収バリアントは将来オプション化検討
 - **供託の流局持ち越し**: `winner_takes_pot` を呼ばなければ pot は自然に持ち越されるため、流局処理ロジックさえ書けば対応可能
 
-### 実装予定
+### リアルタイム麻雀 (RealTime)
 
-- 🚧 **リアルタイム麻雀**: 同時打牌、早い者勝ちの鳴き
+`cargo run -- --mode realtime` で起動。ターン制を廃止、全員独立タイマー (5 秒) で
+ツモ → 打牌を回す。タイムアウトで自動ツモ切り。鳴き宣言は早い者勝ちで優先順位は
+**Ron > Pon > Kan > Chi**（同優先は先勝ち）。
+
+- ✅ `GameMode::RealTime` モード追加
+- ✅ `realtime` モジュール: `Call`, `CallKind`, `PlayerTimer`, `resolve_calls`, `should_auto_discard`
+- ✅ Game 統合: `tick_timers(delta_ms)` / `timed_out_players()` / `auto_discard_for(idx)` / `reset_player_timer(idx)` / `resolve_pending_calls(calls)`
+- ✅ CLI: `--mode realtime` / `--mode real-time` / `--mode real_time` で起動。起動メッセージのみ
+- 🚧 完全な同時打牌入力ループは Rust の同期 I/O では実現できないため CLI 版の範疇外。web/wasm + WebRTC シグナリングは follow-up
+- 🚧 タイマーの実時間進行（`requestAnimationFrame` / async タスク）は呼び出し側の責務
 
 ## プロジェクト構成
 

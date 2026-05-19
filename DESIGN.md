@@ -559,3 +559,52 @@ PR #18 時点では「Discard 構造 + 闇牌・照射 API + CLI 闇牌打牌 + 
 - **Web UI**: PixiJS 側で `??` 裏向き牌の描画は未対応
 - **AI 配線**: CPU は闇牌打牌・照射を判断しない（常に通常打牌）
 
+
+### RealTime（リアルタイム麻雀）
+
+『天』『アカギ』の極限緊張感を「同時打牌 + 5 秒タイムアウト」で再現する非ターン制モード。
+本実装は Rust core のロジック層のみで、完全な同時打牌入力ループは web/wasm follow-up。
+
+#### ルール
+
+| 項目         | 値             | 意味                                                                    |
+| ------------ | -------------- | ----------------------------------------------------------------------- |
+| ターン制     | **廃止**       | 全プレイヤーが独立して「ツモ→打牌」を繰り返す                          |
+| 制限時間     | **5000ms**     | 各プレイヤーごと。`PlayerTimer::default_limit()` 定数                  |
+| タイムアウト | **自動ツモ切り** | `auto_discard_for(idx)` で手牌末尾を河へ                                |
+| 鳴き優先順位 | **Ron > Pon > Kan > Chi** | 同優先は先勝ち。`resolve_calls(&[Call])` で 1 件採用                    |
+
+#### 主要 API
+
+- `realtime::CallKind { Ron, Pon, Kan, Chi }` — `Ord` 実装で優先順位（数値小ほど強い）
+- `realtime::Call { player_idx, kind }` — 1 件の鳴き宣言
+- `realtime::resolve_calls(&[Call]) -> Option<Call>` — 同フレームの宣言から 1 件採用
+- `realtime::PlayerTimer { elapsed_ms, limit_ms }` — タイマー状態。`tick` / `is_timeout` / `reset`
+- `realtime::should_auto_discard(elapsed_ms, limit_ms) -> bool`
+- `realtime::pick_auto_discard_tile(tiles) -> Option<Tile>` — 自動打牌対象（手牌末尾）
+- `Game::tick_timers(delta_ms)` — 全プレイヤータイマーを進める
+- `Game::timed_out_players() -> Vec<usize>` — タイムアウト中の idx 一覧
+- `Game::auto_discard_for(idx) -> Option<Tile>` — タイムアウトプレイヤーの自動ツモ切り
+- `Game::reset_player_timer(idx)` — 打牌成功後に呼ぶ
+- `Game::resolve_pending_calls(&[Call]) -> Option<Call>` — `realtime::resolve_calls` ラッパー
+
+#### CLI
+
+```bash
+cargo run -- --mode realtime
+# or --mode real-time / --mode real_time
+```
+
+起動時に「ルール: リアルタイム麻雀（全員同時打牌、5 秒タイムアウト）」+ 鳴き優先順位 +
+「CLI 版は同期入力のため完全な同時打牌は web/wasm follow-up」が表示される。
+
+#### Limitations
+
+PR #20 時点では Rust core ロジック層 + CLI 起動メッセージまで。以下は follow-up:
+
+- **CLI 同時打牌不可**: Rust 標準の同期 I/O ではタイムアウト付き stdin 読み取りが不可能。
+  実時間で進めるには `crossterm` の poll や tokio の `select!` が必要
+- **タイマーの実時間進行**: 呼び出し側 (web `requestAnimationFrame` / wasm async / CLI ループ) が
+  周期的に `tick_timers(delta_ms)` を呼ぶ責務。本 PR は提供しない
+- **WebRTC 鳴きシグナリング**: P2P 経路で鳴き宣言を即時伝搬する配線は別 Issue
+- **AI 配線**: CPU は通常モードの逐次打牌のみ。RealTime での非同期思考は未実装
