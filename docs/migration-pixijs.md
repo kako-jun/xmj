@@ -52,12 +52,20 @@
 - `App.showInitialTable()` は再描画時に旧卓 `Container` を `destroy({ children: true })` まで行い、リークしにくい形へ変更
 - `DESIGN.md` を現行 PixiJS 初期卓表示に合わせて更新し、戦闘卓は暗いフェルト卓、gradient / glass は DOM overlay 用、牌は vector + text glyph という方針を明文化
 
+### Issue #6 — 入力（牌選択・打牌・ツモのタップ操作）
+
+- `web/src/game/App.ts`: `WasmGameBridge` を保持する構造へ寄せ、`selectedHandIndex` / CPU ターン進行 / 人間復帰時の自動ツモを集約
+- 人間手番かつ下側の手牌だけ `pointertap` を有効化。1 回タップで選択、同じ牌の再タップで `discardTile()` を呼ぶ
+- 打牌後は `createGameStateFromBridge()` で UI state を再構築し、CPU が手番の間は `executeCpuTurn()` を順に実行
+- CPU 3 人の処理が終わって人間手番へ戻ったら、手牌 13 枚を検知して `drawTile()` を自動実行
+- `web/src/game/table.ts`: PixiJS で選択牌の浮き上がり表現を追加。`行動` パネルに最小 action area を実装し、「打牌」ボタンと `canRiichi()` 時のみ「立直」ボタンを表示
+- テスト追加: 自動ツモ、タップ選択、再タップ打牌、CPU ループ後の人間復帰を `App.test.ts` で固定
+
 ## 残 Issue
 
 | Issue | 内容 | 主要成果物 |
 |---|---|---|
-| #6 | 入力ハンドラ (打牌・ツモ・リーチ宣言) | `web/src/game/input.ts` |
-| #7 | CPU ターン進行ループ + 演出 | `WasmGameBridge.executeCpuTurn` の UI 連動 |
+| #7 | CPU ターン演出 / ログ / 間 | `WasmGameBridge.executeCpuTurn` の可視化 |
 | #8 | 和了画面 / 流局表示 | `web/src/game/scenes/ResultScene.ts` |
 | #9 | タイトルシーン + モード選択 | `web/src/game/scenes/TitleScene.ts` |
 

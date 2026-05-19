@@ -4,7 +4,6 @@
 import { Application } from 'pixi.js'
 import { App } from './game/App'
 import { STAGE_WIDTH, STAGE_HEIGHT, TABLE_BG_COLOR } from './game/constants'
-import { createGameStateFromBridge } from './game/bridgeState'
 import { initWasm, WasmGameBridge } from './game/wasm'
 
 const setLoadingProgress = (ratio: number): void => {
@@ -44,10 +43,12 @@ const main = async (): Promise<void> => {
   setLoadingProgress(0.8)
 
   const app = new App(pixiApp)
+  if (import.meta.env.DEV) {
+    window.__xmjApp = app
+  }
   try {
     const bridge = WasmGameBridge.createHybrid('あなた', 0)
-    const gameState = createGameStateFromBridge(bridge, 0)
-    app.showInitialTable(gameState)
+    app.startGame(bridge, 0)
   } catch (err) {
     console.warn('[xmj] 初期卓の生成に失敗しました。背景のみ表示します:', err)
     app.showTableBackground()

@@ -18,12 +18,26 @@ import {
   TURN_GLOW_COLOR,
 } from './constants'
 import { createTileBackGraphics, createTileGraphics } from './tile'
-import type { GameState, PlayerState } from './types'
+import type { GameState, PlayerIndex, PlayerState } from './types'
 
 const TABLE_CENTER_X = STAGE_WIDTH / 2
 const TABLE_CENTER_Y = STAGE_HEIGHT / 2 - 12
 
 const PLAYER_WIND = ['東', '南', '西', '北'] as const
+
+export interface TableActionButton {
+  key: string
+  label: string
+  enabled: boolean
+  onTap: () => void
+}
+
+export interface TableSceneOptions {
+  selectedHandIndex?: number | null
+  interactiveHandPlayerId?: PlayerIndex | null
+  onHandTileTap?: (index: number) => void
+  actionButtons?: TableActionButton[]
+}
 
 const makeText = (
   text: string,
@@ -181,7 +195,7 @@ const createScoreBadges = (state: GameState): Container => {
   return badges
 }
 
-const createPlayerHand = (player: PlayerState): Container => {
+const createPlayerHand = (player: PlayerState, options: TableSceneOptions = {}): Container => {
   const hand = new Container()
   hand.label = `hand-${player.id}`
 
@@ -189,6 +203,30 @@ const createPlayerHand = (player: PlayerState): Container => {
   player.hand.forEach((tile, index) => {
     const sprite = player.isCPU ? createTileBackGraphics() : createTileGraphics(tile)
     sprite.x = (index - (total - 1) / 2) * 42
+
+    const isInteractive =
+      options.interactiveHandPlayerId === player.id && typeof options.onHandTileTap === 'function'
+    const isSelected = options.selectedHandIndex === index && isInteractive
+    if (isSelected) {
+      const glow = new Graphics()
+      glow
+        .roundRect(-4, -6, TILE.width + 8, TILE.height + 8, TILE.cornerRadius + 2)
+        .fill({ color: TURN_GLOW_COLOR, alpha: 0.16 })
+        .stroke({ color: TURN_GLOW_COLOR, width: 2, alpha: 0.9 })
+      sprite.addChildAt(glow, 0)
+      sprite.y = -18
+      sprite.scale.set(1.04)
+    }
+
+    if (isInteractive) {
+      sprite.label = `${sprite.label ?? 'tile'}-${index}`
+      sprite.eventMode = 'static'
+      sprite.cursor = 'pointer'
+      sprite.on('pointertap', () => {
+        options.onHandTileTap?.(index)
+      })
+    }
+
     hand.addChild(sprite)
   })
 
@@ -227,6 +265,7 @@ const createPlayerDiscards = (player: PlayerState): Container => {
 
 const createTurnMarker = (label: string): Container => {
   const marker = new Container()
+  marker.label = 'turn-marker'
   const chip = new Graphics()
   chip
     .roundRect(0, 0, 124, 34, 12)
@@ -242,11 +281,79 @@ const createTurnMarker = (label: string): Container => {
   return marker
 }
 
-const createBottomArea = (state: GameState): Container => {
+const createActionArea = (buttons: TableActionButton[]): Container => {
+  const area = new Container()
+  area.label = 'action-area'
+
+  const bg = new Graphics()
+  bg
+    .roundRect(0, 0, 248, 92, 18)
+    .fill({ color: PANEL_BG_COLOR, alpha: 0.94 })
+    .stroke({ color: PANEL_BORDER_COLOR, width: 2 })
+  area.addChild(bg)
+
+  const title = makeText('行動', 15, TEXT_MUTED_COLOR, 'left', 'bold')
+  title.x = 16
+  title.y = 12
+  area.addChild(title)
+
+  if (buttons.length === 0) {
+    const empty = makeText('選択肢なし', 17, TEXT_MUTED_COLOR, 'left')
+    empty.x = 16
+    empty.y = 48
+    area.addChild(empty)
+    return area
+  }
+
+  buttons.forEach((button, index) => {
+    const action = new Container()
+    action.label = `action-button-${button.key}`
+    action.x = 16 + index * 110
+    action.y = 40
+
+    const plate = new Graphics()
+    plate
+      .roundRect(0, 0, 98, 36, 12)
+      .fill({
+        color: button.enabled ? 0x2a1d0d : 0x2a2a2a,
+        alpha: button.enabled ? 0.96 : 0.78,
+      })
+      .stroke({
+        color: button.enabled ? PANEL_ACCENT_COLOR : TEXT_MUTED_COLOR,
+        width: 2,
+        alpha: button.enabled ? 1 : 0.45,
+      })
+    action.addChild(plate)
+
+    const label = makeText(
+      button.label,
+      16,
+      button.enabled ? TEXT_PRIMARY_COLOR : TEXT_MUTED_COLOR,
+      'center',
+      'bold'
+    )
+    label.anchor.set(0.5)
+    label.x = 49
+    label.y = 18
+    action.addChild(label)
+
+    if (button.enabled) {
+      action.eventMode = 'static'
+      action.cursor = 'pointer'
+      action.on('pointertap', button.onTap)
+    }
+
+    area.addChild(action)
+  })
+
+  return area
+}
+
+const createBottomArea = (state: GameState, options: TableSceneOptions = {}): Container => {
   const area = new Container()
   area.label = 'bottom-area'
 
-  const hand = createPlayerHand(state.players[0])
+  const hand = createPlayerHand(state.players[0], options)
   hand.x = TABLE_CENTER_X
   hand.y = 560
   area.addChild(hand)
@@ -262,6 +369,11 @@ const createBottomArea = (state: GameState): Container => {
     marker.y = 620
     area.addChild(marker)
   }
+
+  const actionArea = createActionArea(options.actionButtons ?? [])
+  actionArea.x = 38
+  actionArea.y = 606
+  area.addChild(actionArea)
 
   return area
 }
@@ -369,7 +481,7 @@ const createFooter = (): Container => {
   return footer
 }
 
-export const createTableScene = (state: GameState): Container => {
+export const createTableScene = (state: GameState, options: TableSceneOptions = {}): Container => {
   const root = new Container()
   root.label = 'game-table'
 
@@ -380,7 +492,7 @@ export const createTableScene = (state: GameState): Container => {
   root.addChild(createTopArea(state))
   root.addChild(createLeftArea(state))
   root.addChild(createRightArea(state))
-  root.addChild(createBottomArea(state))
+  root.addChild(createBottomArea(state, options))
   root.addChild(createFooter())
 
   return root

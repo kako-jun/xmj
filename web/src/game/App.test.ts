@@ -8,6 +8,54 @@ import { describe, it, expect } from 'vitest'
 import { Container, Text } from 'pixi.js'
 import { App } from './App'
 import { initWithState } from './state'
+import type { Tile } from './types'
+
+const sampleState = `Round: 1 | Wall: 69 tiles
+Dora indicators: 5p
+>親 あなた (25000点): 1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to
+  河: 9m 1p
+   CPU 南 (25000点): 1p 1p 2p 2p 3p 3p 4s 5s 6s na na ht cn
+  河: 7s
+   CPU 西 (25000点): 4m 5m 6m 7m 8m 9m 3p 4p 5p 6p 7p 8p pe
+   CPU 北 (25000点): 1s 1s 2s 2s 3s 3s 4m 4m 5m 5m 6m 6m sa
+`
+
+const createBridgeMock = (overrides: Partial<import('./wasm').WasmGameBridge> = {}) =>
+  ({
+    getGameStateJson: () => sampleState,
+    getPlayerScore: () => 25000,
+    getPlayerName: (idx: number) => ['あなた', 'CPU 南', 'CPU 西', 'CPU 北'][idx],
+    getPlayerDiscards: () => '',
+    isPlayerRiichi: () => false,
+    getCurrentHandString: () => '1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to hk',
+    getCurrentPlayerId: () => 0,
+    getWallCount: () => 69,
+    getDoraIndicators: () => '5p',
+    isCurrentPlayerHuman: () => true,
+    isCurrentPlayerCpu: () => false,
+    isGameOver: () => false,
+    drawTile: () => true,
+    discardTile: (_tile: Tile) => true,
+    executeCpuTurn: () => '5m',
+    canRiichi: () => false,
+    declareRiichi: () => false,
+    ...overrides,
+  }) as unknown as import('./wasm').WasmGameBridge
+
+const getTable = (stage: Container): Container => stage.children[0] as Container
+
+const getBottomArea = (stage: Container): Container =>
+  getTable(stage).getChildByLabel('bottom-area') as Container
+
+const getHandTile = (stage: Container, label: string): Container => {
+  const hand = getBottomArea(stage).getChildByLabel('hand-0') as Container
+  return hand.getChildByLabel(label) as Container
+}
+
+const getActionButton = (stage: Container, key: string): Container => {
+  const actionArea = getBottomArea(stage).getChildByLabel('action-area') as Container
+  return actionArea.getChildByLabel(`action-button-${key}`) as Container
+}
 
 describe('App', () => {
   it('showTableBackground は stage に背景を 1 つ追加する', () => {
@@ -53,13 +101,13 @@ describe('App', () => {
       const areas = ['bottom-area', 'right-area', 'top-area', 'left-area'] as const
       const markerCounts = areas.map(label => {
         const area = table.getChildByLabel(label) as Container
-        return area.children.length - 2
+        return area.getChildrenByLabel('turn-marker', true).length
       })
 
       expect(markerCounts.reduce((sum, count) => sum + count, 0)).toBe(1)
 
       const activeArea = table.getChildByLabel(areaLabel) as Container
-      const marker = activeArea.children[2] as Container
+      const marker = activeArea.getChildByLabel('turn-marker') as Container
       const markerLabel = marker.children[1] as Text
       expect(markerLabel.text).toBe(markerText)
     }
@@ -104,5 +152,253 @@ describe('App', () => {
     )
 
     expect(riichiTexts).toHaveLength(1)
+  })
+
+  it('startGame は人間手番かつ 13 枚なら自動で drawTile して 14 枚にする', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    let drawCount = 0
+
+    const bridge = createBridgeMock({
+      getCurrentHandString: () =>
+        drawCount === 0
+          ? '1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to'
+          : '1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to hk',
+      drawTile: () => {
+        drawCount += 1
+        return true
+      },
+    })
+
+    app.startGame(bridge, 0)
+
+    expect(drawCount).toBe(1)
+    expect(app.gameState?.players[0].hand).toHaveLength(14)
+  })
+
+  it('手牌タップで選択状態になり、同じ牌の再タップで discardTile が走る', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    const discarded: Tile[] = []
+
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      discardTile: (tile: Tile) => {
+        discarded.push(tile)
+        return true
+      },
+    })
+
+    app.startGame(bridge, 0)
+
+    const getTargetTile = (): Container => {
+      const table = stage.children[0] as Container
+      const bottomArea = table.getChildByLabel('bottom-area') as Container
+      const hand = bottomArea.getChildByLabel('hand-0') as Container
+      return hand.getChildByLabel('1m-0') as Container
+    }
+
+    getTargetTile().emit('pointertap', {} as never)
+    expect(app.selectedHandIndex).toBe(0)
+
+    getTargetTile().emit('pointertap', {} as never)
+    expect(discarded).toEqual([{ suit: 'man', value: 1 }])
+    expect(app.selectedHandIndex).toBe(null)
+  })
+
+  it('打牌後は CPU ターンを回し、人間に戻ったら自動ツモして再描画する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    let drawCount = 0
+    let discardCount = 0
+    let cpuCount = 0
+    let currentPlayerId = 0
+
+    const bridge = createBridgeMock({
+      drawTile: () => {
+        drawCount += 1
+        return true
+      },
+      discardTile: () => {
+        discardCount += 1
+        currentPlayerId = 1
+        return true
+      },
+      executeCpuTurn: () => {
+        cpuCount += 1
+        currentPlayerId = currentPlayerId === 3 ? 0 : (currentPlayerId + 1)
+        return '5m'
+      },
+      getCurrentPlayerId: () => currentPlayerId,
+      isCurrentPlayerHuman: () => currentPlayerId === 0,
+      isCurrentPlayerCpu: () => currentPlayerId !== 0,
+      getCurrentHandString: () =>
+        drawCount >= 1
+          ? '1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to hk'
+          : '1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to',
+    })
+
+    app.startGame(bridge, 0)
+    drawCount = 0
+
+    app.selectedHandIndex = 0
+    const result = (
+      app as unknown as {
+        discardSelectedTile: () => boolean
+      }
+    ).discardSelectedTile()
+
+    expect(result).toBe(true)
+    expect(discardCount).toBe(1)
+    expect(cpuCount).toBe(3)
+    expect(drawCount).toBe(1)
+    expect(app.gameState?.currentTurn).toBe(0)
+    expect(app.gameState?.players[0].hand).toHaveLength(14)
+  })
+
+  it('drawTile が false のとき startGame は 13 枚のまま維持する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    let drawCount = 0
+
+    const bridge = createBridgeMock({
+      getCurrentHandString: () => '1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to',
+      drawTile: () => {
+        drawCount += 1
+        return false
+      },
+    })
+
+    app.startGame(bridge, 0)
+
+    expect(drawCount).toBe(1)
+    expect(app.gameState?.players[0].hand).toHaveLength(13)
+    expect(stage.children.length).toBe(1)
+  })
+
+  it('discard action button から打牌できる', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    const discarded: Tile[] = []
+
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      discardTile: (tile: Tile) => {
+        discarded.push(tile)
+        return true
+      },
+    })
+
+    app.startGame(bridge, 0)
+
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+
+    expect(discarded).toEqual([{ suit: 'man', value: 1 }])
+    expect(app.selectedHandIndex).toBe(null)
+  })
+
+  it('discardTile が false のとき選択状態を維持して CPU ターンへ進まない', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    let cpuCount = 0
+
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      discardTile: () => false,
+      executeCpuTurn: () => {
+        cpuCount += 1
+        return '5m'
+      },
+    })
+
+    app.startGame(bridge, 0)
+
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+
+    expect(app.selectedHandIndex).toBe(0)
+    expect(cpuCount).toBe(0)
+    expect(app.gameState?.players[0].discards).toHaveLength(0)
+  })
+
+  it('CPU 手番では手牌をタップしても選択できない', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      getCurrentPlayerId: () => 1,
+      isCurrentPlayerHuman: () => false,
+      isCurrentPlayerCpu: () => true,
+    })
+
+    app.startGame(bridge, 0)
+
+    const hand = getBottomArea(stage).getChildByLabel('hand-0') as Container
+    const tile = hand.children[0] as Container
+    expect(hand.getChildByLabel('1m-0')).toBeNull()
+    expect(tile.eventMode).not.toBe('static')
+    tile.emit('pointertap', {} as never)
+
+    expect(app.selectedHandIndex).toBe(null)
+  })
+
+  it('canRiichi=true のときだけ action area に立直ボタンが出る', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    app.startGame(
+      createBridgeMock({
+        drawTile: () => false,
+        canRiichi: () => false,
+      }),
+      0
+    )
+    expect(getActionButton(stage, 'discard')).toBeTruthy()
+    expect(getActionButton(stage, 'riichi')).toBeNull()
+
+    app.startGame(
+      createBridgeMock({
+        drawTile: () => false,
+        canRiichi: () => true,
+      }),
+      0
+    )
+    expect(getActionButton(stage, 'riichi')).toBeTruthy()
+  })
+
+  it('declareRiichi が false のとき選択状態を維持する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    let riichiCount = 0
+
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      canRiichi: () => true,
+      declareRiichi: () => {
+        riichiCount += 1
+        return false
+      },
+    })
+
+    app.startGame(bridge, 0)
+
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    getActionButton(stage, 'riichi').emit('pointertap', {} as never)
+
+    expect(riichiCount).toBe(1)
+    expect(app.selectedHandIndex).toBe(0)
+    expect(getActionButton(stage, 'riichi')).toBeTruthy()
   })
 })
