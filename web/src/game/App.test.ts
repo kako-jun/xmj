@@ -384,6 +384,40 @@ describe('App', () => {
     expect(app.gameState?.players[0].discards).toHaveLength(0)
   })
 
+  it('declareRiichi が true でも discardTile が false のとき手番を止めたまま選択状態を維持する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    let riichiCount = 0
+    let cpuCount = 0
+
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      canRiichi: () => true,
+      declareRiichi: () => {
+        riichiCount += 1
+        return true
+      },
+      discardTile: () => false,
+      executeCpuTurn: () => {
+        cpuCount += 1
+        return '5m'
+      },
+    })
+
+    app.startGame(bridge, 0)
+
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    getActionButton(stage, 'riichi-discard').emit('pointertap', {} as never)
+
+    expect(riichiCount).toBe(1)
+    expect(cpuCount).toBe(0)
+    expect(app.selectedHandIndex).toBe(0)
+    expect(app.gameState?.currentTurn).toBe(0)
+    expect(app.gameState?.players[0].hand).toHaveLength(14)
+    expect(app.gameState?.players[0].discards).toHaveLength(0)
+  })
+
   it('CPU 手番では手牌をタップしても選択できない', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
