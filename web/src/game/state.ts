@@ -37,6 +37,7 @@ export const createInitialGameState = (): GameState => ({
   currentTurn: 0,
   wall: [],
   doraIndicators: [],
+  lastDiscard: null,
   round: 1,
 })
 
@@ -52,6 +53,7 @@ export const initWithState = (partial: Partial<GameState> = {}): GameState => {
     currentTurn: partial.currentTurn ?? base.currentTurn,
     wall: partial.wall ?? base.wall,
     doraIndicators: partial.doraIndicators ?? base.doraIndicators,
+    lastDiscard: partial.lastDiscard ?? base.lastDiscard,
     round: partial.round ?? base.round,
   }
 

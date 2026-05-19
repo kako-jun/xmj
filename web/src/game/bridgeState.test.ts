@@ -10,6 +10,7 @@ Dora indicators: 5p
   河: 7s
    CPU 西 (25000点): 4m 5m 6m 7m 8m 9m 3p 4p 5p 6p 7p 8p pe
    CPU 北 (25000点): 1s 1s 2s 2s 3s 3s 4m 4m 5m 5m 6m 6m sa
+Last discard: 7s
 `
 
 describe('parseFormattedGameState', () => {
@@ -30,6 +31,18 @@ describe('parseFormattedGameState', () => {
       { suit: 'pin', value: 1 },
     ])
     expect(state.players[1].discards).toEqual([{ suit: 'sou', value: 7 }])
+    expect(state.lastDiscard).toEqual({ suit: 'sou', value: 7 })
+  })
+
+  it('Last discard 行がないときは lastDiscard=null で復元する', () => {
+    const stateWithoutLastDiscard = sampleState
+      .split('\n')
+      .filter(line => !line.startsWith('Last discard:'))
+      .join('\n')
+
+    const state = parseFormattedGameState(stateWithoutLastDiscard, 0)
+
+    expect(state.lastDiscard).toBe(null)
   })
 
   it('Round 行が欠けた文字列は失敗する', () => {
@@ -63,6 +76,7 @@ describe('createGameStateFromBridge', () => {
       getCurrentPlayerId: () => 0,
       getWallCount: () => 68,
       getDoraIndicators: () => '5p 9s',
+      isGameOver: () => false,
     } as const
 
     const state = createGameStateFromBridge(
@@ -82,6 +96,7 @@ describe('createGameStateFromBridge', () => {
       { suit: 'pin', value: 5 },
       { suit: 'sou', value: 9 },
     ])
+    expect(state.lastDiscard).toEqual({ suit: 'sou', value: 7 })
   })
 
   it('humanPlayerIndex が手番でない間は getCurrentHandString() で人間席を上書きしない', () => {
@@ -95,6 +110,7 @@ describe('createGameStateFromBridge', () => {
       getCurrentPlayerId: () => 0,
       getWallCount: () => 68,
       getDoraIndicators: () => '5p',
+      isGameOver: () => false,
     } as const
 
     const state = createGameStateFromBridge(
@@ -132,6 +148,7 @@ describe('createGameStateFromBridge', () => {
       getCurrentPlayerId: () => 1,
       getWallCount: () => 68,
       getDoraIndicators: () => '5p',
+      isGameOver: () => true,
     } as const
 
     const state = createGameStateFromBridge(
@@ -140,6 +157,7 @@ describe('createGameStateFromBridge', () => {
     )
 
     expect(state.currentTurn).toBe(1)
+    expect(state.phase).toBe('over')
     expect(state.players[1].hand).toEqual([
       { suit: 'sou', value: 9 },
       { suit: 'sou', value: 9 },

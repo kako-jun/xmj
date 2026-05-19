@@ -61,13 +61,23 @@
 - `web/src/game/table.ts`: PixiJS で選択牌の浮き上がり表現を追加。`行動` パネルに最小 action area を実装し、選択牌の確定ボタンを表示。`canRiichi()` 時はこの確定ボタンを「立直して打牌」に切り替える
 - テスト追加: 自動ツモ、タップ選択、再タップ打牌、立直成功後の打牌と CPU ループ、人間復帰を `App.test.ts` で固定
 
+### Issue #7 — Wasm 関数呼び出しフロー整備（ツモ・打牌・CPU AI・終局）
+
+- `web/src/game/App.ts`: `eventLog` / `resultMessage` / `cpuTurnDelayMs` を追加し、#6 の同期ループを「人間打牌 → CPU 南/西/北 → 人間ツモ」の UI 可視フローへ昇格
+- `web/src/main.ts`: ブラウザ起動時だけ CPU ターンへ `280ms` の短い待ちを入れ、CPU の思考中と打牌反映が追えるようにした。テストは既定 `0ms` のままで同期実行
+- `web/src/game/bridgeState.ts`: Rust 側 `get_game_state_string()` の `Last discard:` 行を `GameState.lastDiscard` に取り込み、`isGameOver()` と合わせて `phase='over'` を設定
+- `web/src/game/table.ts`: 中央情報盤に「直前打牌」、下段に「対局ログ」パネル、最小の終局オーバーレイを追加。現在手番・山牌残数・河更新・直前打牌・CPU 打牌ログが 1 画面で見える
+- 終局理由は Rust core の現 API に合わせた最小実装で、`isGameOver()` + wall/score から「山牌が尽きて終局」または「飛んで終局」を表示
+- テスト追加: `Last discard` パース、`phase='over'`、終局オーバーレイ、ログ蓄積を Vitest で固定
+
 ## 残 Issue
 
 | Issue | 内容 | 主要成果物 |
 |---|---|---|
-| #7 | CPU ターン演出 / ログ / 間 | `WasmGameBridge.executeCpuTurn` の可視化 |
-| #8 | 和了画面 / 流局表示 | `web/src/game/scenes/ResultScene.ts` |
+| #8 | 和了画面 / 流局表示 | 和了者/点数/流局理由を受け取る詳細結果 UI |
 | #9 | タイトルシーン + モード選択 | `web/src/game/scenes/TitleScene.ts` |
+
+Issue #7 の MVP は完了。残る #8 は Rust core から「誰が和了したか」「流局か」を直接受け取る API が無いため、現状は `isGameOver()` ベースの最小終局表示に留めている。
 
 ## 設計メモ
 

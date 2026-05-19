@@ -54,6 +54,7 @@ export interface GameState {
   /** 山牌の残り。Tile[] 自体は UI でほぼ使わないが残数表示のために長さだけ参照する。 */
   wall: Tile[]
   doraIndicators: Tile[]
+  lastDiscard: Tile | null
   /** 何局目か (1: 東1局, 2: 東2局, ...)。 */
   round: number
 }

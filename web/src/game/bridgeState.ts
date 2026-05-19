@@ -5,6 +5,7 @@ import { WasmGameBridge } from './wasm'
 const PLAYER_LINE_RE = /^([ >])(?:(親)\s*)?(.+?) \((\d+)点\):\s*(.*)$/
 const ROUND_LINE_RE = /^Round: (\d+) \| Wall: (\d+) tiles$/
 const DORA_LINE_RE = /^Dora indicators:\s*(.*)$/
+const LAST_DISCARD_LINE_RE = /^Last discard:\s*(.+)$/
 
 const parseTileList = (raw: string): Tile[] =>
   raw
@@ -56,9 +57,15 @@ export const parseFormattedGameState = (
 
   const players: PlayerState[] = []
   let currentTurn: PlayerIndex = 0
+  let lastDiscard: Tile | null = null
 
   for (let i = 2; i < lines.length; i++) {
     const playerLine = lines[i]
+    const lastDiscardMatch = LAST_DISCARD_LINE_RE.exec(playerLine)
+    if (lastDiscardMatch) {
+      lastDiscard = tileFromCuiCode(lastDiscardMatch[1]?.trim() ?? '')
+      continue
+    }
     const match = PLAYER_LINE_RE.exec(playerLine)
     if (!match) continue
 
@@ -100,6 +107,7 @@ export const parseFormattedGameState = (
     currentTurn,
     wall: Array.from({ length: wallCount }, () => ({ suit: 'man', value: 1 as const })),
     doraIndicators,
+    lastDiscard,
     round,
   }
 }
@@ -128,6 +136,7 @@ export const createGameStateFromBridge = (
 
   return {
     ...base,
+    phase: bridge.isGameOver() ? 'over' : base.phase,
     currentTurn: currentPlayerId,
     wall: Array.from({ length: bridge.getWallCount() }, () => ({ suit: 'man', value: 1 })),
     doraIndicators: parseTileList(bridge.getDoraIndicators()),

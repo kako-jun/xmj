@@ -42,7 +42,7 @@ const main = async (): Promise<void> => {
 
   setLoadingProgress(0.8)
 
-  const app = new App(pixiApp)
+  const app = new App(pixiApp, { cpuTurnDelayMs: 280 })
   if (import.meta.env.DEV) {
     window.__xmjApp = app
   }

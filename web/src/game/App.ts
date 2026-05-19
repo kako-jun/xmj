@@ -2,9 +2,14 @@ import { Application, Graphics } from 'pixi.js'
 import { STAGE_WIDTH, STAGE_HEIGHT, TABLE_BG_COLOR } from './constants'
 import { createTableScene } from './table'
 import type { TableActionButton } from './table'
-import type { GameState, PlayerIndex } from './types'
+import type { GameState, PlayerIndex, Tile } from './types'
 import { createGameStateFromBridge } from './bridgeState'
+import { tileToCuiCode } from './types'
 import { WasmGameBridge } from './wasm'
+
+interface AppOptions {
+  cpuTurnDelayMs?: number
+}
 
 export class App {
   app: Application
@@ -12,9 +17,14 @@ export class App {
   humanPlayerIndex: PlayerIndex = 0
   gameState: GameState | null = null
   selectedHandIndex: number | null = null
+  eventLog: string[] = []
+  resultMessage: string | null = null
+  private cpuTurnDelayMs: number
+  private cpuTurnTask: Promise<void> | null = null
 
-  constructor(app: Application) {
+  constructor(app: Application, options: AppOptions = {}) {
     this.app = app
+    this.cpuTurnDelayMs = options.cpuTurnDelayMs ?? 0
   }
 
   /**
@@ -33,6 +43,8 @@ export class App {
   showInitialTable(gameState: GameState): void {
     this.gameState = gameState
     this.selectedHandIndex = null
+    this.eventLog = []
+    this.resultMessage = null
     this.renderTable()
   }
 
@@ -40,10 +52,13 @@ export class App {
     this.bridge = bridge
     this.humanPlayerIndex = humanPlayerIndex
     this.selectedHandIndex = null
+    this.eventLog = ['対局開始']
+    this.resultMessage = null
     this.refreshFromBridge()
 
     if (this.shouldDrawHumanTile()) {
       this.bridge.drawTile()
+      this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がツモ ${this.wallSummary()}`)
       this.refreshFromBridge()
     }
   }
@@ -67,6 +82,46 @@ export class App {
     return this.gameState.players[this.humanPlayerIndex].hand.length % 3 === 1
   }
 
+  private appendLog(message: string): void {
+    this.eventLog = [...this.eventLog.slice(-11), message]
+  }
+
+  private getPlayerName(playerIndex: PlayerIndex): string {
+    return this.bridge?.getPlayerName(playerIndex) ?? `P${playerIndex + 1}`
+  }
+
+  private formatTile(tile: Tile): string {
+    return tileToCuiCode(tile)
+  }
+
+  private wallSummary(): string {
+    const wallCount = this.bridge?.getWallCount() ?? this.gameState?.wall.length ?? 0
+    return `(山${wallCount})`
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => {
+      window.setTimeout(resolve, ms)
+    })
+  }
+
+  private finalizeGameIfNeeded(): void {
+    if (!this.bridge || !this.gameState || !this.bridge.isGameOver()) return
+
+    if (this.resultMessage) return
+
+    const bankruptPlayer = this.gameState.players.find(player => player.score <= 0)
+    if (bankruptPlayer) {
+      this.resultMessage = `${bankruptPlayer.name} が飛んで終局`
+    } else if (this.bridge.getWallCount() === 0) {
+      this.resultMessage = '山牌が尽きて終局'
+    } else {
+      this.resultMessage = '対局終了'
+    }
+    this.appendLog(this.resultMessage)
+    this.renderTable()
+  }
+
   private confirmSelectedTile(options: { riichi: boolean } = { riichi: false }): boolean {
     if (!this.bridge || !this.gameState || this.selectedHandIndex === null) return false
     if (!this.bridge.isCurrentPlayerHuman()) return false
@@ -77,10 +132,16 @@ export class App {
     if (options.riichi && !this.bridge.declareRiichi()) {
       return false
     }
+    if (options.riichi) {
+      this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} が立直`)
+    }
 
     const discarded = this.bridge.discardTile(tile)
     if (!discarded) return false
 
+    this.appendLog(
+      `${this.getPlayerName(this.humanPlayerIndex)} が ${this.formatTile(tile)} を打牌 ${this.wallSummary()}`
+    )
     this.selectedHandIndex = null
     this.advanceTurnLoop()
     return true
@@ -90,15 +151,63 @@ export class App {
     if (!this.bridge) return
 
     this.refreshFromBridge()
+    this.finalizeGameIfNeeded()
+
+    if (this.cpuTurnDelayMs > 0) {
+      if (!this.cpuTurnTask) {
+        this.cpuTurnTask = this.runCpuTurnsAsync().finally(() => {
+          this.cpuTurnTask = null
+        })
+      }
+      return
+    }
+
     while (!this.bridge.isGameOver() && this.bridge.isCurrentPlayerCpu()) {
-      this.bridge.executeCpuTurn()
+      const currentPlayer = this.bridge.getCurrentPlayerId() as PlayerIndex
+      const playerName = this.getPlayerName(currentPlayer)
+      this.appendLog(`${playerName} がツモ ${this.wallSummary()}`)
+      const discardedTile = this.bridge.executeCpuTurn()
       this.refreshFromBridge()
+      this.appendLog(`${playerName} が ${discardedTile} を打牌 ${this.wallSummary()}`)
+      this.finalizeGameIfNeeded()
     }
 
     if (this.shouldDrawHumanTile()) {
       this.bridge.drawTile()
+      this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がツモ ${this.wallSummary()}`)
       this.refreshFromBridge()
     }
+
+    this.finalizeGameIfNeeded()
+  }
+
+  private async runCpuTurnsAsync(): Promise<void> {
+    if (!this.bridge) return
+
+    while (!this.bridge.isGameOver() && this.bridge.isCurrentPlayerCpu()) {
+      const currentPlayer = this.bridge.getCurrentPlayerId() as PlayerIndex
+      const playerName = this.getPlayerName(currentPlayer)
+      this.appendLog(`${playerName} が思考中`)
+      this.renderTable()
+      await this.sleep(this.cpuTurnDelayMs)
+
+      const discardedTile = this.bridge.executeCpuTurn()
+      this.refreshFromBridge()
+      this.appendLog(`${playerName} が ${discardedTile} を打牌 ${this.wallSummary()}`)
+      this.finalizeGameIfNeeded()
+
+      if (!this.bridge.isGameOver() && this.bridge.isCurrentPlayerCpu()) {
+        await this.sleep(this.cpuTurnDelayMs)
+      }
+    }
+
+    if (this.shouldDrawHumanTile()) {
+      this.bridge.drawTile()
+      this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がツモ ${this.wallSummary()}`)
+      this.refreshFromBridge()
+    }
+
+    this.finalizeGameIfNeeded()
   }
 
   private handleHandTileTap(index: number): void {
@@ -116,6 +225,7 @@ export class App {
 
   private buildActionButtons(): TableActionButton[] {
     if (!this.bridge || !this.gameState) return []
+    if (this.bridge.isGameOver()) return []
 
     const shouldUseRiichiConfirm =
       this.bridge.isCurrentPlayerHuman() &&
@@ -154,6 +264,8 @@ export class App {
         this.handleHandTileTap(index)
       },
       actionButtons: this.buildActionButtons(),
+      eventLog: this.eventLog,
+      resultMessage: this.resultMessage,
     })
     this.app.stage.addChild(table)
   }

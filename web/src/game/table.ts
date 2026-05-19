@@ -37,6 +37,8 @@ export interface TableSceneOptions {
   interactiveHandPlayerId?: PlayerIndex | null
   onHandTileTap?: (index: number) => void
   actionButtons?: TableActionButton[]
+  eventLog?: string[]
+  resultMessage?: string | null
 }
 
 const makeText = (
@@ -140,6 +142,24 @@ const createInfoPanel = (state: GameState): Container => {
   tension.x = 266
   tension.y = 156
   panel.addChild(tension)
+
+  const lastDiscardLabel = makeText('直前打牌', 14, TEXT_MUTED_COLOR)
+  lastDiscardLabel.x = 188
+  lastDiscardLabel.y = 122
+  panel.addChild(lastDiscardLabel)
+
+  if (state.lastDiscard) {
+    const sprite = createTileGraphics(state.lastDiscard)
+    sprite.scale.set(0.72)
+    sprite.x = 236
+    sprite.y = 114
+    panel.addChild(sprite)
+  } else {
+    const empty = makeText('なし', 14, TEXT_MUTED_COLOR)
+    empty.x = 236
+    empty.y = 138
+    panel.addChild(empty)
+  }
 
   panel.x = TABLE_CENTER_X - 145
   panel.y = TABLE_CENTER_Y - 95
@@ -481,6 +501,65 @@ const createFooter = (): Container => {
   return footer
 }
 
+const createEventLogPanel = (eventLog: string[]): Container => {
+  const panel = new Container()
+  panel.label = 'event-log'
+
+  const bg = new Graphics()
+  bg
+    .roundRect(0, 0, 458, 116, 18)
+    .fill({ color: PANEL_BG_COLOR, alpha: 0.94 })
+    .stroke({ color: PANEL_BORDER_COLOR, width: 2 })
+  panel.addChild(bg)
+
+  const title = makeText('対局ログ', 15, TEXT_MUTED_COLOR, 'left', 'bold')
+  title.x = 18
+  title.y = 14
+  panel.addChild(title)
+
+  const visibleEntries = eventLog.slice(-4)
+  visibleEntries.forEach((entry, index) => {
+    const row = makeText(entry, 14, TEXT_PRIMARY_COLOR)
+    row.x = 18
+    row.y = 40 + index * 18
+    panel.addChild(row)
+  })
+
+  return panel
+}
+
+const createResultOverlay = (message: string): Container => {
+  const overlay = new Container()
+  overlay.label = 'result-overlay'
+
+  const shade = new Graphics()
+  shade.rect(0, 0, STAGE_WIDTH, STAGE_HEIGHT).fill({ color: 0x000000, alpha: 0.28 })
+  overlay.addChild(shade)
+
+  const panel = new Graphics()
+  panel
+    .roundRect(0, 0, 360, 132, 24)
+    .fill({ color: PANEL_BG_COLOR, alpha: 0.96 })
+    .stroke({ color: TURN_GLOW_COLOR, width: 3 })
+  panel.x = TABLE_CENTER_X - 180
+  panel.y = TABLE_CENTER_Y - 66
+  overlay.addChild(panel)
+
+  const title = makeText('終局', 26, TURN_GLOW_COLOR, 'center', 'bold')
+  title.anchor.set(0.5, 0)
+  title.x = TABLE_CENTER_X
+  title.y = TABLE_CENTER_Y - 40
+  overlay.addChild(title)
+
+  const detail = makeText(message, 18, TEXT_PRIMARY_COLOR, 'center', 'bold')
+  detail.anchor.set(0.5, 0)
+  detail.x = TABLE_CENTER_X
+  detail.y = TABLE_CENTER_Y + 6
+  overlay.addChild(detail)
+
+  return overlay
+}
+
 export const createTableScene = (state: GameState, options: TableSceneOptions = {}): Container => {
   const root = new Container()
   root.label = 'game-table'
@@ -493,7 +572,16 @@ export const createTableScene = (state: GameState, options: TableSceneOptions = 
   root.addChild(createLeftArea(state))
   root.addChild(createRightArea(state))
   root.addChild(createBottomArea(state, options))
+  root.addChild(createEventLogPanel(options.eventLog ?? []))
   root.addChild(createFooter())
+
+  const eventLog = root.getChildByLabel('event-log') as Container
+  eventLog.x = 320
+  eventLog.y = 608
+
+  if (options.resultMessage) {
+    root.addChild(createResultOverlay(options.resultMessage))
+  }
 
   return root
 }

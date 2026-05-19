@@ -4,7 +4,7 @@
 // PixiJS の WebGL レンダラは jsdom 環境では init できないため、
 // Application の init は呼ばずに stage だけモックする。
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { Container, Text } from 'pixi.js'
 import { App } from './App'
 import { initWithState } from './state'
@@ -58,6 +58,10 @@ const getActionButton = (stage: Container, key: string): Container => {
 }
 
 describe('App', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('showTableBackground は stage に背景を 1 つ追加する', () => {
     const stage = new Container()
     // 最低限 stage プロパティを持つ Application モックで足りる。
@@ -80,6 +84,21 @@ describe('App', () => {
     expect(grid.getChildByLabel('center-info')).toBeTruthy()
     expect(grid.getChildByLabel('score-badges')).toBeTruthy()
     expect(grid.getChildByLabel('bottom-area')).toBeTruthy()
+    expect(grid.getChildByLabel('event-log')).toBeTruthy()
+  })
+
+  it('lastDiscard=null のとき中央情報盤に「なし」を表示する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    const state = initWithState({ phase: 'game', lastDiscard: null })
+
+    app.showInitialTable(state)
+
+    const centerInfo = getTable(stage).getChildByLabel('center-info') as Container
+    const texts = centerInfo.children.filter((child): child is Text => child instanceof Text)
+
+    expect(texts.some(text => text.text === 'なし')).toBe(true)
   })
 
   it.each([
@@ -493,5 +512,184 @@ describe('App', () => {
     expect(riichiCount).toBe(1)
     expect(app.selectedHandIndex).toBe(0)
     expect(getActionButton(stage, 'riichi-discard')).toBeTruthy()
+  })
+
+  it('ゲームオーバー時は終局メッセージを出し action button を消す', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    let gameOver = false
+
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      discardTile: () => {
+        gameOver = true
+        return true
+      },
+      isGameOver: () => gameOver,
+      getWallCount: () => 0,
+    })
+
+    app.startGame(bridge, 0)
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+
+    expect(app.resultMessage).toBe('山牌が尽きて終局')
+    const table = stage.children[0] as Container
+    expect(table.getChildByLabel('result-overlay')).toBeTruthy()
+    const actionArea = getBottomArea(stage).getChildByLabel('action-area') as Container
+    expect(actionArea.getChildByLabel('action-button-discard')).toBeNull()
+  })
+
+  it('飛び終了時は終局理由に飛んだプレイヤー名を表示する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    let gameOver = false
+
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      discardTile: () => {
+        gameOver = true
+        return true
+      },
+      isGameOver: () => gameOver,
+      getWallCount: () => 12,
+      getPlayerScore: (idx: number) => (idx === 2 ? 0 : 25000),
+      getPlayerName: (idx: number) => ['あなた', 'CPU 南', 'CPU 西', 'CPU 北'][idx],
+    })
+
+    app.startGame(bridge, 0)
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+
+    expect(app.resultMessage).toBe('CPU 西 が飛んで終局')
+    expect(app.eventLog[app.eventLog.length - 1]).toBe('CPU 西 が飛んで終局')
+  })
+
+  it('山牌切れでも飛びでもないゲームオーバー時は汎用の終局文言を表示する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    let gameOver = false
+
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      discardTile: () => {
+        gameOver = true
+        return true
+      },
+      isGameOver: () => gameOver,
+      getWallCount: () => 12,
+      getPlayerScore: () => 25000,
+    })
+
+    app.startGame(bridge, 0)
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+
+    expect(app.resultMessage).toBe('対局終了')
+    expect(app.eventLog[app.eventLog.length - 1]).toBe('対局終了')
+  })
+
+  it('非同期 CPU ターン中に advanceTurnLoop を再入しても CPU 実行は重複しない', async () => {
+    vi.useFakeTimers()
+
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp, { cpuTurnDelayMs: 10 })
+
+    let currentPlayerId = 1
+    let cpuCount = 0
+    let drawCount = 0
+
+    const bridge = createBridgeMock({
+      drawTile: () => {
+        drawCount += 1
+        return true
+      },
+      getCurrentPlayerId: () => currentPlayerId,
+      isCurrentPlayerHuman: () => currentPlayerId === 0,
+      isCurrentPlayerCpu: () => currentPlayerId !== 0,
+      executeCpuTurn: () => {
+        cpuCount += 1
+        currentPlayerId = currentPlayerId === 3 ? 0 : ((currentPlayerId + 1) as 0 | 1 | 2 | 3)
+        return '5m'
+      },
+      getCurrentHandString: () =>
+        drawCount >= 1
+          ? '1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to hk'
+          : '1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to',
+    })
+
+    app.startGame(bridge, 0)
+
+    const internalApp = app as unknown as {
+      advanceTurnLoop: () => void
+      cpuTurnTask: Promise<void> | null
+    }
+    internalApp.advanceTurnLoop()
+    internalApp.advanceTurnLoop()
+
+    await vi.runAllTimersAsync()
+    await internalApp.cpuTurnTask
+
+    expect(cpuCount).toBe(3)
+    expect(drawCount).toBe(1)
+    expect(app.gameState?.currentTurn).toBe(0)
+  })
+
+  it('打牌ログに人間と CPU のイベントが積まれる', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    let currentPlayerId = 0
+    let drawCount = 0
+
+    const bridge = createBridgeMock({
+      drawTile: () => {
+        drawCount += 1
+        return true
+      },
+      discardTile: () => {
+        currentPlayerId = 1
+        return true
+      },
+      executeCpuTurn: () => {
+        currentPlayerId = currentPlayerId === 3 ? 0 : (currentPlayerId + 1)
+        return '5m'
+      },
+      getCurrentPlayerId: () => currentPlayerId,
+      isCurrentPlayerHuman: () => currentPlayerId === 0,
+      isCurrentPlayerCpu: () => currentPlayerId !== 0,
+      getCurrentHandString: () =>
+        currentPlayerId === 0 && drawCount >= 2
+          ? '1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to hk'
+          : '1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to',
+    })
+
+    app.startGame(bridge, 0)
+
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+
+    expect(app.eventLog.some(entry => entry.includes('あなた が 1m を打牌'))).toBe(true)
+    expect(app.eventLog.some(entry => entry.includes('CPU 南 が 5m を打牌'))).toBe(true)
+    expect(app.eventLog.some(entry => entry.includes('あなた がツモ'))).toBe(true)
+  })
+
+  it('eventLog は 12 件を上限に古い順から切り詰める', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    const appendLog = (app as unknown as { appendLog: (message: string) => void }).appendLog
+
+    for (let index = 1; index <= 14; index += 1) {
+      appendLog.call(app, `log-${index}`)
+    }
+
+    expect(app.eventLog).toHaveLength(12)
+    expect(app.eventLog[0]).toBe('log-3')
+    expect(app.eventLog[app.eventLog.length - 1]).toBe('log-14')
   })
 })
