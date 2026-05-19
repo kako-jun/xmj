@@ -122,8 +122,12 @@ impl Player {
     }
 
     /// 誠京麻雀の役満祝儀を支払う（放銃者）
+    ///
+    /// `subtract_score` の 0 クランプを意図的に回避してゼロサムを保証する。
+    /// 持ち点が祝儀額に満たない場合は **マイナス値を許容する**。
+    /// （誠京麻雀の世界観：トビ＝即敗北なので、ゼロ止めではなく素直に負債を計上する）
     pub fn pay_yakuman_tip(&mut self, amount: i32) {
-        self.subtract_score(amount);
+        self.score -= amount;
     }
 
     /// 誠京麻雀の役満祝儀を受け取る（和了者）
@@ -194,5 +198,28 @@ mod tests {
         assert_eq!(payer_delta + winner_delta, 0);
         assert_eq!(payer_delta, -tip);
         assert_eq!(winner_delta, tip);
+    }
+
+    /// 役満祝儀はマイナス点になっても 0 クランプしないことを保証する（ゼロサム維持）
+    #[test]
+    fn test_yakuman_tip_can_go_negative() {
+        let mut payer = Player::new(0, "Payer".to_string());
+        let mut receiver = Player::new(1, "Receiver".to_string());
+
+        // 持ち点を意図的に低くする
+        payer.score = 3000;
+        receiver.score = 25000;
+
+        let sum_before = payer.score + receiver.score;
+
+        payer.pay_yakuman_tip(8000);
+        receiver.receive_yakuman_tip(8000);
+
+        // payer は -5000（クランプされない）
+        assert_eq!(payer.score, -5000, "0 クランプされずにマイナスに突き抜ける");
+        assert_eq!(receiver.score, 33000, "receiver は 8000 増える");
+
+        // ゼロサム不変
+        assert_eq!(payer.score + receiver.score, sum_before, "ゼロサムが維持される");
     }
 }
