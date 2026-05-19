@@ -18,11 +18,13 @@ const removeLoading = (): void => {
 
 const main = async (): Promise<void> => {
   setLoadingProgress(0.1)
+  let canStartGame = true
 
   // Wasm を最初に読む。失敗してもゲームは描画したいので catch して続行。
   try {
     await initWasm()
   } catch (err) {
+    canStartGame = false
     console.warn('[xmj] Wasm 初期化に失敗しました。UI のみで起動します:', err)
   }
   setLoadingProgress(0.5)
@@ -44,12 +46,14 @@ const main = async (): Promise<void> => {
 
   const app = new App(pixiApp, {
     cpuTurnDelayMs: 280,
-    createBridge: () => WasmGameBridge.createHybrid('あなた', 0),
+    createBridge: canStartGame ? () => WasmGameBridge.createHybrid('あなた', 0) : null,
   })
   if (import.meta.env.DEV) {
     window.__xmjApp = app
   }
-  app.showTitleScene()
+  app.showTitleScene(
+    canStartGame ? null : 'Wasm 初期化に失敗したため、対局を開始できません。'
+  )
 
   setLoadingProgress(1)
   removeLoading()

@@ -62,6 +62,11 @@ const getActionButton = (stage: Container, key: string): Container => {
 const getSceneButton = (stage: Container, label: string): Container =>
   (stage.children[0] as Container).getChildByLabel(label) as Container
 
+const getSceneTexts = (stage: Container): Text[] =>
+  ((stage.children[0] as Container).children.filter(
+    (child): child is Text => child instanceof Text
+  ))
+
 describe('App', () => {
   afterEach(() => {
     vi.useRealTimers()
@@ -182,6 +187,22 @@ describe('App', () => {
     expect(getSceneButton(stage, 'title-start-button')).toBeTruthy()
   })
 
+  it('createBridge が無い title-scene は開始ボタンを無効化し、案内文を表示する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    app.showTitleScene('Wasm 初期化に失敗したため、対局を開始できません。')
+
+    const startButton = getSceneButton(stage, 'title-start-button')
+    expect(startButton.eventMode).not.toBe('static')
+    expect(
+      getSceneTexts(stage).some(text =>
+        text.text.includes('Wasm 初期化に失敗したため、対局を開始できません。')
+      )
+    ).toBe(true)
+  })
+
   it('showTitleScene のスタートボタンから新しい bridge を作って対局を始める', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
@@ -195,6 +216,25 @@ describe('App', () => {
     expect(createBridge).toHaveBeenCalledTimes(1)
     expect((stage.children[0] as Container).label).toBe('game-table')
     expect(app.bridge).not.toBe(null)
+  })
+
+  it('showTitleScene の開始処理で createBridge が例外を投げたときは title-scene に留まり理由を表示する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp, {
+      createBridge: () => {
+        throw new Error('boom')
+      },
+    })
+
+    app.showTitleScene()
+    getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
+
+    expect((stage.children[0] as Container).label).toBe('title-scene')
+    expect(app.bridge).toBe(null)
+    expect(
+      getSceneTexts(stage).some(text => text.text.includes('対局の初期化に失敗しました: boom'))
+    ).toBe(true)
   })
 
   it('立直中のプレイヤーだけ score badge に立直表示が出る', () => {

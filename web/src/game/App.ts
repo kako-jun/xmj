@@ -75,6 +75,7 @@ export class App {
     this.replaceStageRoot(
       createTitleScene({
         notice: this.titleNotice,
+        startEnabled: this.createBridge !== null,
         onStart: () => {
           this.startNewGame()
         },
@@ -345,7 +346,6 @@ export class App {
       },
       actionButtons: this.buildActionButtons(),
       eventLog: this.eventLog,
-      resultMessage: this.resultMessage,
     })
     this.replaceStageRoot(table)
   }
@@ -359,6 +359,7 @@ export class App {
   }
 
   private buildResultEntries(gameState: GameState): ResultEntry[] {
+    // 同点時の正式な順位規則は Rust core 側の API 整備後に再検討する。
     return [...gameState.players]
       .sort((a, b) => b.score - a.score || a.id - b.id)
       .map((player, index) => ({

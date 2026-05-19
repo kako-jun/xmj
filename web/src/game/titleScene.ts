@@ -33,9 +33,11 @@ const makeText = (
 interface TitleSceneOptions {
   onStart: () => void
   notice?: string | null
+  startEnabled?: boolean
 }
 
 export const createTitleScene = (options: TitleSceneOptions): Container => {
+  const startEnabled = options.startEnabled ?? true
   const root = new Container()
   root.label = 'title-scene'
 
@@ -89,19 +91,31 @@ export const createTitleScene = (options: TitleSceneOptions): Container => {
   const buttonBg = new Graphics()
   buttonBg
     .roundRect(0, 0, 288, 58, 18)
-    .fill({ color: 0x281608, alpha: 0.96 })
-    .stroke({ color: PANEL_ACCENT_COLOR, width: 3 })
+    .fill({ color: startEnabled ? 0x281608 : 0x2a2a2a, alpha: startEnabled ? 0.96 : 0.8 })
+    .stroke({
+      color: startEnabled ? PANEL_ACCENT_COLOR : TEXT_MUTED_COLOR,
+      width: 3,
+      alpha: startEnabled ? 1 : 0.5,
+    })
   startButton.addChild(buttonBg)
 
-  const buttonLabel = makeText('CPU 対戦スタート', 24, TEXT_PRIMARY_COLOR, 'center', 'bold')
+  const buttonLabel = makeText(
+    'CPU 対戦スタート',
+    24,
+    startEnabled ? TEXT_PRIMARY_COLOR : TEXT_MUTED_COLOR,
+    'center',
+    'bold'
+  )
   buttonLabel.anchor.set(0.5)
   buttonLabel.x = 144
   buttonLabel.y = 29
   startButton.addChild(buttonLabel)
 
-  startButton.eventMode = 'static'
-  startButton.cursor = 'pointer'
-  startButton.on('pointertap', options.onStart)
+  if (startEnabled) {
+    startButton.eventMode = 'static'
+    startButton.cursor = 'pointer'
+    startButton.on('pointertap', options.onStart)
+  }
   root.addChild(startButton)
 
   const notice = makeText(

@@ -39,7 +39,6 @@ export interface TableSceneOptions {
   onHandTileTap?: (index: number) => void
   actionButtons?: TableActionButton[]
   eventLog?: string[]
-  resultMessage?: string | null
 }
 
 const makeText = (
@@ -529,38 +528,6 @@ const createEventLogPanel = (eventLog: string[]): Container => {
   return panel
 }
 
-const createResultOverlay = (message: string): Container => {
-  const overlay = new Container()
-  overlay.label = 'result-overlay'
-
-  const shade = new Graphics()
-  shade.rect(0, 0, STAGE_WIDTH, STAGE_HEIGHT).fill({ color: 0x000000, alpha: 0.28 })
-  overlay.addChild(shade)
-
-  const panel = new Graphics()
-  panel
-    .roundRect(0, 0, 360, 132, 24)
-    .fill({ color: PANEL_BG_COLOR, alpha: 0.96 })
-    .stroke({ color: TURN_GLOW_COLOR, width: 3 })
-  panel.x = TABLE_CENTER_X - 180
-  panel.y = TABLE_CENTER_Y - 66
-  overlay.addChild(panel)
-
-  const title = makeText('終局', 26, TURN_GLOW_COLOR, 'center', 'bold')
-  title.anchor.set(0.5, 0)
-  title.x = TABLE_CENTER_X
-  title.y = TABLE_CENTER_Y - 40
-  overlay.addChild(title)
-
-  const detail = makeText(message, 18, TEXT_PRIMARY_COLOR, 'center', 'bold')
-  detail.anchor.set(0.5, 0)
-  detail.x = TABLE_CENTER_X
-  detail.y = TABLE_CENTER_Y + 6
-  overlay.addChild(detail)
-
-  return overlay
-}
-
 export const createTableScene = (state: GameState, options: TableSceneOptions = {}): Container => {
   const root = new Container()
   root.label = 'game-table'
@@ -579,10 +546,6 @@ export const createTableScene = (state: GameState, options: TableSceneOptions = 
   const eventLog = root.getChildByLabel('event-log') as Container
   eventLog.x = 320
   eventLog.y = 608
-
-  if (options.resultMessage) {
-    root.addChild(createResultOverlay(options.resultMessage))
-  }
 
   return root
 }

@@ -78,8 +78,10 @@
 - `web/src/game/titleScene.ts`: 「邪雀」ロゴ + `CPU 対戦スタート` ボタンの最小タイトル画面を追加
 - `web/src/game/resultScene.ts`: Rust/Wasm 現 API の範囲で終局理由、順位 / 点数一覧、`現 API では未取得` プレースホルダ、`再戦` / `タイトルへ` ボタンを持つ結果画面を追加
 - `web/src/main.ts`: 起動直後はタイトル画面を出し、対局開始時と再戦時だけ `WasmGameBridge.createHybrid('あなた', 0)` を呼ぶよう変更
+- Wasm 初期化に失敗した場合は `createBridge` を `null` のまま渡し、タイトル画面に失敗文言を出したうえで開始ボタンを無効化する
 - 対局終了時は bridge を破棄して結果画面へ移し、再戦では新しい bridge を作り直す。旧 bridge の遅延 CPU タスクが新局へ混線しないことも継続保証
-- テスト追加: タイトル開始、飛び終局から結果画面遷移、再戦・タイトル復帰を `App.test.ts` で固定
+- `web/src/game/table.ts` に残っていた旧 `result-overlay` 分岐は削除し、終局 UI は `result-scene` へ一本化
+- テスト追加: タイトル開始、起動失敗時の開始不可、初期化例外、飛び終局から結果画面遷移、再戦・タイトル復帰を `App.test.ts` で固定
 
 ## 残 Issue
 
