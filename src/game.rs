@@ -14,6 +14,10 @@ use std::collections::{HashMap, HashSet};
 ///   雀頭+面子1組で和了、タンヤオのみ判定
 /// - `EastWest`: 東西戦（クリア麻雀、『天』のチーム戦ルール）。東家+西家＝東チーム、
 ///   南家+北家＝西チーム。指定二翻役5種を先にチームとして全て揃えた方の勝利。
+/// - `Yamima`: 闇麻。プレイヤーは点棒 1000 点を支払って打牌を**裏向き（闇牌）**で
+///   河に置ける。他家からは「闇牌」（種類非公開）として見え、鳴き・ロンの対象に
+///   できない。ターンプレイヤーは点棒 500 点を支払って「照射」を宣言することで
+///   他家の闇牌を公開させられる。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameMode {
     Standard,
@@ -21,6 +25,7 @@ pub enum GameMode {
     Washizu,
     FiveTile,
     EastWest,
+    Yamima,
 }
 
 /// 東西戦（クリア麻雀）のチーム。
@@ -63,6 +68,10 @@ pub fn east_west_target_yaku() -> [Yaku; 5] {
 pub const SEIKYO_SEAT_FEE: i32 = 1000;
 pub const SEIKYO_YAKUMAN_TIP: i32 = 8000;
 
+/// 闇麻の固定額
+pub const YAMIMA_HIDDEN_COST: i32 = 1000;
+pub const YAMIMA_LIGHT_UP_COST: i32 = 500;
+
 #[derive(Debug, Clone)]
 pub struct Game {
     pub players: Vec<Player>,
@@ -72,7 +81,16 @@ pub struct Game {
     pub round: u32,
     pub dealer: usize,
     pub last_discard: Option<Tile>,
-    /// ゲームモード（Standard / Seikyo）
+    /// 直近の打牌が闇牌（Yamima ルール）かどうか。
+    ///
+    /// `discard_hidden_tile` で打牌したときに true、通常 `discard_tile` で false に
+    /// 戻る。`can_someone_win` / `can_pon` / `can_chi` / `can_kan` はこのフラグが
+    /// true のとき**全てロン・鳴き不可**として扱う（闇牌は鳴けない仕様）。
+    /// 照射（`light_up`）で実際に公開された後でも、`last_discard_hidden` は
+    /// 「最後の打牌時点での裏/表」を表すフィールドであり、過去ターンの照射成功で
+    /// 鳴きが復活する設計ではない（鳴きは原則直後 1 ターン以内）。
+    pub last_discard_hidden: bool,
+    /// ゲームモード（Standard / Seikyo / Washizu / FiveTile / EastWest / Yamima）
     pub mode: GameMode,
     /// 供託（誠京麻雀の場代合計）。和了者が回収・流局で持ち越し
     pub pot: i32,
@@ -125,6 +143,7 @@ impl Game {
             round: 1,
             dealer: 0,
             last_discard: None,
+            last_discard_hidden: false,
             mode,
             pot: 0,
             dealer_won_last: false,
@@ -333,11 +352,70 @@ impl Game {
     pub fn discard_tile(&mut self, tile: Tile) -> bool {
         if self.players[self.current_player].discard_tile(tile) {
             self.last_discard = Some(tile);
+            self.last_discard_hidden = false;
             self.next_player();
             true
         } else {
             false
         }
+    }
+
+    /// 闇牌打牌（Yamima ルール）。`Player::discard_hidden` を呼んで河に裏向きで置く。
+    ///
+    /// - `GameMode::Yamima` でないと no-op で false
+    /// - 現プレイヤーの点数が 1000 未満なら false（`Player::discard_hidden` 内でも検査）
+    /// - 手牌に `tile` が無ければ false
+    /// - 成功時: 1000 点減 + 河に闇牌追加 + `last_discard_hidden=true` + 次の手番へ進む
+    ///
+    /// `last_discard` には実体牌をセットするが、`last_discard_hidden` が true の間は
+    /// `can_someone_win` / `can_pon` / `can_chi` / `can_kan` が全て false を返す（鳴き不可）。
+    /// 照射で公開してもこのフラグは戻らない（鳴きの再開ではなく河の可視化のみ）。
+    pub fn discard_hidden_tile(&mut self, tile: Tile) -> bool {
+        if self.mode != GameMode::Yamima {
+            return false;
+        }
+        if !self.players[self.current_player].discard_hidden(tile) {
+            return false;
+        }
+        self.last_discard = Some(tile);
+        self.last_discard_hidden = true;
+        self.next_player();
+        true
+    }
+
+    /// 照射（Yamima ルール）。観測者が 500 点支払って対象の闇牌を公開させる。
+    ///
+    /// - `GameMode::Yamima` でないと None
+    /// - `observer_idx` / `target_idx` の範囲外なら None
+    /// - 観測者の点数が 500 未満なら None
+    /// - 対象 discard が既に公開済（is_hidden==false）なら None
+    /// - 成功時: 観測者から 500 点減 + 対象の `is_hidden=false` に書き換え + 実体牌を返す
+    ///
+    /// 仕様メモ: 「照射するだけで必ず公開される」運用。空振り（外れ）はなく、
+    /// 失敗するのは「点数不足」「対象 index 不正」「既に公開済」のみ。
+    pub fn light_up(
+        &mut self,
+        observer_idx: usize,
+        target_idx: usize,
+        discard_idx: usize,
+    ) -> Option<Tile> {
+        if self.mode != GameMode::Yamima {
+            return None;
+        }
+        if observer_idx >= self.players.len() || target_idx >= self.players.len() {
+            return None;
+        }
+        // 自分で自分の闇牌を照射するのは無効（点棒だけ焼く操作になる）
+        if observer_idx == target_idx {
+            return None;
+        }
+        if self.players[observer_idx].score < YAMIMA_LIGHT_UP_COST {
+            return None;
+        }
+        // 先に公開を試みる（失敗したら点数は引かない）
+        let revealed = self.players[target_idx].reveal_discard(discard_idx)?;
+        self.players[observer_idx].subtract_score(YAMIMA_LIGHT_UP_COST);
+        Some(revealed)
     }
 
     pub fn next_player(&mut self) {
@@ -353,6 +431,12 @@ impl Game {
     }
 
     pub fn can_someone_win(&self, tile: &Tile) -> Vec<usize> {
+        // Yamima: `last_discard` が闇牌（裏向き）のときはロン不可。先に照射で公開してから
+        // 改めて判定する仕様。引数 `tile` は呼び出し側が `last_discard` と同じ値を渡す前提で
+        // 利用するため、`last_discard_hidden` のみで遮断してよい。
+        if self.last_discard_hidden {
+            return Vec::new();
+        }
         let mut winners = Vec::new();
         for (i, player) in self.players.iter().enumerate() {
             if i == self.current_player {
@@ -372,6 +456,10 @@ impl Game {
     /// チー可能かチェック（下家のみ）
     pub fn can_chi(&self, player_idx: usize) -> bool {
         if self.last_discard.is_none() {
+            return false;
+        }
+        // Yamima: 闇牌はチー不可
+        if self.last_discard_hidden {
             return false;
         }
 
@@ -424,6 +512,10 @@ impl Game {
         if self.last_discard.is_none() || player_idx == self.current_player {
             return false;
         }
+        // Yamima: 闇牌はポン不可
+        if self.last_discard_hidden {
+            return false;
+        }
 
         let tile = self.last_discard.unwrap();
         let hand = &self.players[player_idx].hand;
@@ -436,6 +528,10 @@ impl Game {
     /// カン可能かチェック（明槓）
     pub fn can_kan(&self, player_idx: usize) -> bool {
         if self.last_discard.is_none() || player_idx == self.current_player {
+            return false;
+        }
+        // Yamima: 闇牌は明槓不可
+        if self.last_discard_hidden {
             return false;
         }
 
@@ -1198,5 +1294,192 @@ mod tests {
         assert!(targets.contains(&Yaku::Toitoi));
         assert!(targets.contains(&Yaku::Chanta));
         assert!(targets.contains(&Yaku::Honroutou));
+    }
+
+    // ========================================
+    // Yamima（闇麻）テスト
+    // ========================================
+
+    fn yamima_names() -> Vec<String> {
+        vec![
+            "P1".to_string(),
+            "P2".to_string(),
+            "P3".to_string(),
+            "P4".to_string(),
+        ]
+    }
+
+    /// Yamima モードで闇牌打牌すると last_discard_hidden=true、点数が 1000 減る。
+    #[test]
+    fn test_discard_hidden_tile_in_yamima() {
+        let mut game = Game::new_with_mode(yamima_names(), GameMode::Yamima);
+        let current = game.current_player;
+        let tile = game.players[current].hand.get_tiles()[0];
+        let score_before = game.players[current].score;
+
+        assert!(game.discard_hidden_tile(tile));
+        assert_eq!(game.players[current].score, score_before - YAMIMA_HIDDEN_COST);
+        assert!(game.last_discard_hidden, "闇牌打牌後は last_discard_hidden=true");
+        assert_eq!(game.last_discard, Some(tile));
+        // 次プレイヤーへ進んでいる
+        assert_eq!(game.current_player, (current + 1) % 4);
+    }
+
+    /// Yamima 以外のモードでは discard_hidden_tile は no-op で false。
+    #[test]
+    fn test_discard_hidden_tile_no_op_in_other_modes() {
+        let mut game = Game::new(yamima_names());
+        let current = game.current_player;
+        let tile = game.players[current].hand.get_tiles()[0];
+
+        assert!(!game.discard_hidden_tile(tile), "Standard では闇牌打牌不可");
+        assert!(!game.last_discard_hidden);
+    }
+
+    /// 通常 discard_tile を呼ぶと last_discard_hidden が false に戻る。
+    #[test]
+    fn test_discard_tile_clears_hidden_flag() {
+        let mut game = Game::new_with_mode(yamima_names(), GameMode::Yamima);
+        // 直接フラグを true にしてから通常打牌
+        game.last_discard_hidden = true;
+        let current = game.current_player;
+        let tile = game.players[current].hand.get_tiles()[0];
+
+        assert!(game.discard_tile(tile));
+        assert!(!game.last_discard_hidden, "通常打牌で false に戻る");
+    }
+
+    /// 闇牌に対する can_pon は false（鳴き不可）。
+    #[test]
+    fn test_can_pon_returns_false_on_hidden_discard() {
+        let mut game = Game::new_with_mode(yamima_names(), GameMode::Yamima);
+        // 強制的に「他家が手番、闇牌打牌直後、相手にポンできる牌がある」状態を作る
+        let tile = Tile::new_number(Suit::Man, 5, false);
+        // player 1 の手牌に同じ牌 2 枚を入れる
+        game.players[1].hand = crate::hand::Hand::new();
+        game.players[1].hand.add_tile(tile);
+        game.players[1].hand.add_tile(tile);
+        game.last_discard = Some(tile);
+        game.last_discard_hidden = true;
+        game.current_player = 0;
+
+        assert!(!game.can_pon(1), "闇牌はポン不可");
+
+        // フラグを下ろせばポン可能になる（リグレッション防止）
+        game.last_discard_hidden = false;
+        assert!(game.can_pon(1), "通常打牌ならポン可能");
+    }
+
+    /// 闇牌に対する can_kan / can_chi も false。
+    #[test]
+    fn test_can_kan_and_chi_return_false_on_hidden_discard() {
+        let mut game = Game::new_with_mode(yamima_names(), GameMode::Yamima);
+        let tile = Tile::new_number(Suit::Pin, 5, false);
+        game.players[1].hand = crate::hand::Hand::new();
+        for _ in 0..3 {
+            game.players[1].hand.add_tile(tile);
+        }
+        // チー対象も仕込む（下家パターン: 4p, 6p を持つ）
+        game.players[3].hand = crate::hand::Hand::new();
+        game.players[3].hand.add_tile(Tile::new_number(Suit::Pin, 4, false));
+        game.players[3].hand.add_tile(Tile::new_number(Suit::Pin, 6, false));
+
+        game.last_discard = Some(tile);
+        game.last_discard_hidden = true;
+        game.current_player = 0;
+
+        assert!(!game.can_kan(1), "闇牌は明槓不可");
+        // current_player=0 の下家 = 3
+        assert!(!game.can_chi(3), "闇牌はチー不可");
+    }
+
+    /// 闇牌に対する can_someone_win は常に空ベクタ（ロン不可）。
+    #[test]
+    fn test_can_someone_win_returns_empty_on_hidden_discard() {
+        let mut game = Game::new_with_mode(yamima_names(), GameMode::Yamima);
+        let tile = Tile::new_number(Suit::Sou, 1, false);
+        game.last_discard = Some(tile);
+        game.last_discard_hidden = true;
+        game.current_player = 0;
+
+        assert!(
+            game.can_someone_win(&tile).is_empty(),
+            "闇牌に対してロン宣言は不可（先に照射が必要）"
+        );
+    }
+
+    /// 照射で 500 点支払い、対象の闇牌が公開されて tile が返る。
+    #[test]
+    fn test_light_up_reveals_and_costs_500() {
+        let mut game = Game::new_with_mode(yamima_names(), GameMode::Yamima);
+        let current = game.current_player;
+        let tile = game.players[current].hand.get_tiles()[0];
+        assert!(game.discard_hidden_tile(tile)); // current が闇牌打牌
+        // current は元の current_player、闇牌は players[current].discards[0]
+        let observer = (current + 1) % 4; // 次プレイヤー（current_player になっている）
+        let score_before = game.players[observer].score;
+
+        let revealed = game.light_up(observer, current, 0);
+        assert_eq!(revealed, Some(tile));
+        assert_eq!(
+            game.players[observer].score,
+            score_before - YAMIMA_LIGHT_UP_COST,
+            "観測者から 500 点徴収"
+        );
+        assert!(
+            !game.players[current].discards[0].is_hidden,
+            "対象の河が公開される"
+        );
+    }
+
+    /// 既に公開済の河を照射しても None（無効）。点数も引かない。
+    #[test]
+    fn test_light_up_fails_on_already_revealed() {
+        let mut game = Game::new_with_mode(yamima_names(), GameMode::Yamima);
+        let current = game.current_player;
+        let tile = game.players[current].hand.get_tiles()[0];
+        assert!(game.discard_tile(tile)); // 通常打牌（公開状態）
+        let observer = (current + 1) % 4;
+        let score_before = game.players[observer].score;
+
+        assert_eq!(
+            game.light_up(observer, current, 0),
+            None,
+            "公開済は照射対象外"
+        );
+        assert_eq!(
+            game.players[observer].score, score_before,
+            "失敗時は点数を引かない"
+        );
+    }
+
+    /// 観測者の点数が 500 未満なら照射不可（None）。
+    #[test]
+    fn test_light_up_fails_when_observer_score_below_500() {
+        let mut game = Game::new_with_mode(yamima_names(), GameMode::Yamima);
+        let current = game.current_player;
+        let tile = game.players[current].hand.get_tiles()[0];
+        assert!(game.discard_hidden_tile(tile));
+        let observer = (current + 1) % 4;
+        game.players[observer].score = 499;
+
+        assert_eq!(game.light_up(observer, current, 0), None);
+        assert_eq!(game.players[observer].score, 499, "点数据え置き");
+        assert!(
+            game.players[current].discards[0].is_hidden,
+            "対象は闇牌のまま"
+        );
+    }
+
+    /// Yamima 以外では light_up は no-op で None。
+    #[test]
+    fn test_light_up_no_op_in_other_modes() {
+        let mut game = Game::new(yamima_names());
+        // 強引に Discard を仕込む（is_hidden=true のものを置く）
+        use crate::player::Discard;
+        let tile = Tile::new_number(Suit::Man, 1, false);
+        game.players[0].discards.push(Discard { tile, is_hidden: true });
+
+        assert_eq!(game.light_up(1, 0, 0), None, "Standard では照射不可");
     }
 }

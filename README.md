@@ -56,6 +56,9 @@ cargo run -- --mode five-tile
 
 # 東西戦（クリア麻雀、『天』チーム戦）
 cargo run -- --mode east-west
+
+# 闇麻（闇牌・照射）
+cargo run -- --mode yamima
 ```
 
 ゲームが起動したら、手牌から打牌する牌を入力してください:
@@ -68,6 +71,7 @@ cargo run -- --mode east-west
 - 数牌: `1m`～`9m`（萬子）、`1p`～`9p`（筒子）、`1s`～`9s`（索子）
 - 赤ドラ: `5mr`, `5pr`, `5sr`
 - 字牌: `to`（東）, `na`（南）, `sa`（西）, `pe`（北）, `hk`（白）, `ht`（発）, `cn`（中）
+- 闇麻モード限定: `?` プレフィックスで闇牌打牌（例: `?1m` で 1m を裏向きで河に置く、1000 点支払い）
 
 ### Web版
 
@@ -147,6 +151,15 @@ python3 -m http.server 8000
   - ✅ CLI: ゲーム状態に「東チーム: [✓三色同順, _一気通貫, ...]」進捗を表示、勝敗成立時に終了
   - 🚧 実際の役判定（chanta / honroutou 等）から `record_team_yaku` への自動配線は follow-up。現状は API のみ提供
 
+- ✅ **闇麻** (`--mode yamima`): 闇牌（裏向き打牌）+ 照射ルール
+  - ✅ 闇牌打牌: `Player::discard_hidden` / `Game::discard_hidden_tile` で 1000 点支払って裏向き河に追加
+  - ✅ 照射 API: `Game::light_up(observer, target, idx)` で 500 点支払って闇牌を公開
+  - ✅ 河構造拡張: `Player.discards: Vec<Discard>`（tile + is_hidden）。`discards_tiles()` で Tile のみ抽出可
+  - ✅ 鳴き・ロン制限: `last_discard_hidden=true` の間は `can_pon`/`can_chi`/`can_kan`/`can_someone_win` 全て false
+  - ✅ CLI: 打牌入力に `?` プレフィックス（例 `?1m`）。闇牌は河に `??` で表示
+  - 🚧 照射 CLI コマンド未実装（API のみ提供）。Web UI 配線も follow-up
+  - 🚧 闇牌対象の鳴き・ロンは仕様上不可（先に照射が必要、照射成立後の鳴き再開は別仕様）
+
 #### Limitations（誠京麻雀の現状）
 
 PR #21 時点の実装は API レベル完備 + CLI からの最低限の動線確認まで。以下は未配線で follow-up Issue で対応予定:
@@ -159,7 +172,6 @@ PR #21 時点の実装は API レベル完備 + CLI からの最低限の動線�
 
 ### 実装予定
 
-- 🚧 **闇麻**: 闇牌、照射
 - 🚧 **リアルタイム麻雀**: 同時打牌、早い者勝ちの鳴き
 
 ## プロジェクト構成
