@@ -481,3 +481,81 @@ PR #19 時点では「Team / Yaku enum + API + CLI 表示 + テスト」まで�
   「点数で勝ったがクリアで負け」のような副次表示は CLI には現状無い
 - **Web UI**: WASM 側は follow-up
 
+### Yamima（闇麻 / 闇牌・照射）
+
+| 項目     | 値          | 内容                                                                  |
+| -------- | ----------- | --------------------------------------------------------------------- |
+| 闇牌打牌 | **1000点**  | 打牌を裏向き（種類非公開）で河に置く。他家からは `??` として見える    |
+| 照射     | **500点**   | 観測者が支払って他家の闇牌を 1 枚公開する（必ず公開、空振りなし）     |
+| 鳴き・ロン | **闇牌は全て不可** | 照射で公開してからでないと判定できない（仕様）                  |
+| 和了判定 | 実体牌として扱う | フリテン判定で河を走査する際は `Player::discards_tiles()` を使う |
+
+闇牌は「自分の打牌が他家から読まれることを 1000 点で買い切る」防御的アクション、
+照射は「相手の不審な打牌に 500 点を払って確証を得る」攻撃的アクション。
+点数の出入りが牌譜に対称に乗るので、初心者でも「相手が闇牌を切ったらこちらは照射した方が得か？」の
+シンプルなトレードオフで戦える設計。
+
+#### 河の構造変更（破壊的変更）
+
+`Player.discards` の型を **`Vec<Tile>` → `Vec<Discard>`** に変更。
+`Discard { tile: Tile, is_hidden: bool }` で構成され、照射成立時に
+`is_hidden` だけが false に書き換わる。`tile` は常に実体牌として保存される。
+
+互換性のため `Player::discards_tiles() -> Vec<Tile>` を追加し、
+既存の「河を Tile のリストとして見たい」読み出し（フリテン判定など）はこのラッパー経由で吸収する。
+`get_discards_string()` は闇牌を `??` でマスクして表示する。
+
+#### 現状の実装ステータス
+
+| 機能              | 実装レベル                          | follow-up                                  |
+| ----------------- | ----------------------------------- | ------------------------------------------ |
+| Discard 構造体    | API（`Vec<Discard>`）               | -                                          |
+| 闇牌打牌          | API + CLI `?` プレフィックス         | -                                          |
+| 照射              | API（`Game::light_up`）             | CLI コマンド配線                           |
+| 鳴き・ロンのゲート | `last_discard_hidden` で 4 関数を制御 | -                                          |
+| 河表示            | `??` マスク表示                      | Web UI（PixiJS 側の裏向き描画）             |
+
+#### API（`src/player.rs`）
+
+- `Discard { tile, is_hidden }` — 河の 1 要素
+- `Player.discards: Vec<Discard>` — 河（破壊的変更）
+- `Player::discard_hidden(tile) -> bool` — 1000 点支払って闇牌で河に追加
+- `Player::reveal_discard(idx) -> Option<Tile>` — 該当河を公開（既公開なら None）
+- `Player::discards_tiles() -> Vec<Tile>` — Tile のみ抽出（互換ラッパー）
+- `Player::get_discards_string()` — 闇牌を `??` で表示
+
+#### API（`src/game.rs`）
+
+- `GameMode::Yamima` — モード識別子
+- `YAMIMA_HIDDEN_COST = 1000` / `YAMIMA_LIGHT_UP_COST = 500`
+- `Game.last_discard_hidden: bool` — 直近打牌が闇牌か（鳴き・ロンの可否判定で参照）
+- `Game::discard_hidden_tile(tile) -> bool` — 闇牌打牌 + `next_player`
+- `Game::light_up(observer, target, idx) -> Option<Tile>` — 照射成立で 500 点支払い + 公開
+- `Game::can_someone_win` / `can_pon` / `can_chi` / `can_kan` — `last_discard_hidden==true` なら必ず false / 空
+
+#### CLI
+
+```bash
+cargo run -- --mode yamima
+```
+
+起動時に「ルール: 闇麻（闇牌 1000 / 照射 500）」と説明が表示される。
+打牌入力で `?` プレフィックスを付けると闇牌打牌:
+
+```
+打牌する牌を入力してください (例: 1m / 闇牌は ?1m): ?6m
+[闇麻] 闇牌打牌（1000 点支払い）
+ 親 あなた (24000点): 3m 9m 1p ...
+  河: ??
+```
+
+#### Limitations
+
+PR #18 時点では「Discard 構造 + 闇牌・照射 API + CLI 闇牌打牌 + 鳴きゲート」までの最低限の動線。以下は follow-up:
+
+- **照射 CLI コマンド未実装**: 照射は API のみ提供。CLI からの UX（誰のどの河を照射するかの対話）は未配線
+- **闇牌対象の鳴き・ロンは仕様上不可**: 「先に照射してから判定」が運用ルール。照射後に
+  鳴き再開する仕様（`last_discard_hidden` を後追いで下ろす）は将来検討
+- **Web UI**: PixiJS 側で `??` 裏向き牌の描画は未対応
+- **AI 配線**: CPU は闇牌打牌・照射を判断しない（常に通常打牌）
+

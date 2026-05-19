@@ -26,6 +26,12 @@ fn main() {
             println!("  西チーム = 南家(座席1) + 北家(座席3)");
             println!("  チームとして指定二翻役5種を先に全部揃えたチームの勝利");
         }
+        GameMode::Yamima => {
+            println!("ルール: 闇麻（闇牌 1000 / 照射 500）");
+            println!("  打牌入力に `?` プレフィックスを付けると闇牌（裏向き）打牌");
+            println!("  例: `?1m` で 1m を闇牌として河に置く（1000 点支払い）");
+            println!("  闇牌は他家からはロン・鳴き不可。照射 API で公開できる");
+        }
     }
 
     let player_names = vec![
@@ -111,6 +117,7 @@ fn parse_mode_from_args() -> GameMode {
             "standard" => GameMode::Standard,
             "five-tile" | "five_tile" | "fivetile" => GameMode::FiveTile,
             "east-west" | "east_west" | "eastwest" => GameMode::EastWest,
+            "yamima" => GameMode::Yamima,
             other => {
                 eprintln!("[warn] 未知のモード '{}'、standard で起動します", other);
                 GameMode::Standard
@@ -214,8 +221,13 @@ fn handle_player_turn(game: &mut Game) {
     }
 
     // 打牌選択
+    let yamima = game.mode == GameMode::Yamima;
     loop {
-        print!("打牌する牌を入力してください (例: 1m, 5p, to): ");
+        if yamima {
+            print!("打牌する牌を入力してください (例: 1m / 闇牌は ?1m): ");
+        } else {
+            print!("打牌する牌を入力してください (例: 1m, 5p, to): ");
+        }
         io::stdout().flush().unwrap();
 
         let mut input = String::new();
@@ -226,6 +238,26 @@ fn handle_player_turn(game: &mut Game) {
         if input.is_empty() {
             // EOF やパイプ終了時はループから抜ける（実機 1 ターン検証用）
             return;
+        }
+
+        // Yamima ルール: `?` プレフィックスで闇牌打牌
+        if yamima {
+            if let Some(rest) = input.strip_prefix('?') {
+                if let Some(tile) = Tile::from_string(rest) {
+                    if game.discard_hidden_tile(tile) {
+                        println!("[闇麻] 闇牌打牌（1000 点支払い）");
+                        break;
+                    } else {
+                        println!(
+                            "闇牌打牌に失敗しました（手牌にないか点棒不足、または非 Yamima モード）"
+                        );
+                        continue;
+                    }
+                } else {
+                    println!("無効な牌です");
+                    continue;
+                }
+            }
         }
 
         if let Some(tile) = Tile::from_string(input) {
