@@ -63,7 +63,7 @@ export const parseFormattedGameState = (
     if (!match) continue
 
     const marker = match[1]
-    const name = match[3]
+    const name = match[3].trim()
     const score = Number(match[4])
     const hand = parseTileList(match[5] ?? '')
     const discardsLine = lines[i + 1]?.trim()
@@ -109,6 +109,7 @@ export const createGameStateFromBridge = (
   humanPlayerIndex: PlayerIndex = 0
 ): GameState => {
   const base = parseFormattedGameState(bridge.getGameStateJson(), humanPlayerIndex)
+  const currentPlayerId = bridge.getCurrentPlayerId() as PlayerIndex
   const players = base.players.map((player, idx) => ({
     ...player,
     score: bridge.getPlayerScore(idx),
@@ -117,15 +118,17 @@ export const createGameStateFromBridge = (
     isRiichi: bridge.isPlayerRiichi(idx),
   })) as GameState['players']
 
-  players[humanPlayerIndex] = {
-    ...players[humanPlayerIndex],
-    hand: parseTileList(bridge.getCurrentHandString()),
-    isCPU: false,
+  if (currentPlayerId === humanPlayerIndex) {
+    players[humanPlayerIndex] = {
+      ...players[humanPlayerIndex],
+      hand: parseTileList(bridge.getCurrentHandString()),
+      isCPU: false,
+    }
   }
 
   return {
     ...base,
-    currentTurn: bridge.getCurrentPlayerId() as PlayerIndex,
+    currentTurn: currentPlayerId,
     wall: Array.from({ length: bridge.getWallCount() }, () => ({ suit: 'man', value: 1 })),
     doraIndicators: parseTileList(bridge.getDoraIndicators()),
     players,

@@ -71,9 +71,11 @@ describe('App', () => {
     const app = new App(fakeApp)
 
     app.showInitialTable(initWithState({ phase: 'game', currentTurn: 0 }))
+    const firstTable = stage.children[0] as Container
     app.showInitialTable(initWithState({ phase: 'game', currentTurn: 2 }))
 
     expect(stage.children.length).toBe(1)
+    expect(firstTable.destroyed).toBe(true)
     expect((stage.children[0] as Container).label).toBe('game-table')
   })
 

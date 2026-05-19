@@ -45,6 +45,13 @@
 - 山牌残数、ドラ表示牌、東1局表示、空の河スロット、持ち点/手番表示まで初期卓に反映
 - テスト追加: 卓構造スモーク、整形文字列からの初期局面変換
 
+### Issue #5 フォローアップ — レビュー指摘対応
+
+- `createGameStateFromBridge()` は `getCurrentHandString()` を「現在手番が人間席のときだけ」適用するよう修正
+- これにより、人間席が非手番の局面で CPU の current hand が誤って人間席へ流れ込むバグを防止
+- `App.showInitialTable()` は再描画時に旧卓 `Container` を `destroy({ children: true })` まで行い、リークしにくい形へ変更
+- `DESIGN.md` を現行 PixiJS 初期卓表示に合わせて更新し、戦闘卓は暗いフェルト卓、gradient / glass は DOM overlay 用、牌は vector + text glyph という方針を明文化
+
 ## 残 Issue
 
 | Issue | 内容 | 主要成果物 |
@@ -79,13 +86,12 @@ WebGL 込みの E2E は Playwright を別 Issue で導入予定。
 
 ### DESIGN.md との関係
 
-`DESIGN.md` は旧 HTML プロトタイプ向けに書かれた文書で、"Don't: Use tile graphics or images" は当時の方針 (CSS のみで牌を描画する) を指す。PixiJS 版では:
+`DESIGN.md` は旧 HTML プロトタイプ前提の記述が残っていたため、PixiJS 初期卓に合わせて更新した。現在の扱いは以下:
 
-- ビットマップアセットは使わない (DESIGN.md の意図を尊重)
-- 牌は Graphics (角丸長方形) + Text (漢字・数字) で構成
-- グラスモーフィズム等の UI コンポーネント規定は GameScene 実装時に再評価
-
-DESIGN.md は今後 Web 版仕様を更新する別 Issue で改訂する。
+- ビットマップアセットは使わない
+- 牌は Graphics (角丸長方形) + Text glyph で構成
+- 戦闘卓は dark felt + brass + crimson vignette
+- gradient / glass は loading・title・result など DOM overlay で使う
 
 ## CI / 開発フロー
 

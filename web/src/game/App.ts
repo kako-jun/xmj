@@ -11,8 +11,7 @@ export class App {
   }
 
   /**
-   * 麻雀卓の背景を描画する。Issue #2 では「緑画面が出る」ことが完了条件。
-   * Issue #5 で実 GameScene に置き換える。
+   * Wasm 卓の生成に失敗したときのフォールバックとして、単色の卓背景だけを描画する。
    */
   showTableBackground(): void {
     const bg = new Graphics()
@@ -21,7 +20,10 @@ export class App {
   }
 
   showInitialTable(gameState: GameState): void {
-    this.app.stage.removeChildren()
+    const previousChildren = this.app.stage.removeChildren()
+    previousChildren.forEach(child => {
+      child.destroy({ children: true })
+    })
     const table = createTableScene(gameState)
     this.app.stage.addChild(table)
   }

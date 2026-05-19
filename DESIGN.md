@@ -4,27 +4,29 @@ xmj (Xtreme Mahjong) — Design System
 
 ## 1. Visual Theme & Atmosphere
 
-Modern glassmorphism with gradient backgrounds. Each page has a distinct color identity but shares a common design language: frosted glass panels, bold gradients, and text-based tile rendering. The Web UI feels like a stylish arcade cabinet; the CUI feels like a retro terminal session.
+The current Web battle view is a PixiJS table scene with a cinematic, pressure-heavy look: dark felt, brass-like trims, and a crimson vignette around the table. DOM overlays such as loading or future menus may still use gradients and glass cards, but the main match surface itself is rendered inside the canvas.
 
-Dual interfaces: Web (HTML/CSS/WASM) and CUI (Rust terminal output). Both use text-based tile notation — no graphical tile assets.
+Dual interfaces remain: Web (PixiJS + WASM) and CUI (Rust terminal output). The important rule is unchanged: no bitmap tile assets. Tiles are rendered from vector rectangles plus text glyphs so the look stays lightweight and programmable.
 
 ## 2. Color Palette & Roles
 
-### Main Battle (index.html) — Purple Gradient
+### Main Battle (PixiJS table) — Dark Felt + Crimson Vignette
 
 | Color     | Hex       | Usage                     |
 | --------- | --------- | ------------------------- |
-| Gradient  | `#667eea → #764ba2` | Page background     |
-| Emerald   | `#10b981` | Primary button (CTA)      |
-| Indigo    | `#6366f1` | Secondary button          |
-| Red       | `#ef4444` | Danger button             |
-| Amber     | `#f59e0b` | Warning button            |
+| Backdrop  | `#050505` | Outer stage background    |
+| Felt      | `#003300` | Main table surface        |
+| Inner Felt| `#0d2f1d` | Center information area   |
+| Brass     | `#8f6a2f` / `#d4b06a` | Frames, accents |
+| Crimson   | `#7a0f16` | Tension glow / vignette   |
+| Ivory     | `#faf3e0` | Tile face                 |
+| Danger    | `#c93a3a` | Riichi / tension text     |
 
-### Hybrid Mode (hybrid.html) — Dark Navy
+### Hybrid / Legacy DOM screens — Gradient + Glass
 
 | Color     | Hex       | Usage                     |
 | --------- | --------- | ------------------------- |
-| Gradient  | `#1a1a2e → #16213e` | Page background    |
+| Gradient  | `#1a1a2e → #16213e` | Background for legacy/overlay screens |
 | Sky Blue  | `#4facfe` | Primary elements, CPU log |
 | Cyan      | `#00f2fe` | Active highlights         |
 | Title     | `#f093fb → #f5576c` | Title text gradient |
@@ -51,7 +53,7 @@ Text shadow glow: `0 0 10px #0f0` on primary text.
 | Context          | Family                                             |
 | ---------------- | -------------------------------------------------- |
 | UI text          | `"Segoe UI", Tahoma, Geneva, Verdana, sans-serif`  |
-| Tiles & data     | `"Courier New", monospace`                         |
+| Tiles & data     | Sans-serif glyph text inside vector tiles          |
 
 ### Type Scale
 
@@ -62,7 +64,7 @@ Text shadow glow: `0 0 10px #0f0` on primary text.
 | Subsection        | 1.1–1.2em | 400 |                          |
 | Body/card text    | 1rem    | 400    |                          |
 | Small labels      | 0.9rem  | 400    |                          |
-| Tile display      | 1.1–1.3rem | 400 | Monospace, letter-spacing 0.3rem |
+| Tile display      | 1.1–1.3rem | 700 | Vector tile + text glyph |
 
 ### Text Effects
 
@@ -73,6 +75,8 @@ Text shadow glow: `0 0 10px #0f0` on primary text.
 ## 4. Component Stylings
 
 ### Glass Cards
+
+Use these for DOM overlays, loading states, or future title/result panels. Do not force the match table itself into glassmorphism; the current canvas battle scene is intentionally heavier and more analog.
 
 ```css
 background: rgba(255,255,255,0.1);
@@ -105,10 +109,10 @@ Focus: border-color becomes primary, glow effect added.
 
 ### Tile Display
 
-- Font: monospace, `letter-spacing: 0.3rem`
-- Size: 1.3–1.5rem
-- Container: dark background box
-- Wrapping: `white-space: pre-wrap`, `line-height: 1.8`
+- No bitmap images for tiles
+- Use PixiJS Graphics for the face/back silhouette
+- Place text glyphs on top for number / honor / suit marks
+- Keep colors semantic: man/honor black, pin blue, sou green, red dora red
 
 ### Status Indicators
 
@@ -122,11 +126,11 @@ Focus: border-color becomes primary, glow effect added.
 - Max width: `1400px`
 - Padding: `1.5–2rem`
 
-### Grid Patterns
+### Canvas Composition
 
-- Players grid (main): `grid-template-columns: repeat(4, 1fr)`
-- Players grid (hybrid): `grid-template-columns: repeat(2, 1fr)`
-- Info grid: `auto-fit, minmax(200px, 1fr)`
+- Main table uses a fixed 16:9 composition (`1280x720`) centered in the viewport
+- Four seats wrap the center information plate rather than using DOM grid cards
+- DOM grids remain acceptable for setup, result, and debug screens
 
 ### Spacing
 
@@ -134,11 +138,12 @@ Standard gap: `10–20px`. Generous padding throughout.
 
 ## 6. Depth & Elevation
 
-### Glassmorphism Layers
+### Layers
 
-- Background gradient (lowest)
-- Glass panels with `backdrop-filter: blur(10px)` (mid)
-- Interactive elements with enhanced borders (top)
+- Stage backdrop / vignette (lowest)
+- Felt table and discard areas (middle)
+- Score badges / center info / turn markers (top UI)
+- DOM overlays such as loading and modal panels may sit above canvas when needed
 
 ### Shadows
 
@@ -157,9 +162,9 @@ Standard gap: `10–20px`. Generous padding throughout.
 
 ### Do
 
-- Use glassmorphism (`backdrop-filter: blur(10px)` + semi-transparent backgrounds) for all panels
-- Keep tile rendering in monospace text — no tile image assets
-- Apply gradient backgrounds per page identity
+- Use vector tile rendering with PixiJS Graphics + text; no bitmap tile images
+- Reserve gradients and glass cards for DOM overlays or non-table pages
+- Keep the battle table dark, tense, and legible from all four sides
 - Use `translateY(-2px)` hover effect on buttons
 - Use consistent transition: `all 0.3s`
 - Color-code log messages: green (player), blue (CPU), orange (system)
@@ -167,11 +172,10 @@ Standard gap: `10–20px`. Generous padding throughout.
 
 ### Don't
 
-- Mix page color schemes (purple pages stay purple, navy stays navy)
-- Use tile graphics or images — text-based rendering is deliberate
-- Apply debug-page terminal styling (green glow) to other pages
-- Remove the glassmorphism effect — it defines the visual identity
-- Use flat/material design patterns
+- Reintroduce bitmap tile sheets or photoreal tile textures
+- Force the PixiJS battle scene into a bright purple gradient theme
+- Apply debug-page terminal styling (green glow) to the battle screen
+- Flatten everything into generic material-style cards
 
 ### Animations
 
@@ -183,16 +187,11 @@ Standard gap: `10–20px`. Generous padding throughout.
 
 ## 8. Responsive Behavior
 
-### Grid Adaptation
+### Current Web Rule
 
-- Players grid: 4 columns → 2 columns on smaller screens
-- Info grid: `auto-fit, minmax(200px, 1fr)` handles collapse
-- Viewport meta: `width=device-width, initial-scale=1.0`
-
-### Layout
-
-- Flexbox for button groups, navigation, controls
-- Grid for player displays and info cards
+- Keep the table composition intact on desktop and mobile; scale the canvas rather than reflowing the four-seat layout into unrelated cards
+- Preserve `width=device-width, initial-scale=1.0`
+- If auxiliary controls need mobile treatment, move those controls around the canvas instead of rewriting the table geometry
 
 ## 9. Agent Prompt Guide
 
@@ -208,16 +207,16 @@ Honors:       to(East) na(South) sa(West) pe(North)
 ### Page Color Identities
 
 ```
-Main battle:  #667eea → #764ba2  (purple gradient)
-Hybrid mode:  #1a1a2e → #16213e  (dark navy)
+Main battle:  dark felt + brass + crimson vignette
+Hybrid mode:  #1a1a2e → #16213e  (legacy / overlay gradient)
 Debug:        #1a1a1a             (terminal black)
 ```
 
 ### When generating UI for this project
 
-- Glass card pattern: `rgba(255,255,255,0.1)` bg + `blur(10px)` + `rgba(255,255,255,0.2)` border
-- Tile text uses monospace with `letter-spacing: 0.3rem`
-- Each page gets its own gradient — never cross-contaminate
+- Glass card pattern is for DOM overlays, not the battle table itself
+- Tile rendering is vector-based: Graphics body + text glyphs, no bitmap assets
+- The battle table uses felt, brass, and vignette rather than bright page gradients
 - Log messages are color-coded by source (green/blue/orange)
 - Buttons lift on hover (`translateY(-2px)`) with shadow enhancement
 - Transition everything at `0.3s`
