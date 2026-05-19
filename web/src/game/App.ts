@@ -27,6 +27,7 @@ export class App {
   private cpuTurnDelayMs: number
   private cpuTurnTask: Promise<void> | null = null
   private cpuTurnGeneration = 0
+  private destroyedBridges = new WeakSet<WasmGameBridge>()
 
   constructor(app: Application, options: AppOptions = {}) {
     this.app = app
@@ -48,7 +49,7 @@ export class App {
    */
   showInitialTable(gameState: GameState): void {
     this.invalidateCpuTurnTask()
-    this.bridge = null
+    this.releaseCurrentBridge()
     this.gameState = gameState
     this.selectedHandIndex = null
     this.eventLog = []
@@ -58,6 +59,9 @@ export class App {
 
   startGame(bridge: WasmGameBridge, humanPlayerIndex: PlayerIndex = 0): void {
     this.invalidateCpuTurnTask()
+    if (this.bridge !== bridge) {
+      this.releaseCurrentBridge()
+    }
     this.bridge = bridge
     this.humanPlayerIndex = humanPlayerIndex
     this.selectedHandIndex = null
@@ -115,6 +119,17 @@ export class App {
   private invalidateCpuTurnTask(): void {
     this.cpuTurnGeneration += 1
     this.cpuTurnTask = null
+  }
+
+  private destroyBridgeOnce(bridge: WasmGameBridge | null): void {
+    if (!bridge || this.destroyedBridges.has(bridge)) return
+    bridge.destroy()
+    this.destroyedBridges.add(bridge)
+  }
+
+  private releaseCurrentBridge(): void {
+    this.destroyBridgeOnce(this.bridge)
+    this.bridge = null
   }
 
   private isCpuTurnGenerationCurrent(generation: number): boolean {
@@ -218,8 +233,6 @@ export class App {
     ) {
       const currentPlayer = this.bridge.getCurrentPlayerId() as PlayerIndex
       const playerName = this.getPlayerName(currentPlayer)
-      this.appendLog(`${playerName} が思考中`)
-      this.renderTable()
       await this.sleep(this.cpuTurnDelayMs)
       if (!this.isCpuTurnGenerationCurrent(generation) || !this.bridge) return
 

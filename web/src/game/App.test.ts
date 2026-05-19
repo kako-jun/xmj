@@ -40,6 +40,7 @@ const createBridgeMock = (overrides: Partial<import('./wasm').WasmGameBridge> = 
     executeCpuTurn: () => '5m',
     canRiichi: () => false,
     declareRiichi: () => false,
+    destroy: () => undefined,
     ...overrides,
   }) as unknown as import('./wasm').WasmGameBridge
 
@@ -145,6 +146,25 @@ describe('App', () => {
     expect(stage.children.length).toBe(1)
     expect(firstTable.destroyed).toBe(true)
     expect((stage.children[0] as Container).label).toBe('game-table')
+  })
+
+  it('showInitialTable は保持中の bridge を destroy して切り離す', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    let destroyCount = 0
+
+    const bridge = createBridgeMock({
+      destroy: () => {
+        destroyCount += 1
+      },
+    })
+
+    app.startGame(bridge, 0)
+    app.showInitialTable(initWithState({ phase: 'game' }))
+
+    expect(destroyCount).toBe(1)
+    expect(app.bridge).toBe(null)
   })
 
   it('立直中のプレイヤーだけ score badge に立直表示が出る', () => {
@@ -355,6 +375,32 @@ describe('App', () => {
     expect(app.gameState?.players[0].hand).toHaveLength(13)
     expect(stage.children.length).toBe(1)
     expect(app.eventLog.some(entry => entry.includes('あなた がツモ'))).toBe(false)
+  })
+
+  it('bridge 差し替え時は旧 bridge を一度だけ destroy する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    let oldDestroyCount = 0
+    let newDestroyCount = 0
+
+    const oldBridge = createBridgeMock({
+      destroy: () => {
+        oldDestroyCount += 1
+      },
+    })
+    const newBridge = createBridgeMock({
+      destroy: () => {
+        newDestroyCount += 1
+      },
+    })
+
+    app.startGame(oldBridge, 0)
+    app.startGame(newBridge, 0)
+    app.showInitialTable(initWithState({ phase: 'game' }))
+
+    expect(oldDestroyCount).toBe(1)
+    expect(newDestroyCount).toBe(1)
   })
 
   it('discard action button から打牌できる', () => {
@@ -752,6 +798,7 @@ describe('App', () => {
     expect(app.eventLog.some(entry => entry.includes('CPU 南 がツモ'))).toBe(true)
     expect(app.eventLog.some(entry => entry.includes('CPU 南 が 5m を打牌'))).toBe(true)
     expect(app.eventLog.some(entry => entry.includes('あなた がツモ'))).toBe(true)
+    expect(app.eventLog.some(entry => entry.includes('思考中'))).toBe(false)
   })
 
   it('eventLog は 12 件を上限に古い順から切り詰める', () => {
