@@ -1,4 +1,4 @@
-import { Application, Graphics } from 'pixi.js'
+import { Application, Container, Graphics } from 'pixi.js'
 import {
   STAGE_WIDTH,
   STAGE_HEIGHT,
@@ -11,9 +11,12 @@ import type { GameState, PlayerIndex, Tile } from './types'
 import { createGameStateFromBridge } from './bridgeState'
 import { tileToCuiCode } from './types'
 import { WasmGameBridge } from './wasm'
+import { createTitleScene } from './titleScene'
+import { createResultScene, type ResultEntry } from './resultScene'
 
 interface AppOptions {
   cpuTurnDelayMs?: number
+  createBridge?: (() => WasmGameBridge) | null
 }
 
 export class App {
@@ -24,7 +27,9 @@ export class App {
   selectedHandIndex: number | null = null
   eventLog: string[] = []
   resultMessage: string | null = null
+  titleNotice: string | null = null
   private cpuTurnDelayMs: number
+  private createBridge: (() => WasmGameBridge) | null
   private cpuTurnTask: Promise<void> | null = null
   private cpuTurnGeneration = 0
   private destroyedBridges = new WeakSet<WasmGameBridge>()
@@ -32,6 +37,7 @@ export class App {
   constructor(app: Application, options: AppOptions = {}) {
     this.app = app
     this.cpuTurnDelayMs = options.cpuTurnDelayMs ?? 0
+    this.createBridge = options.createBridge ?? null
   }
 
   /**
@@ -54,7 +60,47 @@ export class App {
     this.selectedHandIndex = null
     this.eventLog = []
     this.resultMessage = null
+    this.titleNotice = null
     this.renderTable()
+  }
+
+  showTitleScene(notice: string | null = null): void {
+    this.invalidateCpuTurnTask()
+    this.releaseCurrentBridge()
+    this.gameState = null
+    this.selectedHandIndex = null
+    this.eventLog = []
+    this.resultMessage = null
+    this.titleNotice = notice
+    this.replaceStageRoot(
+      createTitleScene({
+        notice: this.titleNotice,
+        onStart: () => {
+          this.startNewGame()
+        },
+      })
+    )
+  }
+
+  startNewGame(): boolean {
+    if (!this.createBridge) {
+      this.showTitleScene('対局開始に必要な bridge factory が未設定です。')
+      return false
+    }
+
+    try {
+      const bridge = this.createBridge()
+      this.titleNotice = null
+      this.startGame(bridge, 0)
+      return true
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? `対局の初期化に失敗しました: ${error.message}`
+          : '対局の初期化に失敗しました。'
+      this.showTitleScene(message)
+      return false
+    }
   }
 
   startGame(bridge: WasmGameBridge, humanPlayerIndex: PlayerIndex = 0): void {
@@ -67,6 +113,7 @@ export class App {
     this.selectedHandIndex = null
     this.eventLog = ['対局開始']
     this.resultMessage = null
+    this.titleNotice = null
     this.refreshFromBridge()
 
     if (this.shouldDrawHumanTile()) {
@@ -145,23 +192,6 @@ export class App {
     return true
   }
 
-  private finalizeGameIfNeeded(): void {
-    if (!this.bridge || !this.gameState || !this.bridge.isGameOver()) return
-
-    if (this.resultMessage) return
-
-    const bankruptPlayer = this.gameState.players.find(player => player.score <= 0)
-    if (bankruptPlayer) {
-      this.resultMessage = `${bankruptPlayer.name} が飛んで終局`
-    } else if (this.bridge.getWallCount() === 0) {
-      this.resultMessage = '山牌が尽きて終局'
-    } else {
-      this.resultMessage = '対局終了'
-    }
-    this.appendLog(this.resultMessage)
-    this.renderTable()
-  }
-
   private confirmSelectedTile(options: { riichi: boolean } = { riichi: false }): boolean {
     if (!this.bridge || !this.gameState || this.selectedHandIndex === null) return false
     if (!this.bridge.isCurrentPlayerHuman()) return false
@@ -192,6 +222,7 @@ export class App {
 
     this.refreshFromBridge()
     this.finalizeGameIfNeeded()
+    if (!this.bridge) return
 
     if (this.cpuTurnDelayMs > 0) {
       const generation = this.cpuTurnGeneration
@@ -205,7 +236,7 @@ export class App {
       return
     }
 
-    while (!this.bridge.isGameOver() && this.bridge.isCurrentPlayerCpu()) {
+    while (this.bridge && !this.bridge.isGameOver() && this.bridge.isCurrentPlayerCpu()) {
       const currentPlayer = this.bridge.getCurrentPlayerId() as PlayerIndex
       const playerName = this.getPlayerName(currentPlayer)
       const discardedTile = this.bridge.executeCpuTurn()
@@ -214,6 +245,8 @@ export class App {
       this.appendLog(`${playerName} が ${discardedTile} を打牌 ${this.wallSummary()}`)
       this.finalizeGameIfNeeded()
     }
+
+    if (!this.bridge) return
 
     if (this.shouldDrawHumanTile()) {
       this.drawHumanTileAndRefresh()
@@ -298,11 +331,6 @@ export class App {
 
   private renderTable(): void {
     if (!this.gameState) return
-    const previousChildren = this.app.stage.removeChildren()
-    previousChildren.forEach(child => {
-      child.destroy({ children: true })
-    })
-
     const isInteractive =
       this.bridge !== null &&
       this.bridge.isCurrentPlayerHuman() &&
@@ -319,6 +347,70 @@ export class App {
       eventLog: this.eventLog,
       resultMessage: this.resultMessage,
     })
-    this.app.stage.addChild(table)
+    this.replaceStageRoot(table)
+  }
+
+  private replaceStageRoot(root: Container): void {
+    const previousChildren = this.app.stage.removeChildren()
+    previousChildren.forEach(child => {
+      child.destroy({ children: true })
+    })
+    this.app.stage.addChild(root)
+  }
+
+  private buildResultEntries(gameState: GameState): ResultEntry[] {
+    return [...gameState.players]
+      .sort((a, b) => b.score - a.score || a.id - b.id)
+      .map((player, index) => ({
+        rank: index + 1,
+        playerId: player.id,
+        name: player.name,
+        score: player.score,
+      }))
+  }
+
+  private showResultScene(): void {
+    if (!this.gameState || !this.resultMessage) return
+
+    const finalState = this.gameState
+    const reason = this.resultMessage
+    const entries = this.buildResultEntries(finalState)
+
+    this.invalidateCpuTurnTask()
+    this.releaseCurrentBridge()
+    this.gameState = finalState
+    this.selectedHandIndex = null
+
+    this.replaceStageRoot(
+      createResultScene({
+        reason,
+        entries,
+        detailPlaceholder: '現 API では未取得',
+        onRematch: () => {
+          this.startNewGame()
+        },
+        onBackToTitle: () => {
+          this.showTitleScene()
+        },
+      })
+    )
+  }
+
+  private finalizeGameIfNeeded(): void {
+    if (!this.bridge || !this.gameState || !this.bridge.isGameOver()) return
+
+    if (!this.resultMessage) {
+      const bankruptPlayer = this.gameState.players.find(player => player.score <= 0)
+      if (bankruptPlayer) {
+        this.resultMessage = `${bankruptPlayer.name} が飛んで終局`
+      } else if (this.bridge.getWallCount() === 0) {
+        this.resultMessage = '山牌が尽きて終局'
+      } else {
+        this.resultMessage = '対局終了'
+      }
+      this.appendLog(this.resultMessage)
+    }
+
+    this.showResultScene()
   }
 }

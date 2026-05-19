@@ -2,7 +2,7 @@ import type { GameState, PlayerIndex, PlayerState, Tile } from './types'
 import { tileFromCuiCode } from './types'
 import { WasmGameBridge } from './wasm'
 
-const PLAYER_LINE_RE = /^([ >])(?:(親)\s*)?(.+?) \((\d+)点\):\s*(.*)$/
+const PLAYER_LINE_RE = /^([ >])(?:(親)\s*)?(.+?) \((-?\d+)点\):\s*(.*)$/
 const ROUND_LINE_RE = /^Round: (\d+) \| Wall: (\d+) tiles$/
 const DORA_LINE_RE = /^Dora indicators:\s*(.*)$/
 const LAST_DISCARD_LINE_RE = /^Last discard:\s*(.+)$/

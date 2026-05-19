@@ -66,20 +66,28 @@
 - `web/src/game/App.ts`: `eventLog` / `resultMessage` / `cpuTurnDelayMs` を追加し、#6 の同期ループを「人間打牌 → CPU 南/西/北 → 人間ツモ」の UI 可視フローへ昇格
 - `web/src/main.ts`: ブラウザ起動時だけ CPU ターンへ `280ms` の短い待ちを入れ、CPU の思考中と打牌反映が追えるようにした。テストは既定 `0ms` のままで同期実行
 - `web/src/game/bridgeState.ts`: Rust 側 `get_game_state_string()` の `Last discard:` 行を `GameState.lastDiscard` に取り込み、`isGameOver()` と合わせて `phase='over'` を設定
-- `web/src/game/table.ts`: 中央情報盤に「直前打牌」、下段に「対局ログ」パネル、最小の終局オーバーレイを追加。現在手番・山牌残数・河更新・直前打牌・CPU 打牌ログが 1 画面で見える
-- 終局理由は Rust core の現 API に合わせた最小実装で、`isGameOver()` + wall/score から「山牌が尽きて終局」または「飛んで終局」を表示
+- `web/src/game/table.ts`: 中央情報盤に「直前打牌」、下段に「対局ログ」パネルを追加。現在手番・山牌残数・河更新・直前打牌・CPU 打牌ログが 1 画面で見える
+- 終局理由は Rust core の現 API に合わせた最小実装で、`isGameOver()` + wall/score から「山牌が尽きて終局」または「飛んで終局」を導出
 - ログは内部保持 `12` 件・画面表示 `4` 件に固定。同期/非同期どちらの CPU 経路でも `ツモ` → `打牌` の 2 件だけを積み、人間側も `drawTile()` 成功時だけ `ツモ` を積む
 - `startGame()` / `showInitialTable()` / 新ゲーム開始では CPU 非同期タスクを世代トークンで無効化し、旧 bridge の遅延処理が新しい局面へ混線しないようにした。合わせて bridge 差し替え時は旧 `WasmGameBridge.destroy()` を一度だけ呼ぶ
-- テスト追加: `Last discard` パース、`phase='over'`、終局オーバーレイ、ログ蓄積、非同期 CPU タスクの無効化を Vitest で固定
+- テスト追加: `Last discard` パース、`phase='over'`、終局時の結果シーン遷移、ログ蓄積、非同期 CPU タスクの無効化を Vitest で固定
+
+### Issue #8 — タイトル / 結果 / シーン遷移
+
+- `web/src/game/App.ts` に scene 管理を追加し、`title-scene` → `game-table` → `result-scene` を PixiJS `Container` の差し替えだけで遷移させる構成へ更新
+- `web/src/game/titleScene.ts`: 「邪雀」ロゴ + `CPU 対戦スタート` ボタンの最小タイトル画面を追加
+- `web/src/game/resultScene.ts`: Rust/Wasm 現 API の範囲で終局理由、順位 / 点数一覧、`現 API では未取得` プレースホルダ、`再戦` / `タイトルへ` ボタンを持つ結果画面を追加
+- `web/src/main.ts`: 起動直後はタイトル画面を出し、対局開始時と再戦時だけ `WasmGameBridge.createHybrid('あなた', 0)` を呼ぶよう変更
+- 対局終了時は bridge を破棄して結果画面へ移し、再戦では新しい bridge を作り直す。旧 bridge の遅延 CPU タスクが新局へ混線しないことも継続保証
+- テスト追加: タイトル開始、飛び終局から結果画面遷移、再戦・タイトル復帰を `App.test.ts` で固定
 
 ## 残 Issue
 
 | Issue | 内容 | 主要成果物 |
 |---|---|---|
-| #8 | 和了画面 / 流局表示 | 和了者/点数/流局理由を受け取る詳細結果 UI |
-| #9 | タイトルシーン + モード選択 | `web/src/game/scenes/TitleScene.ts` |
+| #9 | 詳細結果 API に合わせた結果 UI 拡張 | 和了者 / 役 / 打点 / 収支 API 追加後に本実装 |
 
-Issue #7 の MVP は完了。残る #8 は Rust core から「誰が和了したか」「流局か」を直接受け取る API が無いため、現状は `isGameOver()` ベースの最小終局表示に留めている。
+Issue #8 の MVP は完了。Rust core から「誰が和了したか」「役」「収支」を直接受け取る API はまだ無いため、結果画面の詳細欄は `現 API では未取得` のプレースホルダに留めている。
 
 ## 設計メモ
 

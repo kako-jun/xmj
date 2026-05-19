@@ -59,6 +59,9 @@ const getActionButton = (stage: Container, key: string): Container => {
   return actionArea.getChildByLabel(`action-button-${key}`) as Container
 }
 
+const getSceneButton = (stage: Container, label: string): Container =>
+  (stage.children[0] as Container).getChildByLabel(label) as Container
+
 describe('App', () => {
   afterEach(() => {
     vi.useRealTimers()
@@ -165,6 +168,33 @@ describe('App', () => {
 
     expect(destroyCount).toBe(1)
     expect(app.bridge).toBe(null)
+  })
+
+  it('showTitleScene は title-scene を表示する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    app.showTitleScene()
+
+    expect(stage.children).toHaveLength(1)
+    expect((stage.children[0] as Container).label).toBe('title-scene')
+    expect(getSceneButton(stage, 'title-start-button')).toBeTruthy()
+  })
+
+  it('showTitleScene のスタートボタンから新しい bridge を作って対局を始める', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const bridges = [createBridgeMock(), createBridgeMock()]
+    const createBridge = vi.fn(() => bridges.shift() as import('./wasm').WasmGameBridge)
+    const app = new App(fakeApp, { createBridge })
+
+    app.showTitleScene()
+    getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
+
+    expect(createBridge).toHaveBeenCalledTimes(1)
+    expect((stage.children[0] as Container).label).toBe('game-table')
+    expect(app.bridge).not.toBe(null)
   })
 
   it('立直中のプレイヤーだけ score badge に立直表示が出る', () => {
@@ -403,6 +433,100 @@ describe('App', () => {
     expect(newDestroyCount).toBe(1)
   })
 
+  it('飛び終局時は result-scene に遷移して順位一覧を表示する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    let currentPlayerId = 0
+    let destroyed = 0
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      discardTile: () => {
+        currentPlayerId = 1
+        return true
+      },
+      executeCpuTurn: () => {
+        currentPlayerId = 1
+        return '5m'
+      },
+      getCurrentPlayerId: () => currentPlayerId,
+      isCurrentPlayerHuman: () => currentPlayerId === 0,
+      isCurrentPlayerCpu: () => currentPlayerId !== 0,
+      isGameOver: () => currentPlayerId === 1,
+      getPlayerScore: idx => [25000, -800, 24000, 18000][idx] ?? 0,
+      getGameStateJson: () => `Round: 1 | Wall: 1 tiles
+Dora indicators: 5p
+>親 あなた (25000点): 1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to hk
+  河: 9m 1p
+   CPU 南 (-800点): 1p 1p 2p 2p 3p 3p 4s 5s 6s na na ht cn
+  河: 7s
+   CPU 西 (24000点): 4m 5m 6m 7m 8m 9m 3p 4p 5p 6p 7p 8p pe
+   CPU 北 (18000点): 1s 1s 2s 2s 3s 3s 4m 4m 5m 5m 6m 6m sa
+Last discard: 5m`,
+      destroy: () => {
+        destroyed += 1
+      },
+    })
+
+    app.startGame(bridge, 0)
+    app.selectedHandIndex = 0
+    ;(app as unknown as { confirmSelectedTile: () => boolean }).confirmSelectedTile()
+
+    const resultScene = stage.children[0] as Container
+    const texts = resultScene.children.filter((child): child is Text => child instanceof Text)
+
+    expect(resultScene.label).toBe('result-scene')
+    expect(texts.some(text => text.text === 'CPU 南 が飛んで終局')).toBe(true)
+    expect(texts.some(text => text.text === '1位')).toBe(true)
+    expect(texts.some(text => text.text === '現 API では未取得')).toBe(true)
+    expect(app.bridge).toBe(null)
+    expect(destroyed).toBe(1)
+  })
+
+  it('result-scene の再戦ボタンで新しい bridge を作り直して対局へ戻る', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+
+    let createCount = 0
+    const finishedBridge = createBridgeMock({
+      isGameOver: () => true,
+      getPlayerScore: idx => [25000, -1000, 24000, 20000][idx] ?? 0,
+    })
+    const freshBridge = createBridgeMock()
+    const app = new App(fakeApp, {
+      createBridge: () => {
+        createCount += 1
+        return freshBridge
+      },
+    })
+
+    app.startGame(finishedBridge, 0)
+    ;(app as unknown as { finalizeGameIfNeeded: () => void }).finalizeGameIfNeeded()
+    getSceneButton(stage, 'result-rematch-button').emit('pointertap', {} as never)
+
+    expect(createCount).toBe(1)
+    expect((stage.children[0] as Container).label).toBe('game-table')
+    expect(app.bridge).toBe(freshBridge)
+  })
+
+  it('result-scene のタイトルボタンで title-scene に戻る', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    const finishedBridge = createBridgeMock({
+      isGameOver: () => true,
+      getPlayerScore: idx => [25000, -1000, 24000, 20000][idx] ?? 0,
+    })
+
+    app.startGame(finishedBridge, 0)
+    ;(app as unknown as { finalizeGameIfNeeded: () => void }).finalizeGameIfNeeded()
+    getSceneButton(stage, 'result-title-button').emit('pointertap', {} as never)
+
+    expect((stage.children[0] as Container).label).toBe('title-scene')
+    expect(app.bridge).toBe(null)
+  })
+
   it('discard action button から打牌できる', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
@@ -562,7 +686,7 @@ describe('App', () => {
     expect(getActionButton(stage, 'riichi-discard')).toBeTruthy()
   })
 
-  it('ゲームオーバー時は終局メッセージを出し action button を消す', () => {
+  it('ゲームオーバー時は result-scene に切り替わる', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const app = new App(fakeApp)
@@ -583,10 +707,7 @@ describe('App', () => {
     getActionButton(stage, 'discard').emit('pointertap', {} as never)
 
     expect(app.resultMessage).toBe('山牌が尽きて終局')
-    const table = stage.children[0] as Container
-    expect(table.getChildByLabel('result-overlay')).toBeTruthy()
-    const actionArea = getBottomArea(stage).getChildByLabel('action-area') as Container
-    expect(actionArea.getChildByLabel('action-button-discard')).toBeNull()
+    expect((stage.children[0] as Container).label).toBe('result-scene')
   })
 
   it('飛び終了時は終局理由に飛んだプレイヤー名を表示する', () => {
@@ -613,6 +734,7 @@ describe('App', () => {
 
     expect(app.resultMessage).toBe('CPU 西 が飛んで終局')
     expect(app.eventLog[app.eventLog.length - 1]).toBe('CPU 西 が飛んで終局')
+    expect((stage.children[0] as Container).label).toBe('result-scene')
   })
 
   it('山牌切れでも飛びでもないゲームオーバー時は汎用の終局文言を表示する', () => {
@@ -638,6 +760,7 @@ describe('App', () => {
 
     expect(app.resultMessage).toBe('対局終了')
     expect(app.eventLog[app.eventLog.length - 1]).toBe('対局終了')
+    expect((stage.children[0] as Container).label).toBe('result-scene')
   })
 
   it('非同期 CPU ターン中に advanceTurnLoop を再入しても CPU 実行は重複しない', async () => {

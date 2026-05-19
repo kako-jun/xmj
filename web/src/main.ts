@@ -42,17 +42,14 @@ const main = async (): Promise<void> => {
 
   setLoadingProgress(0.8)
 
-  const app = new App(pixiApp, { cpuTurnDelayMs: 280 })
+  const app = new App(pixiApp, {
+    cpuTurnDelayMs: 280,
+    createBridge: () => WasmGameBridge.createHybrid('あなた', 0),
+  })
   if (import.meta.env.DEV) {
     window.__xmjApp = app
   }
-  try {
-    const bridge = WasmGameBridge.createHybrid('あなた', 0)
-    app.startGame(bridge, 0)
-  } catch (err) {
-    console.warn('[xmj] 初期卓の生成に失敗しました。背景のみ表示します:', err)
-    app.showTableBackground()
-  }
+  app.showTitleScene()
 
   setLoadingProgress(1)
   removeLoading()
