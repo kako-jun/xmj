@@ -1,4 +1,5 @@
 use crate::player::Player;
+use crate::realtime::{self, PlayerTimer};
 use crate::scoring::Yaku;
 use crate::tile::{Tile, TileType, Suit, Honor};
 use rand::seq::SliceRandom;
@@ -18,6 +19,10 @@ use std::collections::{HashMap, HashSet};
 ///   河に置ける。他家からは「闇牌」（種類非公開）として見え、鳴き・ロンの対象に
 ///   できない。ターンプレイヤーは点棒 500 点を支払って「照射」を宣言することで
 ///   他家の闇牌を公開させられる。
+/// - `RealTime`: リアルタイム麻雀。ターン制を廃止、全員が独立タイマー（5 秒）で
+///   ツモ→打牌を繰り返す。タイムアウトで自動ツモ切り。鳴き宣言は早い者勝ちで
+///   優先順位は Ron > Pon > Kan > Chi。本実装は Rust core のロジック層のみで、
+///   完全な同時打牌入力ループは CLI 同期版の範疇外（web/wasm follow-up）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameMode {
     Standard,
@@ -26,6 +31,7 @@ pub enum GameMode {
     FiveTile,
     EastWest,
     Yamima,
+    RealTime,
 }
 
 /// 東西戦（クリア麻雀）のチーム。
@@ -108,6 +114,12 @@ pub struct Game {
     /// `east_west_target_yaku()` 全 5 種が揃ったチームが勝利。
     /// EastWest 以外のモードでは初期化はされるが書き込まれない（no-op）。
     pub team_progress: HashMap<Team, HashSet<Yaku>>,
+    /// リアルタイム麻雀のプレイヤー別タイマー（4 つ、各 5000ms 制限）。
+    ///
+    /// `GameMode::RealTime` のときのみ実質的に意味を持つが、コストが極小なので
+    /// 全モードで `PlayerTimer::default_limit()` 初期化する。
+    /// 進行は呼び出し側が `tick_timers(delta_ms)` を周期的に呼ぶ。
+    pub player_timers: Vec<PlayerTimer>,
 }
 
 impl Game {
@@ -135,6 +147,10 @@ impl Game {
         team_progress.insert(Team::East, HashSet::new());
         team_progress.insert(Team::West, HashSet::new());
 
+        // 4 人ぶんの PlayerTimer をデフォルト 5000ms 制限で初期化。
+        // RealTime 以外のモードでも持つが書き込み・読み込みされないため実害なし。
+        let player_timers = (0..4).map(|_| PlayerTimer::default_limit()).collect();
+
         let mut game = Self {
             players,
             wall: Vec::new(),
@@ -148,6 +164,7 @@ impl Game {
             pot: 0,
             dealer_won_last: false,
             team_progress,
+            player_timers,
         };
 
         game.initialize_wall();
@@ -769,6 +786,77 @@ impl Game {
         } else {
             None
         }
+    }
+
+    // ========================================
+    // RealTime（リアルタイム麻雀）API
+    // ========================================
+
+    /// 全プレイヤーのタイマーを `delta_ms` 進める。
+    ///
+    /// `GameMode::RealTime` 以外でも安全に呼べる（フィールドは常に保持しているため）が、
+    /// 他モードでは意味を持たない。
+    pub fn tick_timers(&mut self, delta_ms: u64) {
+        for timer in self.player_timers.iter_mut() {
+            timer.tick(delta_ms);
+        }
+    }
+
+    /// 現在タイムアウト中のプレイヤー idx 一覧。
+    ///
+    /// `elapsed_ms >= limit_ms` を満たすプレイヤーを昇順で返す。
+    pub fn timed_out_players(&self) -> Vec<usize> {
+        self.player_timers
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| if t.is_timeout() { Some(i) } else { None })
+            .collect()
+    }
+
+    /// 指定プレイヤーが手牌から自動ツモ切り（手牌末尾＝最新ツモ）。
+    ///
+    /// - 範囲外 idx なら None
+    /// - 手牌が空なら None
+    /// - 成功時: 手牌から末尾牌を除去 + 河に discard として追加 + `last_discard` 更新 +
+    ///   `last_discard_hidden=false` + 当該プレイヤーのタイマーリセット
+    ///
+    /// **注意**: `current_player` は変更しない。RealTime ではターンの概念が無いため、
+    /// この関数は「タイムアウトしたプレイヤーの自動打牌」だけを行い、誰が次に打つかは
+    /// 呼び出し側のスケジューラに委ねる。
+    pub fn auto_discard_for(&mut self, player_idx: usize) -> Option<Tile> {
+        if player_idx >= self.players.len() {
+            return None;
+        }
+        let tile = {
+            let tiles = self.players[player_idx].hand.get_tiles();
+            realtime::pick_auto_discard_tile(tiles)?
+        };
+        // Player::discard_tile は「手牌から remove + 河に追加」を 1 つの API でこなす。
+        if !self.players[player_idx].discard_tile(tile) {
+            return None;
+        }
+        self.last_discard = Some(tile);
+        self.last_discard_hidden = false;
+        self.player_timers[player_idx].reset();
+        Some(tile)
+    }
+
+    /// 指定プレイヤーのタイマーをリセット（打牌成功後に呼ぶ）。
+    pub fn reset_player_timer(&mut self, player_idx: usize) {
+        if player_idx < self.player_timers.len() {
+            self.player_timers[player_idx].reset();
+        }
+    }
+
+    /// 同フレームに集まった鳴き宣言から優先順位通りに 1 件採用する。
+    ///
+    /// `realtime::resolve_calls` のラッパー。優先順位は Ron > Pon > Kan > Chi、
+    /// 同優先は入力順で先勝ち。
+    pub fn resolve_pending_calls(
+        &self,
+        calls: &[realtime::Call],
+    ) -> Option<realtime::Call> {
+        realtime::resolve_calls(calls)
     }
 
     pub fn is_game_over(&self) -> bool {
