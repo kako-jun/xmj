@@ -237,6 +237,7 @@ describe('App', () => {
     getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
 
     expect(app.selectedStartMode).toBe('cpu-south')
+    expect(app.humanPlayerIndex).toBe(1)
     expect(createBridge).toHaveBeenCalledWith('cpu-south')
     expect((stage.children[0] as Container).label).toBe('game-table')
   })
