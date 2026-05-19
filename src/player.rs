@@ -121,6 +121,20 @@ impl Player {
         self.ippatsu = false;
     }
 
+    /// 誠京麻雀の役満祝儀を支払う（放銃者）
+    ///
+    /// `subtract_score` の 0 クランプを意図的に回避してゼロサムを保証する。
+    /// 持ち点が祝儀額に満たない場合は **マイナス値を許容する**。
+    /// （誠京麻雀の世界観：トビ＝即敗北なので、ゼロ止めではなく素直に負債を計上する）
+    pub fn pay_yakuman_tip(&mut self, amount: i32) {
+        self.score -= amount;
+    }
+
+    /// 誠京麻雀の役満祝儀を受け取る（和了者）
+    pub fn receive_yakuman_tip(&mut self, amount: i32) {
+        self.add_score(amount);
+    }
+
     /// リーチ後の打牌チェック（ツモ切りのみ）
     pub fn can_discard_after_riichi(&self, tile: &Tile) -> bool {
         if !self.is_riichi {
@@ -157,12 +171,55 @@ mod tests {
     fn test_draw_and_discard() {
         let mut player = Player::new(0, "Test".to_string());
         let tile = Tile::new_number(Suit::Man, 1, false);
-        
+
         player.draw_tile(tile);
         assert_eq!(player.tile_count(), 1);
-        
+
         assert!(player.discard_tile(tile));
         assert_eq!(player.tile_count(), 0);
         assert_eq!(player.discards.len(), 1);
+    }
+
+    #[test]
+    fn test_yakuman_tip_zero_sum() {
+        let mut payer = Player::new(0, "Payer".to_string());
+        let mut winner = Player::new(1, "Winner".to_string());
+
+        let payer_before = payer.score;
+        let winner_before = winner.score;
+
+        let tip = 8000;
+        payer.pay_yakuman_tip(tip);
+        winner.receive_yakuman_tip(tip);
+
+        // 双方の差分の合計は 0（payer が 8000 減り、winner が 8000 増える）
+        let payer_delta = payer.score - payer_before;
+        let winner_delta = winner.score - winner_before;
+        assert_eq!(payer_delta + winner_delta, 0);
+        assert_eq!(payer_delta, -tip);
+        assert_eq!(winner_delta, tip);
+    }
+
+    /// 役満祝儀はマイナス点になっても 0 クランプしないことを保証する（ゼロサム維持）
+    #[test]
+    fn test_yakuman_tip_can_go_negative() {
+        let mut payer = Player::new(0, "Payer".to_string());
+        let mut receiver = Player::new(1, "Receiver".to_string());
+
+        // 持ち点を意図的に低くする
+        payer.score = 3000;
+        receiver.score = 25000;
+
+        let sum_before = payer.score + receiver.score;
+
+        payer.pay_yakuman_tip(8000);
+        receiver.receive_yakuman_tip(8000);
+
+        // payer は -5000（クランプされない）
+        assert_eq!(payer.score, -5000, "0 クランプされずにマイナスに突き抜ける");
+        assert_eq!(receiver.score, 33000, "receiver は 8000 増える");
+
+        // ゼロサム不変
+        assert_eq!(payer.score + receiver.score, sum_before, "ゼロサムが維持される");
     }
 }
