@@ -1,11 +1,7 @@
-// xmj Web 版エントリ。シーン基盤は Issue #5 以降で本実装。
-// Issue #2 段階では PixiJS Application を保持して空ステージを描く。
-// Issue #4 で全 34 種類の牌を並べる確認用ステージを追加した。
-
-import { Application, Container, Graphics } from 'pixi.js'
-import { STAGE_WIDTH, STAGE_HEIGHT, TABLE_BG_COLOR, TILE } from './constants'
-import { createTileGraphics, enumerateAllTiles } from './tile'
-import type { Tile, Suit } from './types'
+import { Application, Graphics } from 'pixi.js'
+import { STAGE_WIDTH, STAGE_HEIGHT, TABLE_BG_COLOR } from './constants'
+import { createTableScene } from './table'
+import type { GameState } from './types'
 
 export class App {
   app: Application
@@ -24,38 +20,9 @@ export class App {
     this.app.stage.addChild(bg)
   }
 
-  /**
-   * Issue #4 の動作確認用: 全 34 種類の牌を 9 列 x 4 行で並べる。
-   * 5m / 5p / 5s は赤ドラとしても 1 枚ずつ追加。
-   * 後の Issue で GameScene に置き換える。
-   */
-  showAllTilesDemo(): void {
-    const grid = new Container()
-    grid.label = 'tile-demo'
-
-    const cols = 9
-    const padX = 8
-    const padY = 12
-    // 赤ドラは 5m / 5p / 5s の 3 枚。Suit 型を再利用して型安全に並べる。
-    const RED_SUITS: readonly Suit[] = ['man', 'pin', 'sou']
-    const redTiles: Tile[] = RED_SUITS.map(suit => ({ suit, value: 5, isRed: true }))
-    const tiles: Tile[] = [...enumerateAllTiles(), ...redTiles]
-
-    tiles.forEach((tile, i) => {
-      const col = i % cols
-      const row = Math.floor(i / cols)
-      const g = createTileGraphics(tile)
-      g.x = col * (TILE.width + padX)
-      g.y = row * (TILE.height + padY)
-      grid.addChild(g)
-    })
-
-    // 中央に寄せる
-    const gridWidth = cols * (TILE.width + padX) - padX
-    const gridHeight = Math.ceil(tiles.length / cols) * (TILE.height + padY) - padY
-    grid.x = (STAGE_WIDTH - gridWidth) / 2
-    grid.y = (STAGE_HEIGHT - gridHeight) / 2
-
-    this.app.stage.addChild(grid)
+  showInitialTable(gameState: GameState): void {
+    this.app.stage.removeChildren()
+    const table = createTableScene(gameState)
+    this.app.stage.addChild(table)
   }
 }

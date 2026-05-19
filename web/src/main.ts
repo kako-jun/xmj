@@ -4,7 +4,8 @@
 import { Application } from 'pixi.js'
 import { App } from './game/App'
 import { STAGE_WIDTH, STAGE_HEIGHT, TABLE_BG_COLOR } from './game/constants'
-import { initWasm } from './game/wasm'
+import { createGameStateFromBridge } from './game/bridgeState'
+import { initWasm, WasmGameBridge } from './game/wasm'
 
 const setLoadingProgress = (ratio: number): void => {
   const bar = document.querySelector<HTMLDivElement>('#loading-bar > div')
@@ -43,11 +44,14 @@ const main = async (): Promise<void> => {
   setLoadingProgress(0.8)
 
   const app = new App(pixiApp)
-  app.showTableBackground()
-  // TODO(Issue #5): GameScene に置き換える。
-  // 現状は Issue #4 の確認用デモを表示しており、本番ビルドにもデモが露出する。
-  // SceneManager 導入時にタイトルシーン → GameScene 遷移へ差し替える。
-  app.showAllTilesDemo()
+  try {
+    const bridge = WasmGameBridge.createHybrid('あなた', 0)
+    const gameState = createGameStateFromBridge(bridge, 0)
+    app.showInitialTable(gameState)
+  } catch (err) {
+    console.warn('[xmj] 初期卓の生成に失敗しました。背景のみ表示します:', err)
+    app.showTableBackground()
+  }
 
   setLoadingProgress(1)
   removeLoading()

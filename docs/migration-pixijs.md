@@ -36,11 +36,19 @@
 - 動作確認: `App.showAllTilesDemo()` で 34 種 + 赤ドラ 3 枚を 9 列グリッドで表示
 - テスト 12 件 (列挙数 / 生成 / label / Text 内容 / 文字色)
 
-## 未着手 Issue
+### Issue #5 — 初期配牌卓の PixiJS 描画
+
+- `web/src/game/table.ts`: 4 方向の手牌、中央情報盤、河スロット、スコア帯をまとめた卓シーンを追加
+- `web/src/game/bridgeState.ts`: Rust 側 `getGameState()` の整形文字列を `GameState` に戻す最小パース層を追加
+- `web/src/main.ts`: `WasmGameBridge.createHybrid('あなた', 0)` から初期局面を生成し、旧 `showAllTilesDemo()` を本番起動から除去
+- 相手手牌は文字列から枚数を復元しつつ、描画は裏向きで固定
+- 山牌残数、ドラ表示牌、東1局表示、空の河スロット、持ち点/手番表示まで初期卓に反映
+- テスト追加: 卓構造スモーク、整形文字列からの初期局面変換
+
+## 残 Issue
 
 | Issue | 内容 | 主要成果物 |
 |---|---|---|
-| #5 | GameScene 本実装 (山・河・手牌の配置) | `web/src/game/scenes/GameScene.ts` |
 | #6 | 入力ハンドラ (打牌・ツモ・リーチ宣言) | `web/src/game/input.ts` |
 | #7 | CPU ターン進行ループ + 演出 | `WasmGameBridge.executeCpuTurn` の UI 連動 |
 | #8 | 和了画面 / 流局表示 | `web/src/game/scenes/ResultScene.ts` |

@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest'
 import { Container } from 'pixi.js'
 import { App } from './App'
+import { initWithState } from './state'
 
 describe('App', () => {
   it('showTableBackground は stage に背景を 1 つ追加する', () => {
@@ -19,15 +20,17 @@ describe('App', () => {
     expect(stage.children.length).toBe(1)
   })
 
-  it('showAllTilesDemo は label="tile-demo" の Container を stage に 1 つ追加する', () => {
+  it('showInitialTable は label="game-table" の Container を stage に 1 つ追加する', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const app = new App(fakeApp)
-    app.showAllTilesDemo()
+    const state = initWithState({ phase: 'game' })
+    app.showInitialTable(state)
     expect(stage.children.length).toBe(1)
     const grid = stage.children[0] as Container
-    expect(grid.label).toBe('tile-demo')
-    // 34 種 + 赤ドラ 3 枚 = 37 子
-    expect(grid.children.length).toBe(37)
+    expect(grid.label).toBe('game-table')
+    expect(grid.getChildByLabel('center-info')).toBeTruthy()
+    expect(grid.getChildByLabel('score-badges')).toBeTruthy()
+    expect(grid.getChildByLabel('bottom-area')).toBeTruthy()
   })
 })
