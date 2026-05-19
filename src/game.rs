@@ -7,10 +7,12 @@ use rand::thread_rng;
 ///
 /// - `Standard`: 通常ルール
 /// - `Seikyo`: 誠京麻雀（『天』『アカギ』の裏ルール）。場代・二度ヅモ・役満祝儀
+/// - `Washizu`: 鷲巣麻雀（『アカギ』）。全牌の 3/4 が透明で他家からも見える
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameMode {
     Standard,
     Seikyo,
+    Washizu,
 }
 
 /// 誠京麻雀の固定額
@@ -167,10 +169,54 @@ impl Game {
 
         // シャッフル
         self.wall.shuffle(&mut thread_rng());
-        
+
+        // 鷲巣麻雀: 全 136 牌のうちランダムに 3/4 を glass にする
+        // 山牌のシャッフル後に 0..(len * 3 / 4) を glass マーク（既にシャッフル済みなので
+        // インデックス先頭から塗ってもランダム分布になる）
+        if self.mode == GameMode::Washizu {
+            let total = self.wall.len();
+            let glass_count = total * 3 / 4;
+            for i in 0..glass_count {
+                self.wall[i].is_glass = true;
+            }
+        }
+
         // ドラ表示牌を設定
         if let Some(dora_indicator) = self.wall.pop() {
             self.dora_indicators.push(dora_indicator);
+        }
+    }
+
+    /// 観測者 (`observer_idx`) から見た対象 (`target_idx`) の手牌のうち、
+    /// 視認可能な牌のリストを返す。
+    ///
+    /// - 自分自身 (`observer_idx == target_idx`) なら手牌すべて
+    /// - 他家なら鷲巣ルール: `is_glass == true` の牌のみ
+    /// - 非鷲巣モードでも、他家の手牌は通常見えないため空ベクタを返す
+    ///   （UI 側は別経路で「自分の手牌のみ表示」しているのでこの API は鷲巣専用想定）
+    ///
+    /// 副槓子（meld）は鳴いた時点で公開されているので別 API で参照する想定。
+    /// ここでは concealed hand の見え方だけ扱う。
+    pub fn get_visible_tiles_of_opponent(
+        &self,
+        observer_idx: usize,
+        target_idx: usize,
+    ) -> Vec<Tile> {
+        if observer_idx >= self.players.len() || target_idx >= self.players.len() {
+            return Vec::new();
+        }
+        let target_hand = self.players[target_idx].hand.get_tiles();
+        if observer_idx == target_idx {
+            return target_hand.clone();
+        }
+        match self.mode {
+            GameMode::Washizu => target_hand
+                .iter()
+                .filter(|t| t.is_glass)
+                .cloned()
+                .collect(),
+            // 他モードでは他家の手牌は不可視（空）
+            _ => Vec::new(),
         }
     }
 
@@ -525,9 +571,26 @@ impl Game {
         for (i, player) in self.players.iter().enumerate() {
             let marker = if i == self.current_player { ">" } else { " " };
             let dealer_mark = if player.is_dealer { "親" } else { " " };
-            result.push_str(&format!("{}{} {} ({}点): {}\n", 
+            result.push_str(&format!("{}{} {} ({}点): {}\n",
                 marker, dealer_mark, player.name, player.score, player.get_hand_string()));
-            
+
+            // 鷲巣麻雀: 自分以外（player id 0 = 「あなた」視点）の glass 牌を追加表示
+            // CLI クライアントは player id 0 を観測者として想定。
+            // 自分自身 (i == 0) はすでに手牌全表示済みなのでスキップ
+            if self.mode == GameMode::Washizu && i != 0 {
+                let glass_tiles = self.get_visible_tiles_of_opponent(0, i);
+                let glass_str = if glass_tiles.is_empty() {
+                    "（透明牌なし）".to_string()
+                } else {
+                    glass_tiles
+                        .iter()
+                        .map(|t| t.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                result.push_str(&format!("  [{} の透明牌: {}]\n", player.name, glass_str));
+            }
+
             if !player.discards.is_empty() {
                 result.push_str(&format!("  河: {}\n", player.get_discards_string()));
             }
@@ -683,6 +746,125 @@ mod tests {
         for p in &game.players {
             assert_eq!(p.score, 25000 - SEIKYO_SEAT_FEE * 3);
         }
+    }
+
+    fn washizu_names() -> Vec<String> {
+        vec![
+            "P1".to_string(),
+            "P2".to_string(),
+            "P3".to_string(),
+            "P4".to_string(),
+        ]
+    }
+
+    /// Washizu モードでは wall + 配牌 + dora indicator の合計のうち
+    /// **3/4 が glass** になっていること。
+    /// シャッフル後に先頭 75% を塗る決定的な整数演算実装なので、毎回ぴったり 102 枚 glass。
+    /// exact 比較で固定。将来確率的実装（サンプリング等）に変えたら許容幅を緩める。
+    #[test]
+    fn test_washizu_wall_has_3_4_glass_tiles() {
+        let game = Game::new_with_mode(washizu_names(), GameMode::Washizu);
+
+        let mut total = 0usize;
+        let mut glass = 0usize;
+
+        // 山牌
+        for t in &game.wall {
+            total += 1;
+            if t.is_glass {
+                glass += 1;
+            }
+        }
+        // 各プレイヤー手牌
+        for p in &game.players {
+            for t in p.hand.get_tiles() {
+                total += 1;
+                if t.is_glass {
+                    glass += 1;
+                }
+            }
+        }
+        // ドラ表示牌
+        for t in &game.dora_indicators {
+            total += 1;
+            if t.is_glass {
+                glass += 1;
+            }
+        }
+
+        assert_eq!(total, 136, "麻雀牌は全 136 枚");
+        let expected = 136 * 3 / 4; // 102
+        let diff = (glass as i32 - expected as i32).abs();
+        assert!(
+            diff <= 1,
+            "glass 牌は 102 (3/4 of 136) 枚であるべき。実測 {} / 期待 {} (exact 比較)",
+            glass,
+            expected
+        );
+    }
+
+    #[test]
+    fn test_standard_wall_no_glass_tiles() {
+        let game = Game::new(washizu_names());
+
+        for t in &game.wall {
+            assert!(!t.is_glass, "Standard モードでは glass が立たない");
+        }
+        for p in &game.players {
+            for t in p.hand.get_tiles() {
+                assert!(!t.is_glass, "Standard モードでは手牌にも glass が無い");
+            }
+        }
+        for t in &game.dora_indicators {
+            assert!(!t.is_glass, "Standard モードではドラ表示牌にも glass が無い");
+        }
+    }
+
+    #[test]
+    fn test_visible_tiles_self_returns_all() {
+        let game = Game::new_with_mode(washizu_names(), GameMode::Washizu);
+
+        for idx in 0..4 {
+            let visible = game.get_visible_tiles_of_opponent(idx, idx);
+            let own = game.players[idx].hand.get_tiles();
+            assert_eq!(
+                visible.len(),
+                own.len(),
+                "自分の手牌は glass/opaque 問わず全部見える (player {})",
+                idx
+            );
+        }
+    }
+
+    #[test]
+    fn test_visible_tiles_opponent_returns_glass_only() {
+        let game = Game::new_with_mode(washizu_names(), GameMode::Washizu);
+
+        // 観測者 0、対象 1
+        let visible = game.get_visible_tiles_of_opponent(0, 1);
+        let target_all = game.players[1].hand.get_tiles();
+        let target_glass_count = target_all.iter().filter(|t| t.is_glass).count();
+
+        assert_eq!(
+            visible.len(),
+            target_glass_count,
+            "他家の glass 牌のみ見える"
+        );
+        for t in &visible {
+            assert!(t.is_glass, "他家からの見えは必ず is_glass=true");
+        }
+    }
+
+    /// Standard モードでは `get_visible_tiles_of_opponent` は他家に対して空を返す。
+    #[test]
+    fn test_visible_tiles_standard_mode_opponent_empty() {
+        let game = Game::new(washizu_names());
+        let visible = game.get_visible_tiles_of_opponent(0, 1);
+        assert!(visible.is_empty(), "Standard では他家手牌は不可視");
+
+        // ただし自分自身なら全表示
+        let own = game.get_visible_tiles_of_opponent(0, 0);
+        assert_eq!(own.len(), game.players[0].hand.get_tiles().len());
     }
 
     /// 二度ヅモ直後は親手牌が 15 枚になり、(1枚目, 2枚目) を返す（打牌は呼び出し側責務）。

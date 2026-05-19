@@ -47,6 +47,9 @@ cargo run
 
 # 誠京麻雀ルール（場代・二度ヅモ・役満祝儀）
 cargo run -- --mode seikyo
+
+# 鷲巣麻雀ルール（3/4 透明牌、他家の glass 牌が見える）
+cargo run -- --mode washizu
 ```
 
 ゲームが起動したら、手牌から打牌する牌を入力してください:
@@ -118,6 +121,12 @@ python3 -m http.server 8000
   - ✅ 親二度ヅモ: API 提供（`dealer_double_draw`）+ CUI で 1 枚目を即捨てる UX。連荘フラグ（`dealer_won_last`）の自動更新配線は follow-up
   - ✅ 役満祝儀: API 提供（`pay_yakuman_tip` / `receive_yakuman_tip`、ゼロサム保証）。実際の役満和了時の自動授受配線は follow-up
 
+- ✅ **鷲巣麻雀** (`--mode washizu`): 3/4 透明牌、他家の glass 牌が見える（『アカギ』）
+  - ✅ 透明牌: `Tile.is_glass` フラグ + `initialize_wall` で全 136 牌のうち 3/4 (102 枚) を glass 化
+  - ✅ 可視性 API: `Game::get_visible_tiles_of_opponent(observer, target)` で他家手牌のうち glass 牌のみ取得
+  - ✅ CLI 表示: Washizu モード時のみ `[CPUx の透明牌: ...]` を各他家に追加表示。Standard/Seikyo の表示には影響しない
+  - 🚧 血液ポイント・牌の使用回数制限などの追加ルールは follow-up
+
 #### Limitations（誠京麻雀の現状）
 
 PR #21 時点の実装は API レベル完備 + CLI からの最低限の動線確認まで。以下は未配線で follow-up Issue で対応予定:
@@ -130,7 +139,6 @@ PR #21 時点の実装は API レベル完備 + CLI からの最低限の動線�
 
 ### 実装予定
 
-- 🚧 **鷲巣麻雀**: ガラス牌、血液ポイント（『アカギ』）
 - 🚧 **闇麻**: 闇牌、照射
 - 🚧 **リアルタイム麻雀**: 同時打牌、早い者勝ちの鳴き
 - 🚧 **東西戦**: クリア麻雀（指定役5つの達成競争）
