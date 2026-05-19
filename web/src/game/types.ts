@@ -32,6 +32,19 @@ export type PlayerIndex = 0 | 1 | 2 | 3
 /** タイトル画面から選ぶ開始プリセット。 */
 export type GameStartMode = 'cpu-east' | 'cpu-south' | 'cpu-west' | 'cpu-north'
 
+export const startModeToPlayerIndex = (mode: GameStartMode): PlayerIndex => {
+  switch (mode) {
+    case 'cpu-east':
+      return 0
+    case 'cpu-south':
+      return 1
+    case 'cpu-west':
+      return 2
+    case 'cpu-north':
+      return 3
+  }
+}
+
 /**
  * プレイヤー 1 人の状態。手牌・河・点数を持つ。
  * isCPU で CPU/人間を区別 (Wasm 側の human_player_index に対応)。

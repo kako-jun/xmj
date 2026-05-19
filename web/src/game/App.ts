@@ -9,7 +9,7 @@ import { createTableScene } from './table'
 import type { TableActionButton } from './table'
 import type { GameStartMode, GameState, PlayerIndex, Tile } from './types'
 import { createGameStateFromBridge } from './bridgeState'
-import { tileToCuiCode } from './types'
+import { startModeToPlayerIndex, tileToCuiCode } from './types'
 import { WasmGameBridge } from './wasm'
 import { createTitleScene } from './titleScene'
 import { createResultScene, type ResultEntry } from './resultScene'
@@ -99,7 +99,7 @@ export class App {
     try {
       const bridge = this.createBridge(this.selectedStartMode)
       this.titleNotice = null
-      this.startGame(bridge, this.startModeToPlayerIndex(this.selectedStartMode))
+      this.startGame(bridge, startModeToPlayerIndex(this.selectedStartMode))
       return true
     } catch (error) {
       const message =
@@ -370,19 +370,6 @@ export class App {
       { key: 'cpu-west', title: '西家', description: '対面から開始', enabled: true },
       { key: 'cpu-north', title: '北家', description: '左席から開始', enabled: true },
     ]
-  }
-
-  private startModeToPlayerIndex(mode: GameStartMode): PlayerIndex {
-    switch (mode) {
-      case 'cpu-east':
-        return 0
-      case 'cpu-south':
-        return 1
-      case 'cpu-west':
-        return 2
-      case 'cpu-north':
-        return 3
-    }
   }
 
   private replaceStageRoot(root: Container): void {
