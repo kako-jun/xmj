@@ -72,6 +72,111 @@ impl Hand {
         self.is_winning_hand(&test_tiles)
     }
 
+    /// 5枚麻雀（FiveTile モード）の和了判定。
+    ///
+    /// 5枚麻雀の和了形は「雀頭(2) + 面子(3) = 5 枚」。
+    /// 本関数は手牌 5 枚 + アガリ牌 1 枚 = 6 枚から、5 枚分の和了形を取り出せれば true を返す
+    /// （残り 1 枚はアガリの揺れとして許容）。
+    /// 鳴き運用は 5 枚麻雀では非スコープなので `melds.is_empty()` 前提。
+    pub fn can_win_five_tile(&self, winning_tile: &Tile) -> bool {
+        if !self.melds.is_empty() {
+            return false;
+        }
+        let mut test_tiles = self.tiles.clone();
+        test_tiles.push(*winning_tile);
+        Self::is_five_tile_winning(&test_tiles)
+    }
+
+    /// 5枚麻雀のテンパイ判定。
+    ///
+    /// 手牌 5 枚で、34 種いずれかの牌を加えれば和了形になるかを判定する。
+    pub fn is_tenpai_five_tile(&self) -> bool {
+        if !self.melds.is_empty() {
+            return false;
+        }
+        if self.tiles.len() != 5 {
+            return false;
+        }
+        use crate::tile::{Honor, Suit};
+        for suit in [Suit::Man, Suit::Pin, Suit::Sou] {
+            for value in 1..=9u8 {
+                let candidate = Tile::new_number(suit, value, false);
+                let mut test_tiles = self.tiles.clone();
+                test_tiles.push(candidate);
+                if Self::is_five_tile_winning(&test_tiles) {
+                    return true;
+                }
+            }
+        }
+        for honor in [
+            Honor::Ton,
+            Honor::Nan,
+            Honor::Shaa,
+            Honor::Pei,
+            Honor::Haku,
+            Honor::Hatsu,
+            Honor::Chun,
+        ] {
+            let candidate = Tile::new_honor(honor);
+            let mut test_tiles = self.tiles.clone();
+            test_tiles.push(candidate);
+            if Self::is_five_tile_winning(&test_tiles) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// 6 枚（5 枚和了形 + アガリ揺れ 1 枚）で和了形になるかを判定する。
+    fn is_five_tile_winning(tiles: &[Tile]) -> bool {
+        if tiles.len() != 6 {
+            return false;
+        }
+        Self::has_pair_and_one_meld(tiles)
+    }
+
+    /// `tiles` から「対子 2 枚 + 面子 3 枚」の組み合わせを切り出せるか判定する。
+    /// 余りの牌が 1 枚あっても true（5 枚以上から 5 枚分を消費できれば成立）。
+    fn has_pair_and_one_meld(tiles: &[Tile]) -> bool {
+        let tile_map = Self::create_tile_map(tiles);
+        let unique_tiles: Vec<Tile> = tile_map.keys().copied().collect();
+
+        for pair_tile in &unique_tiles {
+            if tile_map.get(pair_tile).copied().unwrap_or(0) < 2 {
+                continue;
+            }
+            let mut remain = tile_map.clone();
+            *remain.get_mut(pair_tile).unwrap() -= 2;
+
+            if Self::has_one_meld(&remain) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// `tile_map` から面子 1 組（順子 or 刻子）を切り出せるか判定する。
+    fn has_one_meld(tile_map: &HashMap<Tile, usize>) -> bool {
+        for (tile, &count) in tile_map.iter() {
+            if count >= 3 {
+                return true;
+            }
+            if let crate::tile::TileType::Number { suit, value } = tile.tile_type {
+                if value <= 7 {
+                    let tile2 = crate::tile::Tile::new_number(suit, value + 1, false);
+                    let tile3 = crate::tile::Tile::new_number(suit, value + 2, false);
+                    if count >= 1
+                        && tile_map.get(&tile2).copied().unwrap_or(0) >= 1
+                        && tile_map.get(&tile3).copied().unwrap_or(0) >= 1
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     fn is_winning_hand(&self, tiles: &[Tile]) -> bool {
         // 手牌総数チェック
         let total_tiles = tiles.len() + self.melds.len() * 3;
@@ -223,7 +328,7 @@ impl Hand {
 
     /// 国士無双の判定
     fn check_kokushi(&self, tiles: &[Tile]) -> bool {
-        use crate::tile::{TileType, Honor, Suit};
+        use crate::tile::{Honor, Suit};
 
         if tiles.len() != 14 {
             return false;
@@ -325,7 +430,7 @@ impl Hand {
 
     /// 国士無双形のシャンテン数
     fn shanten_kokushi(&self, tiles: &[Tile]) -> i32 {
-        use crate::tile::{TileType, Honor, Suit};
+        use crate::tile::{Honor, Suit};
 
         let tile_map = Self::create_tile_map(tiles);
 
@@ -427,7 +532,7 @@ impl Hand {
     fn sort(&mut self) {
         self.tiles.sort_by(|a, b| {
             use crate::tile::{TileType, Suit, Honor};
-            
+
             match (&a.tile_type, &b.tile_type) {
                 (TileType::Number { suit: s1, value: v1 }, TileType::Number { suit: s2, value: v2 }) => {
                     let suit_order = |s: &Suit| match s {
@@ -457,7 +562,7 @@ impl Hand {
 
     pub fn to_string(&self) -> String {
         let mut result = String::new();
-        
+
         // 手牌
         for tile in &self.tiles {
             result.push_str(&tile.to_string());
@@ -494,10 +599,10 @@ mod tests {
     fn test_hand_operations() {
         let mut hand = Hand::new();
         let tile = Tile::new_number(Suit::Man, 1, false);
-        
+
         hand.add_tile(tile);
         assert_eq!(hand.tile_count(), 1);
-        
+
         assert!(hand.remove_tile(&tile));
         assert_eq!(hand.tile_count(), 0);
         assert!(!hand.remove_tile(&tile));
@@ -510,11 +615,89 @@ mod tests {
         hand.add_tile(Tile::new_number(Suit::Man, 9, false));
         hand.add_tile(Tile::new_number(Suit::Man, 1, false));
         hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
-        
+
         let tiles = hand.get_tiles();
         assert_eq!(tiles[0].to_string(), "1m");
         assert_eq!(tiles[1].to_string(), "9m");
         assert_eq!(tiles[2].to_string(), "5p");
         assert_eq!(tiles[3].to_string(), "to");
+    }
+
+    /// 5枚麻雀: 雀頭 + 刻子で和了
+    /// 手牌 5 枚: 2m 2m 5p 5p 5p、アガリ牌: 2m
+    /// → 雀頭 2m2m(余り) + 刻子 5p5p5p + 余り 2m  → 雀頭 + 面子 が成立
+    /// 実際は 6 枚: 2m 2m 2m 5p 5p 5p → (2m2m 雀頭) + (5p5p5p 刻子) + 余り 2m で和了
+    #[test]
+    fn test_five_tile_winning_pair_triplet() {
+        let mut hand = Hand::new();
+        hand.add_tile(Tile::new_number(Suit::Man, 2, false));
+        hand.add_tile(Tile::new_number(Suit::Man, 2, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+
+        // 任意の牌（ここでは 9m）を加えて和了になるか
+        // 手牌 5 枚: 2m 2m 5p 5p 5p。アガリ牌として 9m を渡しても、
+        // 6 枚 (2m 2m 5p 5p 5p 9m) の中に「対子 (2m 2m) + 刻子 (5p 5p 5p) + 余り (9m)」が成立する
+        let winning_tile = Tile::new_number(Suit::Man, 9, false);
+        assert!(hand.can_win_five_tile(&winning_tile), "対子 + 刻子 + 余り 1 枚で和了成立");
+    }
+
+    /// 5枚麻雀: 雀頭 + 順子で和了
+    /// 手牌 5 枚: 7m 7m 1s 2s 3s、アガリ牌: 9p
+    /// → 雀頭 7m7m + 順子 1s2s3s + 余り 9p
+    #[test]
+    fn test_five_tile_winning_pair_sequence() {
+        let mut hand = Hand::new();
+        hand.add_tile(Tile::new_number(Suit::Man, 7, false));
+        hand.add_tile(Tile::new_number(Suit::Man, 7, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 1, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 2, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 3, false));
+
+        let winning_tile = Tile::new_number(Suit::Pin, 9, false);
+        assert!(hand.can_win_five_tile(&winning_tile), "対子 + 順子 + 余り 1 枚で和了成立");
+    }
+
+    /// 5枚麻雀: 雀頭も面子も作れない場合は和了不可
+    /// 手牌 5 枚: 1m 3p 5s 7m 9p（バラバラ）、アガリ牌: to
+    /// → どこにも対子なし、面子なし → 和了不可
+    #[test]
+    fn test_five_tile_not_winning() {
+        let mut hand = Hand::new();
+        hand.add_tile(Tile::new_number(Suit::Man, 1, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 3, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 5, false));
+        hand.add_tile(Tile::new_number(Suit::Man, 7, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 9, false));
+
+        let winning_tile = Tile::new_honor(Honor::Ton);
+        assert!(!hand.can_win_five_tile(&winning_tile), "対子も面子も作れないので和了不可");
+    }
+
+    /// 5枚麻雀: テンパイ判定
+    /// 手牌 5 枚: 7m 7m 1s 2s 3s → 既に (雀頭 + 順子) で和了形だが、
+    /// 「5 枚で 1 枚足せば和了」を厳密に取ると、5 枚時点で和了形でも tenpai 判定は true
+    /// （余分な 1 枚を許容する仕様なので、何を引いても和了になる）
+    #[test]
+    fn test_five_tile_tenpai_detection() {
+        let mut hand = Hand::new();
+        hand.add_tile(Tile::new_number(Suit::Man, 7, false));
+        hand.add_tile(Tile::new_number(Suit::Man, 7, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 1, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 2, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 3, false));
+
+        assert!(hand.is_tenpai_five_tile(), "雀頭 + 順子 + 任意の 1 枚で和了 → テンパイ");
+
+        // 完全バラバラ手はテンパイ不可
+        let mut bad_hand = Hand::new();
+        bad_hand.add_tile(Tile::new_number(Suit::Man, 1, false));
+        bad_hand.add_tile(Tile::new_number(Suit::Pin, 3, false));
+        bad_hand.add_tile(Tile::new_number(Suit::Sou, 5, false));
+        bad_hand.add_tile(Tile::new_number(Suit::Man, 7, false));
+        bad_hand.add_tile(Tile::new_honor(Honor::Ton));
+
+        assert!(!bad_hand.is_tenpai_five_tile(), "対子の元すらない手はテンパイ不可");
     }
 }
