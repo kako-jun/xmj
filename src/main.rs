@@ -172,7 +172,20 @@ fn handle_player_turn(game: &mut Game) {
     println!("ツモ: 手牌 {}", player.get_hand_string());
 
     // 和了チェック（簡易）
-    if player.tile_count() == 14 && player.is_tenpai() {
+    // - 通常モード: 手牌 14 枚 + テンパイ
+    // - FiveTile モード: 手牌 5 枚で「雀頭+面子」の完成形（最後の 1 枚がアガリ牌相当）
+    let can_declare_tsumo = match game.mode {
+        GameMode::FiveTile => {
+            let tiles = player.hand.get_tiles();
+            tiles.len() == 5
+                && tiles
+                    .last()
+                    .map(|t| player.hand.can_win_five_tile(t))
+                    .unwrap_or(false)
+        }
+        _ => player.tile_count() == 14 && player.is_tenpai(),
+    };
+    if can_declare_tsumo {
         print!("ツモ和了しますか？ (y/n): ");
         io::stdout().flush().unwrap();
         let mut input = String::new();
