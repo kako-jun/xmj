@@ -405,6 +405,10 @@ impl Game {
         if observer_idx >= self.players.len() || target_idx >= self.players.len() {
             return None;
         }
+        // 自分で自分の闇牌を照射するのは無効（点棒だけ焼く操作になる）
+        if observer_idx == target_idx {
+            return None;
+        }
         if self.players[observer_idx].score < YAMIMA_LIGHT_UP_COST {
             return None;
         }
@@ -427,7 +431,9 @@ impl Game {
     }
 
     pub fn can_someone_win(&self, tile: &Tile) -> Vec<usize> {
-        // Yamima: 闇牌に対してはロン不可（先に照射で公開させてから判定する仕様）
+        // Yamima: `last_discard` が闇牌（裏向き）のときはロン不可。先に照射で公開してから
+        // 改めて判定する仕様。引数 `tile` は呼び出し側が `last_discard` と同じ値を渡す前提で
+        // 利用するため、`last_discard_hidden` のみで遮断してよい。
         if self.last_discard_hidden {
             return Vec::new();
         }
