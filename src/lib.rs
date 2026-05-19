@@ -17,7 +17,7 @@ pub mod wasm_webrtc;
 
 pub use tile::{Tile, TileType, Suit};
 pub use hand::Hand;
-pub use game::Game;
+pub use game::{Game, GameMode, SEIKYO_SEAT_FEE, SEIKYO_YAKUMAN_TIP};
 pub use player::Player;
 pub use ai::{AiEngine, AiLevel};
 pub use nostr::{NostrClient, NostrKeys, GameEvent, GameEventType, MatchState};

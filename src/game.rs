@@ -3,6 +3,20 @@ use crate::tile::{Tile, TileType, Suit, Honor};
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 
+/// ゲームモード
+///
+/// - `Standard`: 通常ルール
+/// - `Seikyo`: 誠京麻雀（『天』『アカギ』の裏ルール）。場代・二度ヅモ・役満祝儀
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameMode {
+    Standard,
+    Seikyo,
+}
+
+/// 誠京麻雀の固定額
+pub const SEIKYO_SEAT_FEE: i32 = 1000;
+pub const SEIKYO_YAKUMAN_TIP: i32 = 8000;
+
 #[derive(Debug, Clone)]
 pub struct Game {
     pub players: Vec<Player>,
@@ -12,12 +26,23 @@ pub struct Game {
     pub round: u32,
     pub dealer: usize,
     pub last_discard: Option<Tile>,
+    /// ゲームモード（Standard / Seikyo）
+    pub mode: GameMode,
+    /// 供託（誠京麻雀の場代合計）。和了者が回収・流局で持ち越し
+    pub pot: i32,
+    /// 前局で親が和了したか（= 連荘フラグ。二度ヅモ判定に使う）
+    pub dealer_won_last: bool,
 }
 
 impl Game {
     pub fn new(player_names: Vec<String>) -> Self {
+        Self::new_with_mode(player_names, GameMode::Standard)
+    }
+
+    /// モードを指定してゲームを構築
+    pub fn new_with_mode(player_names: Vec<String>, mode: GameMode) -> Self {
         assert!(player_names.len() == 4, "Mahjong requires exactly 4 players");
-        
+
         let players: Vec<Player> = player_names
             .into_iter()
             .enumerate()
@@ -38,11 +63,64 @@ impl Game {
             round: 1,
             dealer: 0,
             last_discard: None,
+            mode,
+            pot: 0,
+            dealer_won_last: false,
         };
 
         game.initialize_wall();
         game.deal_initial_tiles();
         game
+    }
+
+    /// 誠京麻雀の場代を全員から徴収して供託に積む。
+    /// Standard モードでは no-op。
+    pub fn collect_seat_fee(&mut self, amount: i32) {
+        if self.mode != GameMode::Seikyo {
+            return;
+        }
+        for player in self.players.iter_mut() {
+            player.subtract_score(amount);
+        }
+        self.pot += amount * self.players.len() as i32;
+    }
+
+    /// 供託（pot）を winner に渡してリセット。移動した点数を返す。
+    pub fn winner_takes_pot(&mut self, winner_idx: usize) -> i32 {
+        if winner_idx >= self.players.len() {
+            return 0;
+        }
+        let moved = self.pot;
+        if moved > 0 {
+            self.players[winner_idx].add_score(moved);
+            self.pot = 0;
+        }
+        moved
+    }
+
+    /// 親の二度ヅモ。
+    ///
+    /// 誠京麻雀かつ前局親和了（連荘）かつ現在のプレイヤーが親のときのみ、
+    /// 山牌から 2 枚連続でツモして親の手牌に追加する。
+    /// 戻り値は (1 枚目, 2 枚目) のタプル。山牌が 2 枚未満なら None を返す。
+    pub fn dealer_double_draw(&mut self) -> Option<(Tile, Tile)> {
+        if self.mode != GameMode::Seikyo {
+            return None;
+        }
+        if !self.dealer_won_last {
+            return None;
+        }
+        if self.current_player != self.dealer {
+            return None;
+        }
+        if self.wall.len() < 2 {
+            return None;
+        }
+        let first = self.wall.pop()?;
+        let second = self.wall.pop()?;
+        self.players[self.current_player].draw_tile(first);
+        self.players[self.current_player].draw_tile(second);
+        Some((first, second))
     }
 
     fn initialize_wall(&mut self) {
@@ -464,15 +542,93 @@ mod tests {
     fn test_tile_draw_and_discard() {
         let names = vec!["P1".to_string(), "P2".to_string(), "P3".to_string(), "P4".to_string()];
         let mut game = Game::new(names);
-        
+
         let initial_wall_count = game.get_wall_count();
         assert!(game.current_player_draw());
         assert_eq!(game.get_wall_count(), initial_wall_count - 1);
-        
+
         let _player_tiles = game.get_current_player().get_hand_string();
         let first_tile = game.get_current_player().hand.get_tiles()[0];
-        
+
         assert!(game.discard_tile(first_tile));
         assert_eq!(game.current_player, 1); // Next player
+    }
+
+    fn seikyo_names() -> Vec<String> {
+        vec![
+            "P1".to_string(),
+            "P2".to_string(),
+            "P3".to_string(),
+            "P4".to_string(),
+        ]
+    }
+
+    #[test]
+    fn test_standard_mode_pot_is_noop() {
+        let mut game = Game::new(seikyo_names());
+        assert_eq!(game.mode, GameMode::Standard);
+        assert_eq!(game.pot, 0);
+
+        let initial_scores: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+        game.collect_seat_fee(SEIKYO_SEAT_FEE);
+        let after_scores: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+
+        assert_eq!(game.pot, 0, "Standard モードでは pot が増えない");
+        assert_eq!(initial_scores, after_scores, "Standard モードでは点数も動かない");
+    }
+
+    #[test]
+    fn test_seikyo_collect_seat_fee() {
+        let mut game = Game::new_with_mode(seikyo_names(), GameMode::Seikyo);
+        let initial_scores: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+
+        game.collect_seat_fee(SEIKYO_SEAT_FEE);
+
+        assert_eq!(game.pot, SEIKYO_SEAT_FEE * 4);
+        for (i, p) in game.players.iter().enumerate() {
+            assert_eq!(p.score, initial_scores[i] - SEIKYO_SEAT_FEE);
+        }
+    }
+
+    #[test]
+    fn test_seikyo_winner_takes_pot() {
+        let mut game = Game::new_with_mode(seikyo_names(), GameMode::Seikyo);
+        game.collect_seat_fee(SEIKYO_SEAT_FEE);
+        let pot_before = game.pot;
+        let winner_score_before = game.players[1].score;
+
+        let moved = game.winner_takes_pot(1);
+
+        assert_eq!(moved, pot_before);
+        assert_eq!(game.pot, 0);
+        assert_eq!(game.players[1].score, winner_score_before + pot_before);
+    }
+
+    #[test]
+    fn test_seikyo_dealer_double_draw() {
+        let mut game = Game::new_with_mode(seikyo_names(), GameMode::Seikyo);
+        // 連荘していなければ二度ヅモは発動しない
+        assert!(game.dealer_double_draw().is_none());
+
+        game.dealer_won_last = true;
+        game.current_player = game.dealer;
+        let hand_before = game.players[game.dealer].tile_count();
+        let wall_before = game.wall.len();
+
+        let result = game.dealer_double_draw();
+        assert!(result.is_some(), "Seikyo + 連荘 + 親手番なら二度ヅモが成立する");
+        let hand_after = game.players[game.dealer].tile_count();
+        let wall_after = game.wall.len();
+        assert_eq!(hand_after, hand_before + 2, "親の手牌が 2 枚増える");
+        assert_eq!(wall_after, wall_before - 2, "山牌が 2 枚減る");
+    }
+
+    #[test]
+    fn test_seikyo_dealer_double_draw_not_dealer() {
+        let mut game = Game::new_with_mode(seikyo_names(), GameMode::Seikyo);
+        game.dealer_won_last = true;
+        game.current_player = (game.dealer + 1) % 4; // 子の手番
+
+        assert!(game.dealer_double_draw().is_none(), "親の手番でなければ発動しない");
     }
 }

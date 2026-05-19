@@ -229,3 +229,43 @@ Debug:        #1a1a1a             (terminal black)
 - **Cyan (#00f2fe):** Information, clarity, data
 - **Red (#ef4444):** Danger, riichi declaration, critical action
 - **Lime (#0f0):** Retro, developer mode, raw data
+
+## 10. Rule Specifications (Game Modes)
+
+### Standard
+
+- 標準的なリーチ麻雀。初期点数 25000、全員から場代徴収なし、祝儀なし。
+- API: `Game::new(names)` または `Game::new_with_mode(names, GameMode::Standard)`。
+
+### Seikyo（誠京麻雀 / 『天』『アカギ』）
+
+| 項目         | 値        | 内容                                                                 |
+| ------------ | --------- | -------------------------------------------------------------------- |
+| 場代         | **1000点**| 各局開始時に全員から徴収。和了者が `pot` を回収。流局時は持ち越し    |
+| 役満祝儀     | **8000点**| 役満和了時、放銃者（または振り込み相手）から追加で授受               |
+| 二度ヅモ     | 親限定    | 前局親和了（連荘）時、親は 2 枚ツモして 1 枚捨てる                   |
+
+#### API（`src/game.rs`）
+
+- `GameMode::Seikyo` — モード識別子
+- `Game.pot: i32` — 供託の合計
+- `Game.dealer_won_last: bool` — 前局親和了フラグ
+- `Game::new_with_mode(names, GameMode::Seikyo)` — 構築
+- `Game::collect_seat_fee(amount)` — 全員から `amount` 徴収して pot へ
+- `Game::winner_takes_pot(winner_idx) -> i32` — pot を winner に渡してリセット
+- `Game::dealer_double_draw() -> Option<(Tile, Tile)>` — 親二度ヅモ
+
+#### API（`src/player.rs`）
+
+- `Player::pay_yakuman_tip(amount)` — 役満祝儀の支払い（放銃者）
+- `Player::receive_yakuman_tip(amount)` — 役満祝儀の受け取り（和了者）
+
+#### CLI
+
+```bash
+cargo run -- --mode seikyo
+```
+
+起動時に「場代 1000 点ずつ供託しました（pot: 4000 点）」が表示される。
+親かつ連荘中のターンでは「親二度ヅモ可能」と案内され、2 枚ツモから 1 枚を選んで捨てる。
+

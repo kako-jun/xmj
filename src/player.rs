@@ -121,6 +121,16 @@ impl Player {
         self.ippatsu = false;
     }
 
+    /// 誠京麻雀の役満祝儀を支払う（放銃者）
+    pub fn pay_yakuman_tip(&mut self, amount: i32) {
+        self.subtract_score(amount);
+    }
+
+    /// 誠京麻雀の役満祝儀を受け取る（和了者）
+    pub fn receive_yakuman_tip(&mut self, amount: i32) {
+        self.add_score(amount);
+    }
+
     /// リーチ後の打牌チェック（ツモ切りのみ）
     pub fn can_discard_after_riichi(&self, tile: &Tile) -> bool {
         if !self.is_riichi {
@@ -157,12 +167,32 @@ mod tests {
     fn test_draw_and_discard() {
         let mut player = Player::new(0, "Test".to_string());
         let tile = Tile::new_number(Suit::Man, 1, false);
-        
+
         player.draw_tile(tile);
         assert_eq!(player.tile_count(), 1);
-        
+
         assert!(player.discard_tile(tile));
         assert_eq!(player.tile_count(), 0);
         assert_eq!(player.discards.len(), 1);
+    }
+
+    #[test]
+    fn test_yakuman_tip_zero_sum() {
+        let mut payer = Player::new(0, "Payer".to_string());
+        let mut winner = Player::new(1, "Winner".to_string());
+
+        let payer_before = payer.score;
+        let winner_before = winner.score;
+
+        let tip = 8000;
+        payer.pay_yakuman_tip(tip);
+        winner.receive_yakuman_tip(tip);
+
+        // 双方の差分の合計は 0（payer が 8000 減り、winner が 8000 増える）
+        let payer_delta = payer.score - payer_before;
+        let winner_delta = winner.score - winner_before;
+        assert_eq!(payer_delta + winner_delta, 0);
+        assert_eq!(payer_delta, -tip);
+        assert_eq!(winner_delta, tip);
     }
 }
