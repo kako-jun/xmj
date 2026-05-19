@@ -34,6 +34,7 @@ export interface TableActionButton {
 }
 
 export interface TableSceneOptions {
+  humanPlayerIndex?: PlayerIndex
   selectedHandIndex?: number | null
   interactiveHandPlayerId?: PlayerIndex | null
   onHandTileTap?: (index: number) => void
@@ -166,17 +167,23 @@ const createInfoPanel = (state: GameState): Container => {
   return panel
 }
 
-const addSeatBadge = (player: PlayerState, seat: number, x: number, y: number): Container => {
+const getRelativePlayer = (
+  state: GameState,
+  humanPlayerIndex: PlayerIndex,
+  offset: number
+): PlayerState => state.players[((humanPlayerIndex + offset) % 4) as PlayerIndex]
+
+const addSeatBadge = (player: PlayerState, x: number, y: number): Container => {
   const seatBadge = new Container()
 
   const frame = new Graphics()
   frame
     .roundRect(0, 0, 188, 72, 18)
     .fill({ color: PANEL_BG_COLOR, alpha: 0.9 })
-    .stroke({ color: player.id === seat ? PANEL_BORDER_COLOR : PANEL_ACCENT_COLOR, width: 2 })
+    .stroke({ color: player.isCPU ? PANEL_ACCENT_COLOR : PANEL_BORDER_COLOR, width: 2 })
   seatBadge.addChild(frame)
 
-  const wind = makeText(PLAYER_WIND[seat], 24, PANEL_ACCENT_COLOR, 'center', 'bold')
+  const wind = makeText(PLAYER_WIND[player.id], 24, PANEL_ACCENT_COLOR, 'center', 'bold')
   wind.anchor.set(0.5)
   wind.x = 26
   wind.y = 36
@@ -205,13 +212,13 @@ const addSeatBadge = (player: PlayerState, seat: number, x: number, y: number): 
   return seatBadge
 }
 
-const createScoreBadges = (state: GameState): Container => {
+const createScoreBadges = (state: GameState, humanPlayerIndex: PlayerIndex): Container => {
   const badges = new Container()
   badges.label = 'score-badges'
-  badges.addChild(addSeatBadge(state.players[2], 2, 546, 34))
-  badges.addChild(addSeatBadge(state.players[1], 1, 888, 242))
-  badges.addChild(addSeatBadge(state.players[0], 0, 546, 610))
-  badges.addChild(addSeatBadge(state.players[3], 3, 204, 242))
+  badges.addChild(addSeatBadge(getRelativePlayer(state, humanPlayerIndex, 2), 546, 34))
+  badges.addChild(addSeatBadge(getRelativePlayer(state, humanPlayerIndex, 1), 888, 242))
+  badges.addChild(addSeatBadge(getRelativePlayer(state, humanPlayerIndex, 0), 546, 610))
+  badges.addChild(addSeatBadge(getRelativePlayer(state, humanPlayerIndex, 3), 204, 242))
   return badges
 }
 
@@ -370,20 +377,22 @@ const createActionArea = (buttons: TableActionButton[]): Container => {
 }
 
 const createBottomArea = (state: GameState, options: TableSceneOptions = {}): Container => {
+  const humanPlayerIndex = options.humanPlayerIndex ?? 0
+  const player = getRelativePlayer(state, humanPlayerIndex, 0)
   const area = new Container()
   area.label = 'bottom-area'
 
-  const hand = createPlayerHand(state.players[0], options)
+  const hand = createPlayerHand(player, options)
   hand.x = TABLE_CENTER_X
   hand.y = 560
   area.addChild(hand)
 
-  const discards = createPlayerDiscards(state.players[0])
+  const discards = createPlayerDiscards(player)
   discards.x = 538
   discards.y = 486
   area.addChild(discards)
 
-  if (state.currentTurn === 0) {
+  if (state.currentTurn === player.id) {
     const marker = createTurnMarker('あなたの手番')
     marker.x = 980
     marker.y = 620
@@ -398,24 +407,25 @@ const createBottomArea = (state: GameState, options: TableSceneOptions = {}): Co
   return area
 }
 
-const createTopArea = (state: GameState): Container => {
+const createTopArea = (state: GameState, humanPlayerIndex: PlayerIndex): Container => {
+  const player = getRelativePlayer(state, humanPlayerIndex, 2)
   const area = new Container()
   area.label = 'top-area'
 
-  const hand = createPlayerHand(state.players[2])
+  const hand = createPlayerHand(player)
   hand.rotation = Math.PI
   hand.x = TABLE_CENTER_X
   hand.y = 160
   area.addChild(hand)
 
-  const discards = createPlayerDiscards(state.players[2])
+  const discards = createPlayerDiscards(player)
   discards.rotation = Math.PI
   discards.x = 742
   discards.y = 408
   area.addChild(discards)
 
-  if (state.currentTurn === 2) {
-    const marker = createTurnMarker('対面の手番')
+  if (state.currentTurn === player.id) {
+    const marker = createTurnMarker(`${player.name} の手番`)
     marker.rotation = Math.PI
     marker.x = 746
     marker.y = 106
@@ -425,24 +435,25 @@ const createTopArea = (state: GameState): Container => {
   return area
 }
 
-const createLeftArea = (state: GameState): Container => {
+const createLeftArea = (state: GameState, humanPlayerIndex: PlayerIndex): Container => {
+  const player = getRelativePlayer(state, humanPlayerIndex, 3)
   const area = new Container()
   area.label = 'left-area'
 
-  const hand = createPlayerHand(state.players[3])
+  const hand = createPlayerHand(player)
   hand.rotation = Math.PI / 2
   hand.x = 292
   hand.y = TABLE_CENTER_Y
   area.addChild(hand)
 
-  const discards = createPlayerDiscards(state.players[3])
+  const discards = createPlayerDiscards(player)
   discards.rotation = Math.PI / 2
   discards.x = 428
   discards.y = 267
   area.addChild(discards)
 
-  if (state.currentTurn === 3) {
-    const marker = createTurnMarker('北家の手番')
+  if (state.currentTurn === player.id) {
+    const marker = createTurnMarker(`${player.name} の手番`)
     marker.rotation = Math.PI / 2
     marker.x = 258
     marker.y = 432
@@ -452,24 +463,25 @@ const createLeftArea = (state: GameState): Container => {
   return area
 }
 
-const createRightArea = (state: GameState): Container => {
+const createRightArea = (state: GameState, humanPlayerIndex: PlayerIndex): Container => {
+  const player = getRelativePlayer(state, humanPlayerIndex, 1)
   const area = new Container()
   area.label = 'right-area'
 
-  const hand = createPlayerHand(state.players[1])
+  const hand = createPlayerHand(player)
   hand.rotation = -Math.PI / 2
   hand.x = 988
   hand.y = TABLE_CENTER_Y
   area.addChild(hand)
 
-  const discards = createPlayerDiscards(state.players[1])
+  const discards = createPlayerDiscards(player)
   discards.rotation = -Math.PI / 2
   discards.x = 852
   discards.y = 453
   area.addChild(discards)
 
-  if (state.currentTurn === 1) {
-    const marker = createTurnMarker('南家の手番')
+  if (state.currentTurn === player.id) {
+    const marker = createTurnMarker(`${player.name} の手番`)
     marker.rotation = -Math.PI / 2
     marker.x = 1022
     marker.y = 288
@@ -529,16 +541,17 @@ const createEventLogPanel = (eventLog: string[]): Container => {
 }
 
 export const createTableScene = (state: GameState, options: TableSceneOptions = {}): Container => {
+  const humanPlayerIndex = options.humanPlayerIndex ?? 0
   const root = new Container()
   root.label = 'game-table'
 
   addStageBackdrop(root)
   root.addChild(createTableSurface())
-  root.addChild(createScoreBadges(state))
+  root.addChild(createScoreBadges(state, humanPlayerIndex))
   root.addChild(createInfoPanel(state))
-  root.addChild(createTopArea(state))
-  root.addChild(createLeftArea(state))
-  root.addChild(createRightArea(state))
+  root.addChild(createTopArea(state, humanPlayerIndex))
+  root.addChild(createLeftArea(state, humanPlayerIndex))
+  root.addChild(createRightArea(state, humanPlayerIndex))
   root.addChild(createBottomArea(state, options))
   root.addChild(createEventLogPanel(options.eventLog ?? []))
   root.addChild(createFooter())

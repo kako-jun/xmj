@@ -118,9 +118,9 @@ describe('App', () => {
 
   it.each([
     { currentTurn: 0, areaLabel: 'bottom-area', markerText: 'あなたの手番' },
-    { currentTurn: 1, areaLabel: 'right-area', markerText: '南家の手番' },
-    { currentTurn: 2, areaLabel: 'top-area', markerText: '対面の手番' },
-    { currentTurn: 3, areaLabel: 'left-area', markerText: '北家の手番' },
+    { currentTurn: 1, areaLabel: 'right-area', markerText: 'CPU 南 の手番' },
+    { currentTurn: 2, areaLabel: 'top-area', markerText: 'CPU 西 の手番' },
+    { currentTurn: 3, areaLabel: 'left-area', markerText: 'CPU 北 の手番' },
   ] as const)(
     'currentTurn=%s のとき手番マーカーが対応する方角に 1 つだけ出る',
     ({ currentTurn, areaLabel, markerText }) => {
@@ -229,16 +229,35 @@ describe('App', () => {
   it('title-scene で開始席を切り替えてから開始できる', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
-    const createBridge = vi.fn(() => createBridgeMock())
+    const createBridge = vi.fn(() =>
+      createBridgeMock({
+        getCurrentPlayerId: () => 1,
+        isCurrentPlayerHuman: () => true,
+        isCurrentPlayerCpu: () => false,
+        getPlayerName: idx => ['CPU 東', 'あなた', 'CPU 西', 'CPU 北'][idx],
+        getGameStateJson: () => `Round: 1 | Wall: 69 tiles
+Dora indicators: 5p
+ 親 CPU 東 (25000点): 1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to
+  河: 9m 1p
+>あなた (25000点): 1p 1p 2p 2p 3p 3p 4s 5s 6s na na ht cn
+  河: 7s
+ CPU 西 (25000点): 4m 5m 6m 7m 8m 9m 3p 4p 5p 6p 7p 8p pe
+ CPU 北 (25000点): 1s 1s 2s 2s 3s 3s 4m 4m 5m 5m 6m 6m sa`,
+      })
+    )
     const app = new App(fakeApp, { createBridge })
 
     app.showTitleScene()
     getSceneMode(stage, 'cpu-south').emit('pointertap', {} as never)
     getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
 
+    const bottomArea = getBottomArea(stage)
     expect(app.selectedStartMode).toBe('cpu-south')
     expect(app.humanPlayerIndex).toBe(1)
     expect(createBridge).toHaveBeenCalledWith('cpu-south')
+    expect(bottomArea.getChildByLabel('hand-1')).toBeTruthy()
+    expect(bottomArea.getChildByLabel('hand-0')).toBeNull()
+    expect(bottomArea.getChildByLabel('turn-marker')).toBeTruthy()
     expect((stage.children[0] as Container).label).toBe('game-table')
   })
 

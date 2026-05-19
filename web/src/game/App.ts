@@ -346,6 +346,7 @@ export class App {
       this.gameState.currentTurn === this.humanPlayerIndex
 
     const table = createTableScene(this.gameState, {
+      humanPlayerIndex: this.humanPlayerIndex,
       selectedHandIndex: this.selectedHandIndex,
       interactiveHandPlayerId: isInteractive ? this.humanPlayerIndex : null,
       onHandTileTap: index => {
