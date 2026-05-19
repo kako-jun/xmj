@@ -8,11 +8,14 @@ use rand::thread_rng;
 /// - `Standard`: 通常ルール
 /// - `Seikyo`: 誠京麻雀（『天』『アカギ』の裏ルール）。場代・二度ヅモ・役満祝儀
 /// - `Washizu`: 鷲巣麻雀（『アカギ』）。全牌の 3/4 が透明で他家からも見える
+/// - `FiveTile`: 5枚麻雀（クライマックスだけ麻雀）。手牌 5 枚（親 6 枚）スタート、
+///   雀頭+面子1組で和了、タンヤオのみ判定
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameMode {
     Standard,
     Seikyo,
     Washizu,
+    FiveTile,
 }
 
 /// 誠京麻雀の固定額
@@ -221,7 +224,23 @@ impl Game {
     }
 
     fn deal_initial_tiles(&mut self) {
-        // 親は14枚、子は13枚配る
+        // FiveTile モード: 子 5 枚、親 6 枚（「ツモ番が回った」状態でスタート）
+        if self.mode == GameMode::FiveTile {
+            for player_idx in 0..4 {
+                for _ in 0..5 {
+                    if let Some(tile) = self.wall.pop() {
+                        self.players[player_idx].draw_tile(tile);
+                    }
+                }
+            }
+            // 親に追加の 1 枚
+            if let Some(tile) = self.wall.pop() {
+                self.players[self.dealer].draw_tile(tile);
+            }
+            return;
+        }
+
+        // Standard / Seikyo / Washizu: 親は14枚、子は13枚配る
         for _round in 0..3 {
             for player_idx in 0..4 {
                 for _ in 0..4 {
@@ -231,14 +250,14 @@ impl Game {
                 }
             }
         }
-        
+
         // 最後の1枚ずつ
         for player_idx in 0..4 {
             if let Some(tile) = self.wall.pop() {
                 self.players[player_idx].draw_tile(tile);
             }
         }
-        
+
         // 親に追加の1枚
         if let Some(tile) = self.wall.pop() {
             self.players[self.dealer].draw_tile(tile);
@@ -283,7 +302,14 @@ impl Game {
     pub fn can_someone_win(&self, tile: &Tile) -> Vec<usize> {
         let mut winners = Vec::new();
         for (i, player) in self.players.iter().enumerate() {
-            if i != self.current_player && player.can_win(tile) {
+            if i == self.current_player {
+                continue;
+            }
+            let can_win = match self.mode {
+                GameMode::FiveTile => player.can_win_with_mode(tile, GameMode::FiveTile),
+                _ => player.can_win(tile),
+            };
+            if can_win {
                 winners.push(i);
             }
         }
@@ -865,6 +891,25 @@ mod tests {
         // ただし自分自身なら全表示
         let own = game.get_visible_tiles_of_opponent(0, 0);
         assert_eq!(own.len(), game.players[0].hand.get_tiles().len());
+    }
+
+    /// 5 枚麻雀の配牌: 子 5 枚 / 親 6 枚
+    #[test]
+    fn test_five_tile_initial_deal() {
+        let names = vec![
+            "P1".to_string(),
+            "P2".to_string(),
+            "P3".to_string(),
+            "P4".to_string(),
+        ];
+        let game = Game::new_with_mode(names, GameMode::FiveTile);
+
+        assert_eq!(game.players[0].tile_count(), 6, "親（P1）は 6 枚");
+        for i in 1..4 {
+            assert_eq!(game.players[i].tile_count(), 5, "子（P{}）は 5 枚", i + 1);
+        }
+        // ドラ表示牌 1 枚は配られている
+        assert_eq!(game.dora_indicators.len(), 1);
     }
 
     /// 二度ヅモ直後は親手牌が 15 枚になり、(1枚目, 2枚目) を返す（打牌は呼び出し側責務）。

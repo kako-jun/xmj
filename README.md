@@ -50,6 +50,9 @@ cargo run -- --mode seikyo
 
 # 鷲巣麻雀ルール（3/4 透明牌、他家の glass 牌が見える）
 cargo run -- --mode washizu
+
+# 5枚麻雀（クライマックスだけ麻雀）
+cargo run -- --mode five-tile
 ```
 
 ゲームが起動したら、手牌から打牌する牌を入力してください:
@@ -126,6 +129,12 @@ python3 -m http.server 8000
   - ✅ 可視性 API: `Game::get_visible_tiles_of_opponent(observer, target)` で他家手牌のうち glass 牌のみ取得
   - ✅ CLI 表示: Washizu モード時のみ `[CPUx の透明牌: ...]` を各他家に追加表示。Standard/Seikyo の表示には影響しない
   - 🚧 血液ポイント・牌の使用回数制限などの追加ルールは follow-up
+
+- ✅ **5枚麻雀** (`--mode five-tile`): クライマックスだけ麻雀。手牌 5 枚（親 6 枚）スタート、雀頭+面子1組で和了
+  - ✅ 配牌: `GameMode::FiveTile` で子 5 枚 / 親 6 枚（ツモ番が回った状態）
+  - ✅ 和了判定: `Hand::can_win_five_tile` / `is_tenpai_five_tile` で雀頭(2)+面子(3) を判定
+  - ✅ 点数計算: `scoring::score_five_tile` 基礎点 1000 + タンヤオ 1000
+  - 🚧 字牌の特殊効果カード化、ドラエスカレート、ボスステージ、イカサマ要素は follow-up
 
 #### Limitations（誠京麻雀の現状）
 

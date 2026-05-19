@@ -16,6 +16,19 @@ pub enum Honor {
     Chun,   // 中 (cn)
 }
 
+impl Honor {
+    /// 字牌 7 種の全列挙。テンパイ判定や待ち牌候補の走査などで使う。
+    pub const ALL: [Honor; 7] = [
+        Honor::Ton,
+        Honor::Nan,
+        Honor::Shaa,
+        Honor::Pei,
+        Honor::Haku,
+        Honor::Hatsu,
+        Honor::Chun,
+    ];
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TileType {
     Number { suit: Suit, value: u8 },

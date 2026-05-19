@@ -575,6 +575,32 @@ impl ScoringEngine {
     }
 }
 
+/// 5 枚麻雀の簡易点数計算。
+///
+/// 5 枚麻雀（FiveTile モード）専用の和了点数。
+/// - 基礎点: 1000
+/// - タンヤオ（手牌 5 枚すべて 2-8 の数牌）成立で +1000
+///
+/// 5 枚麻雀の和了形では「アガリ牌は手牌 5 枚の構成牌の 1 つ」であるため、
+/// 手牌のみ評価すれば十分。`win_tile` は和了役（ツモ/ロン等）の拡張用の引数として保持する。
+///
+/// 戻り値は和了者が受け取る合計点数。
+pub fn score_five_tile(hand: &Hand, _win_tile: &Tile) -> i32 {
+    let tiles = hand.get_tiles();
+
+    let mut score: i32 = 1000;
+
+    let is_tanyao = tiles.iter().all(|tile| match tile.tile_type {
+        TileType::Number { value, .. } => (2..=8).contains(&value),
+        TileType::Honor(_) => false,
+    });
+    if is_tanyao {
+        score += 1000;
+    }
+
+    score
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -625,5 +651,42 @@ mod tests {
         if let Some(scoring) = result {
             assert!(scoring.han >= 1);
         }
+    }
+
+    /// 5 枚麻雀: タンヤオ（手牌 5 枚すべて 2-8）成立で 2000 点
+    /// 手牌: 2m 2m 5p 5p 5p（雀頭 + 刻子の完成形、すべて 2-8）
+    #[test]
+    fn test_score_five_tile_tanyao() {
+        let mut hand = Hand::new();
+        hand.add_tile(Tile::new_number(Suit::Man, 2, false));
+        hand.add_tile(Tile::new_number(Suit::Man, 2, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+
+        // win_tile は手牌の構成牌の 1 つ（新仕様）
+        let win_tile = Tile::new_number(Suit::Man, 2, false);
+        let score = score_five_tile(&hand, &win_tile);
+
+        // 基礎点 1000 + タンヤオ 1000 = 2000
+        assert_eq!(score, 2000, "タンヤオで 2000 点");
+    }
+
+    /// 5 枚麻雀: タンヤオ不成立（1 or 9 or 字牌含む）なら基礎点のみ
+    /// 手牌: 1m 1m 5p 5p 5p（1m を含むのでタンヤオ不可）
+    #[test]
+    fn test_score_five_tile_no_tanyao() {
+        let mut hand = Hand::new();
+        hand.add_tile(Tile::new_number(Suit::Man, 1, false));
+        hand.add_tile(Tile::new_number(Suit::Man, 1, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+
+        let win_tile = Tile::new_number(Suit::Man, 1, false);
+        let score = score_five_tile(&hand, &win_tile);
+
+        // 基礎点 1000 のみ
+        assert_eq!(score, 1000, "タンヤオなしは基礎点のみ");
     }
 }
