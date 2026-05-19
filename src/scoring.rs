@@ -2,7 +2,7 @@ use crate::tile::{Tile, TileType, Honor, Suit};
 use crate::hand::{Hand, MeldType};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Yaku {
     // 一飜役
     Riichi,
@@ -28,6 +28,7 @@ pub enum Yaku {
     Sankantsu,
     Chiitoitsu,
     Shousangen,
+    Honroutou,
 
     // 三飜役
     Honitsu,
