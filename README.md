@@ -59,7 +59,22 @@ cargo run -- --mode east-west
 
 # 闇麻（闇牌・照射）
 cargo run -- --mode yamima
+
+# リアルタイム麻雀（ターン制廃止・5 秒タイマー）
+cargo run -- --mode realtime
 ```
+
+**モード早見表**:
+
+| モード        | フラグ                | 概要                                                       |
+| ------------- | --------------------- | ---------------------------------------------------------- |
+| 通常麻雀      | (なし)                | 標準的なリーチ麻雀                                         |
+| 誠京麻雀      | `--mode seikyo`       | 場代・二度ヅモ・役満祝儀（『天』『アカギ』）               |
+| 鷲巣麻雀      | `--mode washizu`      | 3/4 透明牌、他家の glass 牌が見える（『アカギ』）           |
+| 5枚麻雀       | `--mode five-tile`    | クライマックスだけ麻雀。手牌 5 枚スタート                  |
+| 東西戦        | `--mode east-west`    | クリア麻雀（『天』チーム戦）                               |
+| 闇麻          | `--mode yamima`       | 闇牌（裏向き打牌）+ 照射ルール                             |
+| リアルタイム麻雀 | `--mode realtime` | ターン制廃止、全員独立タイマー（5 秒）+ 鳴き早い者勝ち |
 
 ゲームが起動したら、手牌から打牌する牌を入力してください:
 
@@ -170,9 +185,18 @@ PR #21 時点の実装は API レベル完備 + CLI からの最低限の動線�
 - **場代の親回収帰属**: 標準解釈を採用（誰が和了しても pot は和了者が回収）。親回収バリアントは将来オプション化検討
 - **供託の流局持ち越し**: `winner_takes_pot` を呼ばなければ pot は自然に持ち越されるため、流局処理ロジックさえ書けば対応可能
 
-### 実装予定
+### リアルタイム麻雀 (RealTime)
 
-- 🚧 **リアルタイム麻雀**: 同時打牌、早い者勝ちの鳴き
+`cargo run -- --mode realtime` で起動。ターン制を廃止、全員独立タイマー (5 秒) で
+ツモ → 打牌を回す。タイムアウトで自動ツモ切り。鳴き宣言は早い者勝ちで優先順位は
+**Ron > Pon > Kan > Chi**（同優先は先勝ち）。
+
+- ✅ `GameMode::RealTime` モード追加
+- ✅ `realtime` モジュール: `Call`, `CallKind`, `PlayerTimer`, `resolve_calls`, `should_auto_discard`
+- ✅ Game 統合: `tick_timers(delta_ms)` / `timed_out_players()` / `auto_discard_for(idx)` / `reset_player_timer(idx)` / `resolve_pending_calls(calls)`
+- ✅ CLI: `--mode realtime` / `--mode real-time` / `--mode real_time` で起動。起動メッセージのみ
+- 🚧 完全な同時打牌入力ループは Rust の同期 I/O では実現できないため CLI 版の範疇外。web/wasm + WebRTC シグナリングは follow-up
+- 🚧 タイマーの実時間進行（`requestAnimationFrame` / async タスク）は呼び出し側の責務
 
 ## プロジェクト構成
 

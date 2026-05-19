@@ -1,4 +1,5 @@
 use crate::player::Player;
+use crate::realtime::{self, PlayerTimer};
 use crate::scoring::Yaku;
 use crate::tile::{Tile, TileType, Suit, Honor};
 use rand::seq::SliceRandom;
@@ -18,6 +19,10 @@ use std::collections::{HashMap, HashSet};
 ///   河に置ける。他家からは「闇牌」（種類非公開）として見え、鳴き・ロンの対象に
 ///   できない。ターンプレイヤーは点棒 500 点を支払って「照射」を宣言することで
 ///   他家の闇牌を公開させられる。
+/// - `RealTime`: リアルタイム麻雀。ターン制を廃止、全員が独立タイマー（5 秒）で
+///   ツモ→打牌を繰り返す。タイムアウトで自動ツモ切り。鳴き宣言は早い者勝ちで
+///   優先順位は Ron > Pon > Kan > Chi。本実装は Rust core のロジック層のみで、
+///   完全な同時打牌入力ループは CLI 同期版の範疇外（web/wasm follow-up）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameMode {
     Standard,
@@ -26,6 +31,7 @@ pub enum GameMode {
     FiveTile,
     EastWest,
     Yamima,
+    RealTime,
 }
 
 /// 東西戦（クリア麻雀）のチーム。
@@ -108,6 +114,12 @@ pub struct Game {
     /// `east_west_target_yaku()` 全 5 種が揃ったチームが勝利。
     /// EastWest 以外のモードでは初期化はされるが書き込まれない（no-op）。
     pub team_progress: HashMap<Team, HashSet<Yaku>>,
+    /// リアルタイム麻雀のプレイヤー別タイマー（4 つ、各 5000ms 制限）。
+    ///
+    /// `GameMode::RealTime` のときのみ実質的に意味を持つが、コストが極小なので
+    /// 全モードで `PlayerTimer::default_limit()` 初期化する。
+    /// 進行は呼び出し側が `tick_timers(delta_ms)` を周期的に呼ぶ。
+    pub player_timers: Vec<PlayerTimer>,
 }
 
 impl Game {
@@ -135,6 +147,10 @@ impl Game {
         team_progress.insert(Team::East, HashSet::new());
         team_progress.insert(Team::West, HashSet::new());
 
+        // 4 人ぶんの PlayerTimer をデフォルト 5000ms 制限で初期化。
+        // RealTime 以外のモードでも持つが書き込み・読み込みされないため実害なし。
+        let player_timers = (0..4).map(|_| PlayerTimer::default_limit()).collect();
+
         let mut game = Self {
             players,
             wall: Vec::new(),
@@ -148,6 +164,7 @@ impl Game {
             pot: 0,
             dealer_won_last: false,
             team_progress,
+            player_timers,
         };
 
         game.initialize_wall();
@@ -349,6 +366,17 @@ impl Game {
         }
     }
 
+    /// 通常打牌。`current_player` が `tile` を捨て、河に追加して次の手番に進む。
+    ///
+    /// - 手牌に `tile` が無ければ false（state は変化しない）
+    /// - 成功時: 河に追加 + `last_discard` 更新 + `last_discard_hidden=false` + `next_player()`
+    ///
+    /// **タイマーセマンティクス**: 本関数は `current_player` のタイマー
+    /// （`player_timers[current_player]`）には触れない。`GameMode::RealTime` で運用する
+    /// ときは、打牌成功後に呼び出し側が別途
+    /// [`Game::reset_player_timer`]`(打牌したプレイヤー idx)` を呼んで経過時間を 0 に
+    /// 戻すこと。`Standard` 等のターン制モードではタイマーが実質未使用なので呼ばなく
+    /// てもよい。
     pub fn discard_tile(&mut self, tile: Tile) -> bool {
         if self.players[self.current_player].discard_tile(tile) {
             self.last_discard = Some(tile);
@@ -769,6 +797,86 @@ impl Game {
         } else {
             None
         }
+    }
+
+    // ========================================
+    // RealTime（リアルタイム麻雀）API
+    // ========================================
+
+    /// 全プレイヤーのタイマーを `delta_ms` 進める。
+    ///
+    /// `GameMode::RealTime` 以外でも安全に呼べる（フィールドは常に保持しているため）が、
+    /// 他モードでは意味を持たない。
+    pub fn tick_timers(&mut self, delta_ms: u64) {
+        for timer in self.player_timers.iter_mut() {
+            timer.tick(delta_ms);
+        }
+    }
+
+    /// 現在タイムアウト中のプレイヤー idx 一覧。
+    ///
+    /// `elapsed_ms >= limit_ms` を満たすプレイヤーを昇順で返す。
+    pub fn timed_out_players(&self) -> Vec<usize> {
+        self.player_timers
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| if t.is_timeout() { Some(i) } else { None })
+            .collect()
+    }
+
+    /// 指定プレイヤーが手牌から自動ツモ切り（手牌末尾＝最新ツモ）。
+    ///
+    /// - 範囲外 idx なら None
+    /// - 手牌が空なら None
+    /// - 成功時: 手牌から末尾牌を除去 + 河に discard として追加 + `last_discard` 更新 +
+    ///   `last_discard_hidden=false` + 当該プレイヤーのタイマーリセット
+    ///
+    /// **注意**: `current_player` は変更しない。RealTime ではターンの概念が無いため、
+    /// この関数は「タイムアウトしたプレイヤーの自動打牌」だけを行い、誰が次に打つかは
+    /// 呼び出し側のスケジューラに委ねる。
+    pub fn auto_discard_for(&mut self, player_idx: usize) -> Option<Tile> {
+        if player_idx >= self.players.len() {
+            return None;
+        }
+        let tile = {
+            let tiles = self.players[player_idx].hand.get_tiles();
+            realtime::pick_auto_discard_tile(tiles)?
+        };
+        // Player::discard_tile は「手牌から remove + 河に追加」を 1 つの API でこなす。
+        if !self.players[player_idx].discard_tile(tile) {
+            return None;
+        }
+        self.last_discard = Some(tile);
+        self.last_discard_hidden = false;
+        self.player_timers[player_idx].reset();
+        Some(tile)
+    }
+
+    /// 指定プレイヤーのタイマー（経過時間）を 0 に戻す。`limit_ms` は維持。
+    ///
+    /// `GameMode::RealTime` で `discard_tile` / `auto_discard_for` を**自前の経路で**
+    /// 通したあとに呼び出し側が呼ぶ必要がある（`discard_tile` パス自体はタイマーに
+    /// 触れないため）。`auto_discard_for` 内では自動的にリセットされる。
+    ///
+    /// **戻り値ポリシー**: 範囲外 `player_idx` は silently ignore（戻り値なし）。
+    /// これは `tick_timers` / `timed_out_players` と揃えた API 形状で、呼び出し側に
+    /// プレイヤー数の検査責任を持たせない（4 人席という前提が崩れたとき bool/Result
+    /// で返してもハンドリングできることが少ないため）。範囲外の呼び出しは noop。
+    pub fn reset_player_timer(&mut self, player_idx: usize) {
+        if player_idx < self.player_timers.len() {
+            self.player_timers[player_idx].reset();
+        }
+    }
+
+    /// 同フレームに集まった鳴き宣言から優先順位通りに 1 件採用する。
+    ///
+    /// `realtime::resolve_calls` のラッパー。優先順位は Ron > Pon > Kan > Chi、
+    /// 同優先は入力順で先勝ち。
+    pub fn resolve_pending_calls(
+        &self,
+        calls: &[realtime::Call],
+    ) -> Option<realtime::Call> {
+        realtime::resolve_calls(calls)
     }
 
     pub fn is_game_over(&self) -> bool {
@@ -1481,5 +1589,171 @@ mod tests {
         game.players[0].discards.push(Discard { tile, is_hidden: true });
 
         assert_eq!(game.light_up(1, 0, 0), None, "Standard では照射不可");
+    }
+
+    // ========================================
+    // RealTime（リアルタイム麻雀）統合 API のテスト
+    // realtime モジュール単体ではなく Game レベルでの統合動作を検証する。
+    // ========================================
+
+    fn realtime_names() -> Vec<String> {
+        vec![
+            "P1".to_string(),
+            "P2".to_string(),
+            "P3".to_string(),
+            "P4".to_string(),
+        ]
+    }
+
+    /// `auto_discard_for` に範囲外 idx (>= 4) を渡すと None で no-op。
+    #[test]
+    fn test_realtime_auto_discard_returns_none_for_out_of_range_idx() {
+        let mut game = Game::new_with_mode(realtime_names(), GameMode::RealTime);
+        let last_discard_before = game.last_discard;
+
+        assert_eq!(
+            game.auto_discard_for(4),
+            None,
+            "idx=4 は範囲外で None"
+        );
+        assert_eq!(
+            game.auto_discard_for(99),
+            None,
+            "idx=99 も範囲外で None"
+        );
+        assert_eq!(
+            game.last_discard, last_discard_before,
+            "範囲外呼び出しでは last_discard も変化しない"
+        );
+    }
+
+    /// 手牌を空にしてから `auto_discard_for` を呼ぶと None。
+    #[test]
+    fn test_realtime_auto_discard_returns_none_when_hand_empty() {
+        let mut game = Game::new_with_mode(realtime_names(), GameMode::RealTime);
+        // player 1 の手牌をすべて消す（remove で空に）
+        while !game.players[1].hand.get_tiles().is_empty() {
+            let tile = game.players[1].hand.get_tiles()[0];
+            assert!(game.players[1].hand.remove_tile(&tile));
+        }
+        assert_eq!(game.players[1].hand.get_tiles().len(), 0);
+
+        let last_discard_before = game.last_discard;
+        assert_eq!(
+            game.auto_discard_for(1),
+            None,
+            "手牌が空なら None"
+        );
+        assert_eq!(
+            game.last_discard, last_discard_before,
+            "空手牌時は last_discard が変化しない"
+        );
+    }
+
+    /// `auto_discard_for` 成功時も `current_player` は変化しない（RealTime はターン制ではない）。
+    #[test]
+    fn test_realtime_auto_discard_does_not_change_current_player() {
+        let mut game = Game::new_with_mode(realtime_names(), GameMode::RealTime);
+        let before = game.current_player;
+
+        // player 2 を強制 auto_discard（手牌は配牌で 13 枚あるはず）
+        assert!(
+            game.auto_discard_for(2).is_some(),
+            "通常の配牌状態なら auto_discard_for は成功する"
+        );
+        assert_eq!(
+            game.current_player, before,
+            "auto_discard_for は current_player を進めない"
+        );
+    }
+
+    /// `auto_discard_for(player_idx)` は当該プレイヤーのタイマーだけを 0 に戻し、
+    /// 他プレイヤーの elapsed_ms は維持する。
+    #[test]
+    fn test_realtime_auto_discard_resets_only_that_players_timer() {
+        let mut game = Game::new_with_mode(realtime_names(), GameMode::RealTime);
+        // 全員のタイマーを 1234ms 進める
+        game.tick_timers(1234);
+        for t in &game.player_timers {
+            assert_eq!(t.elapsed_ms, 1234);
+        }
+
+        // player 0 だけ auto_discard
+        assert!(game.auto_discard_for(0).is_some());
+
+        assert_eq!(
+            game.player_timers[0].elapsed_ms, 0,
+            "auto_discard した player 0 のタイマーは 0"
+        );
+        for i in 1..4 {
+            assert_eq!(
+                game.player_timers[i].elapsed_ms, 1234,
+                "他プレイヤー (idx={i}) のタイマーは tick された値のまま"
+            );
+        }
+    }
+
+    /// `tick_timers(500)` は 4 人全員の elapsed_ms を一括で進める。
+    #[test]
+    fn test_realtime_tick_timers_advances_all_four() {
+        let mut game = Game::new_with_mode(realtime_names(), GameMode::RealTime);
+        for t in &game.player_timers {
+            assert_eq!(t.elapsed_ms, 0, "初期値は 0");
+        }
+
+        game.tick_timers(500);
+
+        for (i, t) in game.player_timers.iter().enumerate() {
+            assert_eq!(
+                t.elapsed_ms, 500,
+                "player {i} の elapsed_ms は 500"
+            );
+        }
+
+        // もう一度 tick すると加算される
+        game.tick_timers(250);
+        for t in &game.player_timers {
+            assert_eq!(t.elapsed_ms, 750);
+        }
+    }
+
+    /// `Game::resolve_pending_calls` は `realtime::resolve_calls` の単純委譲。
+    /// 同じ入力に対して同じ結果が返ることを確認する。
+    #[test]
+    fn test_realtime_resolve_pending_calls_delegates_to_realtime_module() {
+        let game = Game::new_with_mode(realtime_names(), GameMode::RealTime);
+        use crate::realtime::{resolve_calls, Call, CallKind};
+
+        // ケース 1: 複数の宣言から Ron が勝つ
+        let calls = vec![
+            Call { player_idx: 3, kind: CallKind::Chi },
+            Call { player_idx: 1, kind: CallKind::Pon },
+            Call { player_idx: 0, kind: CallKind::Ron },
+        ];
+        assert_eq!(
+            game.resolve_pending_calls(&calls),
+            resolve_calls(&calls),
+            "Game::resolve_pending_calls は realtime::resolve_calls の委譲",
+        );
+        assert_eq!(
+            game.resolve_pending_calls(&calls).unwrap().kind,
+            CallKind::Ron,
+        );
+
+        // ケース 2: 空ベクタは None
+        let empty: Vec<Call> = Vec::new();
+        assert_eq!(game.resolve_pending_calls(&empty), None);
+        assert_eq!(game.resolve_pending_calls(&empty), resolve_calls(&empty));
+
+        // ケース 3: 同優先は先勝ち
+        let same = vec![
+            Call { player_idx: 2, kind: CallKind::Pon },
+            Call { player_idx: 3, kind: CallKind::Pon },
+        ];
+        assert_eq!(
+            game.resolve_pending_calls(&same),
+            resolve_calls(&same),
+        );
+        assert_eq!(game.resolve_pending_calls(&same).unwrap().player_idx, 2);
     }
 }
