@@ -4,6 +4,7 @@
 import { Application } from 'pixi.js'
 import { App } from './game/App'
 import { STAGE_WIDTH, STAGE_HEIGHT, TABLE_BG_COLOR } from './game/constants'
+import type { GameStartMode } from './game/types'
 import { initWasm, WasmGameBridge } from './game/wasm'
 
 const setLoadingProgress = (ratio: number): void => {
@@ -14,6 +15,19 @@ const setLoadingProgress = (ratio: number): void => {
 const removeLoading = (): void => {
   const el = document.getElementById('loading')
   if (el) el.remove()
+}
+
+const startModeToPlayerIndex = (mode: GameStartMode): number => {
+  switch (mode) {
+    case 'cpu-east':
+      return 0
+    case 'cpu-south':
+      return 1
+    case 'cpu-west':
+      return 2
+    case 'cpu-north':
+      return 3
+  }
 }
 
 const main = async (): Promise<void> => {
@@ -46,7 +60,9 @@ const main = async (): Promise<void> => {
 
   const app = new App(pixiApp, {
     cpuTurnDelayMs: 280,
-    createBridge: canStartGame ? () => WasmGameBridge.createHybrid('あなた', 0) : null,
+    createBridge: canStartGame
+      ? mode => WasmGameBridge.createHybrid('あなた', startModeToPlayerIndex(mode))
+      : null,
   })
   if (import.meta.env.DEV) {
     window.__xmjApp = app

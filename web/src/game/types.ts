@@ -29,6 +29,9 @@ export type GamePhase = 'title' | 'game' | 'over'
 /** プレイヤー位置 (東家=0, 南=1, 西=2, 北=3)。 */
 export type PlayerIndex = 0 | 1 | 2 | 3
 
+/** タイトル画面から選ぶ開始プリセット。 */
+export type GameStartMode = 'cpu-east' | 'cpu-south' | 'cpu-west' | 'cpu-north'
+
 /**
  * プレイヤー 1 人の状態。手牌・河・点数を持つ。
  * isCPU で CPU/人間を区別 (Wasm 側の human_player_index に対応)。

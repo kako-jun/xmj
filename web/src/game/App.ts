@@ -7,7 +7,7 @@ import {
 } from './constants'
 import { createTableScene } from './table'
 import type { TableActionButton } from './table'
-import type { GameState, PlayerIndex, Tile } from './types'
+import type { GameStartMode, GameState, PlayerIndex, Tile } from './types'
 import { createGameStateFromBridge } from './bridgeState'
 import { tileToCuiCode } from './types'
 import { WasmGameBridge } from './wasm'
@@ -16,7 +16,7 @@ import { createResultScene, type ResultEntry } from './resultScene'
 
 interface AppOptions {
   cpuTurnDelayMs?: number
-  createBridge?: (() => WasmGameBridge) | null
+  createBridge?: ((mode: GameStartMode) => WasmGameBridge) | null
 }
 
 export class App {
@@ -28,8 +28,9 @@ export class App {
   eventLog: string[] = []
   resultMessage: string | null = null
   titleNotice: string | null = null
+  selectedStartMode: GameStartMode = 'cpu-east'
   private cpuTurnDelayMs: number
-  private createBridge: (() => WasmGameBridge) | null
+  private createBridge: ((mode: GameStartMode) => WasmGameBridge) | null
   private cpuTurnTask: Promise<void> | null = null
   private cpuTurnGeneration = 0
   private destroyedBridges = new WeakSet<WasmGameBridge>()
@@ -76,6 +77,12 @@ export class App {
       createTitleScene({
         notice: this.titleNotice,
         startEnabled: this.createBridge !== null,
+        selectedMode: this.selectedStartMode,
+        modes: this.buildTitleModes(),
+        onSelectMode: mode => {
+          this.selectedStartMode = mode
+          this.showTitleScene(this.titleNotice)
+        },
         onStart: () => {
           this.startNewGame()
         },
@@ -90,7 +97,7 @@ export class App {
     }
 
     try {
-      const bridge = this.createBridge()
+      const bridge = this.createBridge(this.selectedStartMode)
       this.titleNotice = null
       this.startGame(bridge, 0)
       return true
@@ -348,6 +355,20 @@ export class App {
       eventLog: this.eventLog,
     })
     this.replaceStageRoot(table)
+  }
+
+  private buildTitleModes(): Array<{
+    key: GameStartMode
+    title: string
+    description: string
+    enabled: boolean
+  }> {
+    return [
+      { key: 'cpu-east', title: '東家', description: 'あなたが親で開始', enabled: true },
+      { key: 'cpu-south', title: '南家', description: '右席から開始', enabled: true },
+      { key: 'cpu-west', title: '西家', description: '対面から開始', enabled: true },
+      { key: 'cpu-north', title: '北家', description: '左席から開始', enabled: true },
+    ]
   }
 
   private replaceStageRoot(root: Container): void {

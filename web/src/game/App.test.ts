@@ -62,6 +62,11 @@ const getActionButton = (stage: Container, key: string): Container => {
 const getSceneButton = (stage: Container, label: string): Container =>
   (stage.children[0] as Container).getChildByLabel(label) as Container
 
+const getSceneMode = (stage: Container, key: string): Container =>
+  ((stage.children[0] as Container).getChildByLabel('title-mode-row') as Container).getChildByLabel(
+    `title-mode-${key}`
+  ) as Container
+
 const getSceneTexts = (stage: Container): Text[] =>
   ((stage.children[0] as Container).children.filter(
     (child): child is Text => child instanceof Text
@@ -207,15 +212,33 @@ describe('App', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const bridges = [createBridgeMock(), createBridgeMock()]
-    const createBridge = vi.fn(() => bridges.shift() as import('./wasm').WasmGameBridge)
+    const createBridge = vi.fn(
+      () => bridges.shift() as import('./wasm').WasmGameBridge
+    )
     const app = new App(fakeApp, { createBridge })
 
     app.showTitleScene()
     getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
 
     expect(createBridge).toHaveBeenCalledTimes(1)
+    expect(createBridge).toHaveBeenCalledWith('cpu-east')
     expect((stage.children[0] as Container).label).toBe('game-table')
     expect(app.bridge).not.toBe(null)
+  })
+
+  it('title-scene で開始席を切り替えてから開始できる', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const createBridge = vi.fn(() => createBridgeMock())
+    const app = new App(fakeApp, { createBridge })
+
+    app.showTitleScene()
+    getSceneMode(stage, 'cpu-south').emit('pointertap', {} as never)
+    getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
+
+    expect(app.selectedStartMode).toBe('cpu-south')
+    expect(createBridge).toHaveBeenCalledWith('cpu-south')
+    expect((stage.children[0] as Container).label).toBe('game-table')
   })
 
   it('showTitleScene の開始処理で createBridge が例外を投げたときは title-scene に留まり理由を表示する', () => {

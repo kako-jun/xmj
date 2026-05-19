@@ -83,13 +83,21 @@
 - `web/src/game/table.ts` に残っていた旧 `result-overlay` 分岐は削除し、終局 UI は `result-scene` へ一本化
 - テスト追加: タイトル開始、起動失敗時の開始不可、初期化例外、飛び終局から結果画面遷移、再戦・タイトル復帰を `App.test.ts` で固定
 
+### Issue #9 — タイトルシーン + 開始席選択
+
+- `web/src/game/titleScene.ts`: 東家 / 南家 / 西家 / 北家の 4 カードを追加し、開始前に人間席を選べるタイトル画面へ拡張
+- `web/src/game/App.ts`: `selectedStartMode` を保持し、タイトル画面での選択を `startNewGame()` と再戦へ引き継ぐ
+- `web/src/main.ts`: `WasmGameBridge.createHybrid('あなた', position)` の `position` をタイトル選択から決めるよう変更
+- Rust core の新 API は増やさず、既存の `newHybrid(human_name, human_position)` だけでモード差分を吸収
+- テスト追加: 既定の東家開始に加え、南家選択後の開始が `createBridge('cpu-south')` で呼ばれることを `App.test.ts` で固定
+
 ## 残 Issue
 
 | Issue | 内容 | 主要成果物 |
 |---|---|---|
-| #9 | 詳細結果 API に合わせた結果 UI 拡張 | 和了者 / 役 / 打点 / 収支 API 追加後に本実装 |
+| 結果詳細 | 詳細結果 API に合わせた結果 UI 拡張 | 和了者 / 役 / 打点 / 収支 API 追加後に本実装 |
 
-Issue #8 の MVP は完了。Rust core から「誰が和了したか」「役」「収支」を直接受け取る API はまだ無いため、結果画面の詳細欄は `現 API では未取得` のプレースホルダに留めている。
+Issue #9 までの MVP は完了。Rust core から「誰が和了したか」「役」「収支」を直接受け取る API はまだ無いため、結果画面の詳細欄は `現 API では未取得` のプレースホルダに留めている。
 
 ## 設計メモ
 
