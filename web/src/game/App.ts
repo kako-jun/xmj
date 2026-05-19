@@ -1,5 +1,10 @@
 import { Application, Graphics } from 'pixi.js'
-import { STAGE_WIDTH, STAGE_HEIGHT, TABLE_BG_COLOR } from './constants'
+import {
+  STAGE_WIDTH,
+  STAGE_HEIGHT,
+  TABLE_BG_COLOR,
+  EVENT_LOG_LIMIT,
+} from './constants'
 import { createTableScene } from './table'
 import type { TableActionButton } from './table'
 import type { GameState, PlayerIndex, Tile } from './types'
@@ -21,6 +26,7 @@ export class App {
   resultMessage: string | null = null
   private cpuTurnDelayMs: number
   private cpuTurnTask: Promise<void> | null = null
+  private cpuTurnGeneration = 0
 
   constructor(app: Application, options: AppOptions = {}) {
     this.app = app
@@ -41,6 +47,8 @@ export class App {
    * スモークテストや初期描画確認用であり、ターン進行 UI の起点には使わない。
    */
   showInitialTable(gameState: GameState): void {
+    this.invalidateCpuTurnTask()
+    this.bridge = null
     this.gameState = gameState
     this.selectedHandIndex = null
     this.eventLog = []
@@ -49,6 +57,7 @@ export class App {
   }
 
   startGame(bridge: WasmGameBridge, humanPlayerIndex: PlayerIndex = 0): void {
+    this.invalidateCpuTurnTask()
     this.bridge = bridge
     this.humanPlayerIndex = humanPlayerIndex
     this.selectedHandIndex = null
@@ -57,9 +66,7 @@ export class App {
     this.refreshFromBridge()
 
     if (this.shouldDrawHumanTile()) {
-      this.bridge.drawTile()
-      this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がツモ ${this.wallSummary()}`)
-      this.refreshFromBridge()
+      this.drawHumanTileAndRefresh()
     }
   }
 
@@ -83,7 +90,7 @@ export class App {
   }
 
   private appendLog(message: string): void {
-    this.eventLog = [...this.eventLog.slice(-11), message]
+    this.eventLog = [...this.eventLog.slice(-(EVENT_LOG_LIMIT - 1)), message]
   }
 
   private getPlayerName(playerIndex: PlayerIndex): string {
@@ -103,6 +110,24 @@ export class App {
     return new Promise(resolve => {
       window.setTimeout(resolve, ms)
     })
+  }
+
+  private invalidateCpuTurnTask(): void {
+    this.cpuTurnGeneration += 1
+    this.cpuTurnTask = null
+  }
+
+  private isCpuTurnGenerationCurrent(generation: number): boolean {
+    return generation === this.cpuTurnGeneration
+  }
+
+  private drawHumanTileAndRefresh(): boolean {
+    if (!this.bridge) return false
+    const drew = this.bridge.drawTile()
+    if (!drew) return false
+    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がツモ ${this.wallSummary()}`)
+    this.refreshFromBridge()
+    return true
   }
 
   private finalizeGameIfNeeded(): void {
@@ -154,9 +179,12 @@ export class App {
     this.finalizeGameIfNeeded()
 
     if (this.cpuTurnDelayMs > 0) {
+      const generation = this.cpuTurnGeneration
       if (!this.cpuTurnTask) {
-        this.cpuTurnTask = this.runCpuTurnsAsync().finally(() => {
-          this.cpuTurnTask = null
+        this.cpuTurnTask = this.runCpuTurnsAsync(generation).finally(() => {
+          if (this.isCpuTurnGenerationCurrent(generation)) {
+            this.cpuTurnTask = null
+          }
         })
       }
       return
@@ -165,49 +193,60 @@ export class App {
     while (!this.bridge.isGameOver() && this.bridge.isCurrentPlayerCpu()) {
       const currentPlayer = this.bridge.getCurrentPlayerId() as PlayerIndex
       const playerName = this.getPlayerName(currentPlayer)
-      this.appendLog(`${playerName} がツモ ${this.wallSummary()}`)
       const discardedTile = this.bridge.executeCpuTurn()
       this.refreshFromBridge()
+      this.appendLog(`${playerName} がツモ ${this.wallSummary()}`)
       this.appendLog(`${playerName} が ${discardedTile} を打牌 ${this.wallSummary()}`)
       this.finalizeGameIfNeeded()
     }
 
     if (this.shouldDrawHumanTile()) {
-      this.bridge.drawTile()
-      this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がツモ ${this.wallSummary()}`)
-      this.refreshFromBridge()
+      this.drawHumanTileAndRefresh()
     }
 
     this.finalizeGameIfNeeded()
   }
 
-  private async runCpuTurnsAsync(): Promise<void> {
+  private async runCpuTurnsAsync(generation: number): Promise<void> {
     if (!this.bridge) return
 
-    while (!this.bridge.isGameOver() && this.bridge.isCurrentPlayerCpu()) {
+    while (
+      this.isCpuTurnGenerationCurrent(generation) &&
+      this.bridge &&
+      !this.bridge.isGameOver() &&
+      this.bridge.isCurrentPlayerCpu()
+    ) {
       const currentPlayer = this.bridge.getCurrentPlayerId() as PlayerIndex
       const playerName = this.getPlayerName(currentPlayer)
       this.appendLog(`${playerName} が思考中`)
       this.renderTable()
       await this.sleep(this.cpuTurnDelayMs)
+      if (!this.isCpuTurnGenerationCurrent(generation) || !this.bridge) return
 
       const discardedTile = this.bridge.executeCpuTurn()
       this.refreshFromBridge()
+      if (!this.isCpuTurnGenerationCurrent(generation) || !this.bridge) return
+      this.appendLog(`${playerName} がツモ ${this.wallSummary()}`)
       this.appendLog(`${playerName} が ${discardedTile} を打牌 ${this.wallSummary()}`)
       this.finalizeGameIfNeeded()
 
-      if (!this.bridge.isGameOver() && this.bridge.isCurrentPlayerCpu()) {
+      if (
+        this.isCpuTurnGenerationCurrent(generation) &&
+        this.bridge &&
+        !this.bridge.isGameOver() &&
+        this.bridge.isCurrentPlayerCpu()
+      ) {
         await this.sleep(this.cpuTurnDelayMs)
       }
     }
 
-    if (this.shouldDrawHumanTile()) {
-      this.bridge.drawTile()
-      this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がツモ ${this.wallSummary()}`)
-      this.refreshFromBridge()
+    if (this.isCpuTurnGenerationCurrent(generation) && this.shouldDrawHumanTile()) {
+      this.drawHumanTileAndRefresh()
     }
 
-    this.finalizeGameIfNeeded()
+    if (this.isCpuTurnGenerationCurrent(generation)) {
+      this.finalizeGameIfNeeded()
+    }
   }
 
   private handleHandTileTap(index: number): void {

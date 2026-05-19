@@ -20,6 +20,8 @@ export const TEXT_MUTED_COLOR = 0xb8aa8c
 export const TEXT_DANGER_COLOR = 0xc93a3a
 export const TURN_GLOW_COLOR = 0xffd166
 export const SHADOW_COLOR = 0x000000
+export const EVENT_LOG_LIMIT = 12
+export const EVENT_LOG_VISIBLE_COUNT = 4
 
 // 牌の基本サイズ (Issue #4 で createTileGraphics が参照)
 export const TILE = {

@@ -68,7 +68,9 @@
 - `web/src/game/bridgeState.ts`: Rust 側 `get_game_state_string()` の `Last discard:` 行を `GameState.lastDiscard` に取り込み、`isGameOver()` と合わせて `phase='over'` を設定
 - `web/src/game/table.ts`: 中央情報盤に「直前打牌」、下段に「対局ログ」パネル、最小の終局オーバーレイを追加。現在手番・山牌残数・河更新・直前打牌・CPU 打牌ログが 1 画面で見える
 - 終局理由は Rust core の現 API に合わせた最小実装で、`isGameOver()` + wall/score から「山牌が尽きて終局」または「飛んで終局」を表示
-- テスト追加: `Last discard` パース、`phase='over'`、終局オーバーレイ、ログ蓄積を Vitest で固定
+- ログは内部保持 `12` 件・画面表示 `4` 件に固定。CPU の非同期経路は `思考中` → `ツモ` → `打牌`、同期経路は `ツモ` → `打牌` で揃え、人間側は `drawTile()` 成功時だけ `ツモ` を積む
+- `startGame()` / `showInitialTable()` / 新ゲーム開始では CPU 非同期タスクを世代トークンで無効化し、旧 bridge の遅延処理が新しい局面へ混線しないようにした
+- テスト追加: `Last discard` パース、`phase='over'`、終局オーバーレイ、ログ蓄積、非同期 CPU タスクの無効化を Vitest で固定
 
 ## 残 Issue
 

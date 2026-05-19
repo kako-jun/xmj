@@ -12,6 +12,7 @@ import {
   TABLE_FELT_INNER_COLOR,
   TABLE_GLOW_COLOR,
   TEXT_DANGER_COLOR,
+  EVENT_LOG_VISIBLE_COUNT,
   TEXT_MUTED_COLOR,
   TEXT_PRIMARY_COLOR,
   TILE,
@@ -517,7 +518,7 @@ const createEventLogPanel = (eventLog: string[]): Container => {
   title.y = 14
   panel.addChild(title)
 
-  const visibleEntries = eventLog.slice(-4)
+  const visibleEntries = eventLog.slice(-EVENT_LOG_VISIBLE_COUNT)
   visibleEntries.forEach((entry, index) => {
     const row = makeText(entry, 14, TEXT_PRIMARY_COLOR)
     row.x = 18

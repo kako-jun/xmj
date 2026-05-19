@@ -9,6 +9,7 @@ import { Container, Text } from 'pixi.js'
 import { App } from './App'
 import { initWithState } from './state'
 import type { Tile } from './types'
+import { EVENT_LOG_LIMIT } from './constants'
 
 const sampleState = `Round: 1 | Wall: 69 tiles
 Dora indicators: 5p
@@ -353,6 +354,7 @@ describe('App', () => {
     expect(drawCount).toBe(1)
     expect(app.gameState?.players[0].hand).toHaveLength(13)
     expect(stage.children.length).toBe(1)
+    expect(app.eventLog.some(entry => entry.includes('あなた がツモ'))).toBe(false)
   })
 
   it('discard action button から打牌できる', () => {
@@ -639,6 +641,79 @@ describe('App', () => {
     expect(app.gameState?.currentTurn).toBe(0)
   })
 
+  it('新しい startGame 後は古い非同期 cpuTurnTask が新しい bridge に混線しない', async () => {
+    vi.useFakeTimers()
+
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp, { cpuTurnDelayMs: 10 })
+
+    let oldCurrentPlayerId = 1
+    let oldCpuCount = 0
+    const oldBridge = createBridgeMock({
+      getCurrentPlayerId: () => oldCurrentPlayerId,
+      isCurrentPlayerHuman: () => oldCurrentPlayerId === 0,
+      isCurrentPlayerCpu: () => oldCurrentPlayerId !== 0,
+      executeCpuTurn: () => {
+        oldCpuCount += 1
+        oldCurrentPlayerId = 0
+        return '9m'
+      },
+    })
+
+    app.startGame(oldBridge, 0)
+    ;(app as unknown as { advanceTurnLoop: () => void }).advanceTurnLoop()
+
+    const newBridge = createBridgeMock({
+      drawTile: () => false,
+      getCurrentPlayerId: () => 0,
+      isCurrentPlayerHuman: () => true,
+      isCurrentPlayerCpu: () => false,
+      getPlayerName: (idx: number) => ['新しいあなた', 'CPU 南', 'CPU 西', 'CPU 北'][idx],
+    })
+
+    app.startGame(newBridge, 0)
+
+    await vi.runAllTimersAsync()
+
+    expect(oldCpuCount).toBe(0)
+    expect(app.bridge).toBe(newBridge)
+    expect(app.eventLog).toEqual(['対局開始'])
+    expect(app.gameState?.currentTurn).toBe(0)
+  })
+
+  it('showInitialTable は進行中の非同期 cpuTurnTask を無効化する', async () => {
+    vi.useFakeTimers()
+
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp, { cpuTurnDelayMs: 10 })
+
+    let oldCurrentPlayerId = 1
+    let oldCpuCount = 0
+    const oldBridge = createBridgeMock({
+      getCurrentPlayerId: () => oldCurrentPlayerId,
+      isCurrentPlayerHuman: () => oldCurrentPlayerId === 0,
+      isCurrentPlayerCpu: () => oldCurrentPlayerId !== 0,
+      executeCpuTurn: () => {
+        oldCpuCount += 1
+        oldCurrentPlayerId = 0
+        return '9m'
+      },
+    })
+
+    app.startGame(oldBridge, 0)
+    ;(app as unknown as { advanceTurnLoop: () => void }).advanceTurnLoop()
+    app.showInitialTable(initWithState({ phase: 'game', currentTurn: 2 }))
+
+    await vi.runAllTimersAsync()
+
+    expect(oldCpuCount).toBe(0)
+    expect(app.bridge).toBe(null)
+    expect(app.eventLog).toEqual([])
+    expect(app.gameState?.currentTurn).toBe(2)
+  })
+
   it('打牌ログに人間と CPU のイベントが積まれる', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
@@ -674,6 +749,7 @@ describe('App', () => {
     getActionButton(stage, 'discard').emit('pointertap', {} as never)
 
     expect(app.eventLog.some(entry => entry.includes('あなた が 1m を打牌'))).toBe(true)
+    expect(app.eventLog.some(entry => entry.includes('CPU 南 がツモ'))).toBe(true)
     expect(app.eventLog.some(entry => entry.includes('CPU 南 が 5m を打牌'))).toBe(true)
     expect(app.eventLog.some(entry => entry.includes('あなた がツモ'))).toBe(true)
   })
@@ -688,7 +764,7 @@ describe('App', () => {
       appendLog.call(app, `log-${index}`)
     }
 
-    expect(app.eventLog).toHaveLength(12)
+    expect(app.eventLog).toHaveLength(EVENT_LOG_LIMIT)
     expect(app.eventLog[0]).toBe('log-3')
     expect(app.eventLog[app.eventLog.length - 1]).toBe('log-14')
   })
