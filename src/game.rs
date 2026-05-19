@@ -30,7 +30,12 @@ pub struct Game {
     pub mode: GameMode,
     /// 供託（誠京麻雀の場代合計）。和了者が回収・流局で持ち越し
     pub pot: i32,
-    /// 前局で親が和了したか（= 連荘フラグ。二度ヅモ判定に使う）
+    /// 前局で親が和了したか（= 連荘フラグ。二度ヅモ判定に使う）。
+    ///
+    /// **注意**: 現状の xmj には「局終了→次局」のループ実装が無いため、
+    /// このフラグを更新する本番コードはまだ存在しない。
+    /// 外部から win-resolve 時に手動で更新するフラグとして API のみ提供している。
+    /// 完全な連荘配線は follow-up Issue で対応予定。
     pub dealer_won_last: bool,
 }
 
@@ -75,6 +80,15 @@ impl Game {
 
     /// 誠京麻雀の場代を全員から徴収して供託に積む。
     /// Standard モードでは no-op。
+    ///
+    /// # Arguments
+    /// - `amount`: 1 人あたりの場代額。標準は [`SEIKYO_SEAT_FEE`]（1000 点）。
+    ///   テストや特殊バリアントで上書きできるよう引数化している。
+    ///
+    /// # 仕様メモ
+    /// 本来は「**各局開始時**」に呼ぶべきだが、現状の xmj には局ループが無く、
+    /// `main.rs` ではゲーム起動時に 1 回だけ呼ぶ simplified version になっている。
+    /// 局ごとの再徴収配線は follow-up。複数回呼べば素直に pot が累積する設計。
     pub fn collect_seat_fee(&mut self, amount: i32) {
         if self.mode != GameMode::Seikyo {
             return;
@@ -98,11 +112,16 @@ impl Game {
         moved
     }
 
-    /// 親の二度ヅモ。
+    /// 親の二度ヅモ。**2 枚ツモするだけ。打牌は呼び出し側の責務**。
     ///
     /// 誠京麻雀かつ前局親和了（連荘）かつ現在のプレイヤーが親のときのみ、
     /// 山牌から 2 枚連続でツモして親の手牌に追加する。
     /// 戻り値は (1 枚目, 2 枚目) のタプル。山牌が 2 枚未満なら None を返す。
+    ///
+    /// **注意**: この関数を呼んだ直後、親の手牌は 15 枚（通常 13 + 2 ツモ、
+    /// または親初期 14 + 1 ツモから 2 枚追加）になる。和了判定 `tile_count() == 14`
+    /// を維持するには、呼び出し側で 1 枚を即捨てる UX を実装する必要がある。
+    /// `main.rs` の `handle_player_turn` がそのリファレンス実装。
     pub fn dealer_double_draw(&mut self) -> Option<(Tile, Tile)> {
         if self.mode != GameMode::Seikyo {
             return None;
@@ -630,5 +649,64 @@ mod tests {
         game.current_player = (game.dealer + 1) % 4; // 子の手番
 
         assert!(game.dealer_double_draw().is_none(), "親の手番でなければ発動しない");
+    }
+
+    /// pot が 0 のときに `winner_takes_pot` を呼んでも winner の点数は不変
+    #[test]
+    fn test_winner_takes_empty_pot() {
+        let mut game = Game::new_with_mode(seikyo_names(), GameMode::Seikyo);
+        // collect_seat_fee は呼ばない → pot は 0
+        assert_eq!(game.pot, 0);
+
+        let winner_score_before = game.players[2].score;
+        let moved = game.winner_takes_pot(2);
+
+        assert_eq!(moved, 0, "pot が空なら 0 が返る");
+        assert_eq!(game.players[2].score, winner_score_before, "winner の点数は不変");
+        assert_eq!(game.pot, 0);
+    }
+
+    /// `collect_seat_fee` を複数回呼ぶと pot が累積する（流局持ち越しのシミュレーション）
+    #[test]
+    fn test_pot_carries_over_multiple_collections() {
+        let mut game = Game::new_with_mode(seikyo_names(), GameMode::Seikyo);
+
+        for _ in 0..3 {
+            game.collect_seat_fee(SEIKYO_SEAT_FEE);
+        }
+
+        // 1000 × 4 人 × 3 回 = 12000
+        assert_eq!(game.pot, SEIKYO_SEAT_FEE * 4 * 3);
+        assert_eq!(game.pot, 12000);
+
+        // 各プレイヤーは初期 25000 - 3000 = 22000
+        for p in &game.players {
+            assert_eq!(p.score, 25000 - SEIKYO_SEAT_FEE * 3);
+        }
+    }
+
+    /// 二度ヅモ直後は親手牌が 15 枚になり、(1枚目, 2枚目) を返す（打牌は呼び出し側責務）。
+    ///
+    /// 実機の局ループでは「親が前局打牌した直後 = 手牌 13 枚」状態で次局が始まる想定。
+    /// 本テストは Game::new 直後（親 14 枚）から 1 枚捨てて 13 枚にしてから二度ヅモする。
+    #[test]
+    fn test_dealer_double_draw_returns_two_tiles_and_hand_size_15() {
+        let mut game = Game::new_with_mode(seikyo_names(), GameMode::Seikyo);
+        game.current_player = game.dealer;
+
+        // 親手牌を 14 → 13 にする（1 枚捨てる）
+        let first_tile = game.players[game.dealer].hand.get_tiles()[0];
+        assert!(game.players[game.dealer].discard_tile(first_tile));
+        // discard_tile は current_player を回さないので手動でリセット
+        game.current_player = game.dealer;
+        assert_eq!(game.players[game.dealer].tile_count(), 13, "親手牌 13 枚に揃える");
+
+        game.dealer_won_last = true;
+        let result = game.dealer_double_draw();
+        assert!(result.is_some(), "二度ヅモ成立");
+
+        let (_t1, _t2) = result.unwrap();
+        let hand_after = game.players[game.dealer].tile_count();
+        assert_eq!(hand_after, 15, "親 13 + 2 ツモ = 15 枚（呼び出し側で 1 枚捨てて 14 枚に戻す）");
     }
 }
