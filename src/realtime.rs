@@ -120,8 +120,17 @@ impl Default for PlayerTimer {
 
 /// 自動ツモ切り対象の牌を選ぶ補助関数。
 ///
-/// 「手牌の末尾 = 最新ツモ牌」というプレイヤー実装の慣習に従って末尾を返す。
-/// 手牌が空なら None。`Tile` のみを返し、実際の打牌処理は呼び出し側で行う。
+/// 渡された `tiles` slice の末尾を返す。手牌が空なら None。
+/// `Tile` のみを返し、実際の打牌処理は呼び出し側で行う。
+///
+/// # 不変条件（呼び出し側の責務）
+///
+/// 本関数は「手牌末尾 = 最新ツモ牌」という前提に依存している。すなわち
+/// `Player::draw_tile` がツモ牌を**手牌末尾に push する**ことが前提。
+/// もし `Player::draw_tile` の実装が「ソート後の任意位置に挿入」「先頭に挿入」等に
+/// 変わった場合、本関数の返す牌は「最新ツモ」ではなくなり、自動ツモ切りの
+/// セマンティクスが崩れる。実装を変える場合は本関数の選択ロジックも同時に
+/// 見直すこと（例: `Hand` 側に `last_drawn` フィールドを持たせる等）。
 pub fn pick_auto_discard_tile(tiles: &[Tile]) -> Option<Tile> {
     tiles.last().copied()
 }
@@ -284,5 +293,30 @@ mod tests {
     fn test_pick_auto_discard_tile_empty() {
         let tiles: Vec<Tile> = Vec::new();
         assert!(pick_auto_discard_tile(&tiles).is_none());
+    }
+
+    /// 「末尾＝最新ツモ」の不変条件確認: 順に push していった結果、最後に push した
+    /// 牌が選ばれる。`Hand` の sort 等を経由しない素の slice ベースの不変条件テスト。
+    #[test]
+    fn test_pick_auto_discard_returns_last_drawn() {
+        let mut tiles: Vec<Tile> = Vec::new();
+        // 順番に追加していく（ソートはしない＝Vec の素の push 順）
+        tiles.push(Tile::new_number(Suit::Sou, 9, false));
+        tiles.push(Tile::new_number(Suit::Man, 1, false));
+        tiles.push(Tile::new_number(Suit::Pin, 5, false));
+        // 最後に push した「最新ツモ想定」の牌
+        let latest = Tile::new_number(Suit::Man, 2, false);
+        tiles.push(latest);
+
+        let picked = pick_auto_discard_tile(&tiles).expect("non-empty");
+        assert_eq!(
+            picked, latest,
+            "末尾＝最新ツモの不変条件: 最後に push した牌が選ばれる"
+        );
+
+        // 追加で 1 枚 push すると、選ばれる牌も更新される
+        let newer = Tile::new_number(Suit::Pin, 1, false);
+        tiles.push(newer);
+        assert_eq!(pick_auto_discard_tile(&tiles).unwrap(), newer);
     }
 }
