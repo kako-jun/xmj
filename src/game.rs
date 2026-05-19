@@ -1,7 +1,9 @@
 use crate::player::Player;
+use crate::scoring::Yaku;
 use crate::tile::{Tile, TileType, Suit, Honor};
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use std::collections::{HashMap, HashSet};
 
 /// ゲームモード
 ///
@@ -10,12 +12,51 @@ use rand::thread_rng;
 /// - `Washizu`: 鷲巣麻雀（『アカギ』）。全牌の 3/4 が透明で他家からも見える
 /// - `FiveTile`: 5枚麻雀（クライマックスだけ麻雀）。手牌 5 枚（親 6 枚）スタート、
 ///   雀頭+面子1組で和了、タンヤオのみ判定
+/// - `EastWest`: 東西戦（クリア麻雀、『天』のチーム戦ルール）。東家+西家＝東チーム、
+///   南家+北家＝西チーム。指定二翻役5種を先にチームとして全て揃えた方の勝利。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameMode {
     Standard,
     Seikyo,
     Washizu,
     FiveTile,
+    EastWest,
+}
+
+/// 東西戦（クリア麻雀）のチーム。
+///
+/// 麻雀の座席名（東家 = ton, 南家 = nan, 西家 = shaa, 北家 = pei）と
+/// チーム名（East / West）は別概念であることに注意。
+/// 座席 0 (東家) + 座席 2 (西家) → East チーム、
+/// 座席 1 (南家) + 座席 3 (北家) → West チーム。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Team {
+    East,
+    West,
+}
+
+/// 座席 index からチームを返すヘルパー。
+///
+/// - 座席 0 (東家) と 2 (西家) → `Team::East`
+/// - 座席 1 (南家) と 3 (北家) → `Team::West`
+pub fn team_of(seat_idx: usize) -> Team {
+    match seat_idx {
+        0 | 2 => Team::East,
+        _ => Team::West,
+    }
+}
+
+/// 東西戦のクリア対象役5種（指定二翻役）。
+///
+/// 三色同順 / 一気通貫 / 対々和 / 全帯么 / 混老頭
+pub fn east_west_target_yaku() -> [Yaku; 5] {
+    [
+        Yaku::SanshokuDoujun,
+        Yaku::Ittsu,
+        Yaku::Toitoi,
+        Yaku::Chanta,
+        Yaku::Honroutou,
+    ]
 }
 
 /// 誠京麻雀の固定額
@@ -42,6 +83,13 @@ pub struct Game {
     /// 外部から win-resolve 時に手動で更新するフラグとして API のみ提供している。
     /// 完全な連荘配線は follow-up Issue で対応予定。
     pub dealer_won_last: bool,
+    /// 東西戦（クリア麻雀）のチーム別役クリア進捗。
+    ///
+    /// `GameMode::EastWest` のときのみ実質的に使用する。
+    /// `record_team_yaku` で和了者のチームに役を追加していき、
+    /// `east_west_target_yaku()` 全 5 種が揃ったチームが勝利。
+    /// EastWest 以外のモードでは初期化はされるが書き込まれない（no-op）。
+    pub team_progress: HashMap<Team, HashSet<Yaku>>,
 }
 
 impl Game {
@@ -65,6 +113,10 @@ impl Game {
             })
             .collect();
 
+        let mut team_progress = HashMap::new();
+        team_progress.insert(Team::East, HashSet::new());
+        team_progress.insert(Team::West, HashSet::new());
+
         let mut game = Self {
             players,
             wall: Vec::new(),
@@ -76,6 +128,7 @@ impl Game {
             mode,
             pot: 0,
             dealer_won_last: false,
+            team_progress,
         };
 
         game.initialize_wall();
@@ -575,7 +628,57 @@ impl Game {
         true
     }
 
+    /// 東西戦: 和了者のチームに役を 1 件登録する。
+    ///
+    /// - `GameMode::EastWest` 以外のモードでは安全に no-op（`team_progress` は変更されない）。
+    /// - 既に同じ役を登録済みなら no-op（`HashSet` の性質）。
+    /// - `winner_seat` の範囲チェックはしない（`team_of` が常に East/West を返すため安全）。
+    pub fn record_team_yaku(&mut self, winner_seat: usize, yaku: Yaku) {
+        if self.mode != GameMode::EastWest {
+            return;
+        }
+        let team = team_of(winner_seat);
+        self.team_progress.entry(team).or_insert_with(HashSet::new).insert(yaku);
+    }
+
+    /// 東西戦: 指定チームのクリア進捗を返す。
+    ///
+    /// `east_west_target_yaku()` の並び順でソートされた `Vec<Yaku>` を返す。
+    /// （クリア対象 5 種のうち登録済みのものだけ含める。順序が安定なので CLI 表示と
+    /// テスト assert で揺れない。）
+    pub fn team_clear_progress(&self, team: Team) -> Vec<Yaku> {
+        let empty = HashSet::new();
+        let set = self.team_progress.get(&team).unwrap_or(&empty);
+        east_west_target_yaku()
+            .iter()
+            .filter(|y| set.contains(y))
+            .cloned()
+            .collect()
+    }
+
+    /// 東西戦: 指定チームがクリア対象 5 役を全て揃えたか。
+    pub fn is_team_cleared(&self, team: Team) -> bool {
+        let empty = HashSet::new();
+        let set = self.team_progress.get(&team).unwrap_or(&empty);
+        east_west_target_yaku().iter().all(|y| set.contains(y))
+    }
+
+    /// 東西戦の勝者チーム。両方 cleared の同時成立はゲーム性質上ほぼ起きないが、
+    /// 起きた場合は East を優先して返す（決定論的）。
+    pub fn east_west_winner(&self) -> Option<Team> {
+        if self.is_team_cleared(Team::East) {
+            Some(Team::East)
+        } else if self.is_team_cleared(Team::West) {
+            Some(Team::West)
+        } else {
+            None
+        }
+    }
+
     pub fn is_game_over(&self) -> bool {
+        if self.mode == GameMode::EastWest && self.east_west_winner().is_some() {
+            return true;
+        }
         self.wall.is_empty() || self.players.iter().any(|p| p.score <= 0)
     }
 
@@ -625,8 +728,56 @@ impl Game {
         if let Some(tile) = self.last_discard {
             result.push_str(&format!("Last discard: {}\n", tile.to_string()));
         }
-        
+
+        // 東西戦のクリア進捗表示
+        if self.mode == GameMode::EastWest {
+            result.push_str(&format!(
+                "東チーム: {}\n",
+                format_team_progress_line(self, Team::East)
+            ));
+            result.push_str(&format!(
+                "西チーム: {}\n",
+                format_team_progress_line(self, Team::West)
+            ));
+            if let Some(winner) = self.east_west_winner() {
+                let label = match winner {
+                    Team::East => "東",
+                    Team::West => "西",
+                };
+                result.push_str(&format!("{}チーム勝利！\n", label));
+            }
+        }
+
         result
+    }
+}
+
+/// 東西戦進捗の 1 行表示。
+/// 例: `[✓三色同順, _一気通貫, _対々和, _全帯么, _混老頭]`
+fn format_team_progress_line(game: &Game, team: Team) -> String {
+    let set: HashSet<Yaku> = game
+        .team_clear_progress(team)
+        .into_iter()
+        .collect();
+    let parts: Vec<String> = east_west_target_yaku()
+        .iter()
+        .map(|y| {
+            let mark = if set.contains(y) { "✓" } else { "_" };
+            format!("{}{}", mark, yaku_label_ja(y))
+        })
+        .collect();
+    format!("[{}]", parts.join(", "))
+}
+
+/// 東西戦クリア対象役の日本語ラベル。
+fn yaku_label_ja(y: &Yaku) -> &'static str {
+    match y {
+        Yaku::SanshokuDoujun => "三色同順",
+        Yaku::Ittsu => "一気通貫",
+        Yaku::Toitoi => "対々和",
+        Yaku::Chanta => "全帯么",
+        Yaku::Honroutou => "混老頭",
+        _ => "?",
     }
 }
 
@@ -935,5 +1086,117 @@ mod tests {
         let (_t1, _t2) = result.unwrap();
         let hand_after = game.players[game.dealer].tile_count();
         assert_eq!(hand_after, 15, "親 13 + 2 ツモ = 15 枚（呼び出し側で 1 枚捨てて 14 枚に戻す）");
+    }
+
+    // ========================================
+    // 東西戦（クリア麻雀）テスト
+    // ========================================
+
+    fn east_west_names() -> Vec<String> {
+        vec![
+            "東家".to_string(),
+            "南家".to_string(),
+            "西家".to_string(),
+            "北家".to_string(),
+        ]
+    }
+
+    /// 座席 0/2 → East、座席 1/3 → West の対応
+    #[test]
+    fn test_team_of_seats() {
+        assert_eq!(team_of(0), Team::East, "東家(座席0)は East チーム");
+        assert_eq!(team_of(2), Team::East, "西家(座席2)は East チーム");
+        assert_eq!(team_of(1), Team::West, "南家(座席1)は West チーム");
+        assert_eq!(team_of(3), Team::West, "北家(座席3)は West チーム");
+    }
+
+    /// 起動直後は両チームとも進捗 0 件
+    #[test]
+    fn test_east_west_no_yaku_recorded_initially() {
+        let game = Game::new_with_mode(east_west_names(), GameMode::EastWest);
+        assert!(game.team_clear_progress(Team::East).is_empty());
+        assert!(game.team_clear_progress(Team::West).is_empty());
+        assert!(!game.is_team_cleared(Team::East));
+        assert!(!game.is_team_cleared(Team::West));
+        assert_eq!(game.east_west_winner(), None);
+    }
+
+    /// 和了者の所属チームに役が登録される
+    #[test]
+    fn test_record_team_yaku_for_winner() {
+        let mut game = Game::new_with_mode(east_west_names(), GameMode::EastWest);
+
+        // 座席 0 (東家) が三色同順で和了 → East チームに追加
+        game.record_team_yaku(0, Yaku::SanshokuDoujun);
+        assert_eq!(game.team_clear_progress(Team::East), vec![Yaku::SanshokuDoujun]);
+        assert!(game.team_clear_progress(Team::West).is_empty());
+
+        // 座席 3 (北家) が一気通貫で和了 → West チームに追加
+        game.record_team_yaku(3, Yaku::Ittsu);
+        assert_eq!(game.team_clear_progress(Team::West), vec![Yaku::Ittsu]);
+    }
+
+    /// 同じ役を 2 回登録しても重複しない（HashSet）
+    #[test]
+    fn test_team_clear_progress_unique() {
+        let mut game = Game::new_with_mode(east_west_names(), GameMode::EastWest);
+        game.record_team_yaku(0, Yaku::Toitoi);
+        game.record_team_yaku(0, Yaku::Toitoi);
+        // 別の East 座席（2 = 西家）で再登録しても同じ
+        game.record_team_yaku(2, Yaku::Toitoi);
+        assert_eq!(game.team_clear_progress(Team::East), vec![Yaku::Toitoi]);
+    }
+
+    /// 5 役全て登録すると is_team_cleared が true
+    #[test]
+    fn test_is_team_cleared_after_five() {
+        let mut game = Game::new_with_mode(east_west_names(), GameMode::EastWest);
+        for y in east_west_target_yaku().iter() {
+            game.record_team_yaku(0, y.clone());
+        }
+        assert!(game.is_team_cleared(Team::East));
+        assert!(!game.is_team_cleared(Team::West));
+    }
+
+    /// どちらか cleared なら east_west_winner = Some
+    #[test]
+    fn test_east_west_winner_returns_first_cleared() {
+        let mut game = Game::new_with_mode(east_west_names(), GameMode::EastWest);
+        assert_eq!(game.east_west_winner(), None);
+
+        // West チーム（座席 1 = 南家）が先に揃える
+        for y in east_west_target_yaku().iter() {
+            game.record_team_yaku(1, y.clone());
+        }
+        assert_eq!(game.east_west_winner(), Some(Team::West));
+        // ゲーム終了判定もトリガーされる
+        assert!(game.is_game_over());
+    }
+
+    /// EastWest 以外のモードでは record_team_yaku は no-op
+    #[test]
+    fn test_record_yaku_no_op_in_other_modes() {
+        let mut game = Game::new(east_west_names());
+        assert_eq!(game.mode, GameMode::Standard);
+
+        for y in east_west_target_yaku().iter() {
+            game.record_team_yaku(0, y.clone());
+        }
+        // Standard モードでは team_progress に書き込まれない
+        assert!(game.team_clear_progress(Team::East).is_empty());
+        assert!(!game.is_team_cleared(Team::East));
+        assert_eq!(game.east_west_winner(), None);
+    }
+
+    /// 東西戦のターゲット役は 5 種ちょうど
+    #[test]
+    fn test_east_west_target_yaku_count() {
+        let targets = east_west_target_yaku();
+        assert_eq!(targets.len(), 5);
+        assert!(targets.contains(&Yaku::SanshokuDoujun));
+        assert!(targets.contains(&Yaku::Ittsu));
+        assert!(targets.contains(&Yaku::Toitoi));
+        assert!(targets.contains(&Yaku::Chanta));
+        assert!(targets.contains(&Yaku::Honroutou));
     }
 }

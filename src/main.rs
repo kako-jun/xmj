@@ -1,4 +1,4 @@
-use xmj_core::{Game, GameMode, Tile, AiEngine, AiLevel, SEIKYO_SEAT_FEE, SEIKYO_YAKUMAN_TIP};
+use xmj_core::{Game, GameMode, Tile, AiEngine, AiLevel, SEIKYO_SEAT_FEE, SEIKYO_YAKUMAN_TIP, Team};
 use std::io::{self, Write};
 
 fn main() {
@@ -18,6 +18,13 @@ fn main() {
         }
         GameMode::FiveTile => {
             println!("ルール: 5枚麻雀（クライマックスだけ麻雀）")
+        }
+        GameMode::EastWest => {
+            println!("ルール: 東西戦（クリア麻雀）");
+            println!("  クリア対象役: 三色同順 / 一気通貫 / 対々和 / 全帯么 / 混老頭");
+            println!("  東チーム = 東家(座席0) + 西家(座席2)");
+            println!("  西チーム = 南家(座席1) + 北家(座席3)");
+            println!("  チームとして指定二翻役5種を先に全部揃えたチームの勝利");
         }
     }
 
@@ -45,7 +52,15 @@ fn main() {
 
     loop {
         if game.is_game_over() {
-            println!("ゲーム終了");
+            if game.mode == GameMode::EastWest {
+                match game.east_west_winner() {
+                    Some(Team::East) => println!("東チーム勝利！（東家+西家）"),
+                    Some(Team::West) => println!("西チーム勝利！（南家+北家）"),
+                    None => println!("ゲーム終了（流局）"),
+                }
+            } else {
+                println!("ゲーム終了");
+            }
             break;
         }
 
@@ -95,6 +110,7 @@ fn parse_mode_from_args() -> GameMode {
             "washizu" => GameMode::Washizu,
             "standard" => GameMode::Standard,
             "five-tile" | "five_tile" | "fivetile" => GameMode::FiveTile,
+            "east-west" | "east_west" | "eastwest" => GameMode::EastWest,
             other => {
                 eprintln!("[warn] 未知のモード '{}'、standard で起動します", other);
                 GameMode::Standard

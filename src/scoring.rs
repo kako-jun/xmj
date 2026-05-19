@@ -2,7 +2,7 @@ use crate::tile::{Tile, TileType, Honor, Suit};
 use crate::hand::{Hand, MeldType};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Yaku {
     // 一飜役
     Riichi,
@@ -28,6 +28,9 @@ pub enum Yaku {
     Sankantsu,
     Chiitoitsu,
     Shousangen,
+    // TODO(#19 follow-up): Honroutou は detector 未実装。東西戦 (EastWest) のクリア対象 5 役
+    // に含まれるためバリアントだけ追加してある。calculate_yaku から push される配線は別 Issue。
+    Honroutou,
 
     // 三飜役
     Honitsu,

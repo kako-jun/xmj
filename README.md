@@ -53,6 +53,9 @@ cargo run -- --mode washizu
 
 # 5枚麻雀（クライマックスだけ麻雀）
 cargo run -- --mode five-tile
+
+# 東西戦（クリア麻雀、『天』チーム戦）
+cargo run -- --mode east-west
 ```
 
 ゲームが起動したら、手牌から打牌する牌を入力してください:
@@ -136,6 +139,14 @@ python3 -m http.server 8000
   - ✅ 点数計算: `scoring::score_five_tile` 基礎点 1000 + タンヤオ 1000
   - 🚧 字牌の特殊効果カード化、ドラエスカレート、ボスステージ、イカサマ要素は follow-up
 
+- ✅ **東西戦** (`--mode east-west`): クリア麻雀（『天』のチーム戦ルール）
+  - ✅ チーム構成: 東家(座席0) + 西家(座席2) = 東チーム / 南家(座席1) + 北家(座席3) = 西チーム
+  - ✅ クリア対象役: 三色同順 / 一気通貫 / 対々和 / 全帯么 / 混老頭 の指定二翻役5種
+  - ✅ 勝利条件: チームとして 5 役を先に全て揃えた方の勝利
+  - ✅ API: `Game::record_team_yaku(seat, yaku)` / `team_clear_progress(team)` / `is_team_cleared(team)` / `east_west_winner()`
+  - ✅ CLI: ゲーム状態に「東チーム: [✓三色同順, _一気通貫, ...]」進捗を表示、勝敗成立時に終了
+  - 🚧 実際の役判定（chanta / honroutou 等）から `record_team_yaku` への自動配線は follow-up。現状は API のみ提供
+
 #### Limitations（誠京麻雀の現状）
 
 PR #21 時点の実装は API レベル完備 + CLI からの最低限の動線確認まで。以下は未配線で follow-up Issue で対応予定:
@@ -150,7 +161,6 @@ PR #21 時点の実装は API レベル完備 + CLI からの最低限の動線�
 
 - 🚧 **闇麻**: 闇牌、照射
 - 🚧 **リアルタイム麻雀**: 同時打牌、早い者勝ちの鳴き
-- 🚧 **東西戦**: クリア麻雀（指定役5つの達成競争）
 
 ## プロジェクト構成
 
