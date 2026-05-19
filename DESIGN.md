@@ -282,3 +282,51 @@ cargo run -- --mode seikyo
 
 未知のモード値や `--mode` の値なしは warning 出力後に Standard へフォールバックする。
 
+### Washizu（鷲巣麻雀 / 『アカギ』）
+
+| 項目     | 値          | 内容                                                                  |
+| -------- | ----------- | --------------------------------------------------------------------- |
+| 透明牌   | **3/4 (102/136)** | 山牌初期化時にシャッフル後の先頭 3/4 を `is_glass=true` にする  |
+| 可視性   | 自家全可視 + 他家 glass のみ | 不透明な 1/4 は他家から見えない                                |
+
+#### 同値性の扱い
+
+`is_glass` は**表示属性**であり、`Tile` の `PartialEq` / `Eq` / `Hash` には含めない。
+理由: 「9m の透明牌」と「9m の不透明牌」は同じ牌として和了判定・鳴き判定で扱う必要があるため、
+`is_glass` を比較に入れると既存の `Hand::can_win` / `can_pon` / `can_kan` が壊れる。
+`Tile` は `derive(PartialEq/Eq/Hash)` をやめて手動実装している。
+
+#### 現状の実装ステータス
+
+| 機能            | 実装レベル                            | follow-up                     |
+| --------------- | ------------------------------------- | ----------------------------- |
+| 透明牌の生成    | API + CLI 起動時に 3/4 自動 glass 化 | -                             |
+| 他家の glass 可視 | API + CLI 表示                      | Web (PixiJS) 側の glass 描画 |
+| 血液ポイント    | 未実装                                | 別 Issue                      |
+| 牌の使用回数制限 | 未実装                                | 別 Issue                      |
+
+#### API（`src/tile.rs`）
+
+- `Tile.is_glass: bool` — 透明牌フラグ（同値比較に含まれない）
+- `Tile::with_glass(bool) -> Tile` — ビルダー
+- `Tile::is_glass() -> bool` — getter
+
+#### API（`src/game.rs`）
+
+- `GameMode::Washizu` — モード識別子
+- `Game::new_with_mode(names, GameMode::Washizu)` — 構築（自動で 3/4 glass 化）
+- `Game::get_visible_tiles_of_opponent(observer_idx, target_idx) -> Vec<Tile>` — 観測者から見た対象手牌
+  - 自分自身（observer == target）: 全手牌
+  - Washizu × 他家: glass 牌のみ
+  - 非 Washizu × 他家: 空ベクタ
+
+#### CLI
+
+```bash
+cargo run -- --mode washizu
+```
+
+起動時に「ルール: 鷲巣麻雀（3/4 透明牌、他家の glass 牌が見える）」が表示される。
+各他家の行の下に `[CPUx の透明牌: 9m 7p 9p to na]` のように glass 牌のリストが追記される。
+自分の手牌は従来通り全表示（自家は全可視のため）。
+

@@ -5,7 +5,7 @@ fn main() {
     println!("邪雀 Xtreme Mahjong (xmj) - CUIクライアント");
     println!("==========================================");
 
-    // 引数解析（std のみ）: --mode standard | seikyo
+    // 引数解析（std のみ）: --mode standard | seikyo | washizu
     let mode = parse_mode_from_args();
     match mode {
         GameMode::Standard => println!("ルール: 標準麻雀"),
@@ -13,6 +13,9 @@ fn main() {
             "ルール: 誠京麻雀（場代 {} / 役満祝儀 {}点)",
             SEIKYO_SEAT_FEE, SEIKYO_YAKUMAN_TIP
         ),
+        GameMode::Washizu => {
+            println!("ルール: 鷲巣麻雀（3/4 透明牌、他家の glass 牌が見える）")
+        }
     }
 
     let player_names = vec![
@@ -86,6 +89,7 @@ fn parse_mode_from_args() -> GameMode {
         }
         Some(val) => match val.to_lowercase().as_str() {
             "seikyo" => GameMode::Seikyo,
+            "washizu" => GameMode::Washizu,
             "standard" => GameMode::Standard,
             other => {
                 eprintln!("[warn] 未知のモード '{}'、standard で起動します", other);
