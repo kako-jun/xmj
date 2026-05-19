@@ -248,14 +248,69 @@ describe('App', () => {
     app.selectedHandIndex = 0
     const result = (
       app as unknown as {
-        discardSelectedTile: () => boolean
+        confirmSelectedTile: () => boolean
       }
-    ).discardSelectedTile()
+    ).confirmSelectedTile()
 
     expect(result).toBe(true)
     expect(discardCount).toBe(1)
     expect(cpuCount).toBe(3)
     expect(drawCount).toBe(1)
+    expect(app.gameState?.currentTurn).toBe(0)
+    expect(app.gameState?.players[0].hand).toHaveLength(14)
+  })
+
+  it('立直成功時は選択牌を打牌し、そのまま CPU ループに入る', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    let drawCount = 0
+    let discardCount = 0
+    let declareRiichiCount = 0
+    let cpuCount = 0
+    let currentPlayerId = 0
+
+    const bridge = createBridgeMock({
+      canRiichi: () => true,
+      declareRiichi: () => {
+        declareRiichiCount += 1
+        return true
+      },
+      drawTile: () => {
+        drawCount += 1
+        return true
+      },
+      discardTile: () => {
+        discardCount += 1
+        currentPlayerId = 1
+        return true
+      },
+      executeCpuTurn: () => {
+        cpuCount += 1
+        currentPlayerId = currentPlayerId === 3 ? 0 : (currentPlayerId + 1)
+        return '5m'
+      },
+      getCurrentPlayerId: () => currentPlayerId,
+      isCurrentPlayerHuman: () => currentPlayerId === 0,
+      isCurrentPlayerCpu: () => currentPlayerId !== 0,
+      getCurrentHandString: () =>
+        drawCount >= 1
+          ? '1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to hk'
+          : '1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to',
+    })
+
+    app.startGame(bridge, 0)
+    drawCount = 0
+
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    getActionButton(stage, 'riichi-discard').emit('pointertap', {} as never)
+
+    expect(declareRiichiCount).toBe(1)
+    expect(discardCount).toBe(1)
+    expect(cpuCount).toBe(3)
+    expect(drawCount).toBe(1)
+    expect(app.selectedHandIndex).toBe(null)
     expect(app.gameState?.currentTurn).toBe(0)
     expect(app.gameState?.players[0].hand).toHaveLength(14)
   })
@@ -352,7 +407,7 @@ describe('App', () => {
     expect(app.selectedHandIndex).toBe(null)
   })
 
-  it('canRiichi=true のときだけ action area に立直ボタンが出る', () => {
+  it('canRiichi=true かつ牌選択中のときだけ確定ボタンが立直表示になる', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const app = new App(fakeApp)
@@ -366,6 +421,7 @@ describe('App', () => {
     )
     expect(getActionButton(stage, 'discard')).toBeTruthy()
     expect(getActionButton(stage, 'riichi')).toBeNull()
+    expect(getActionButton(stage, 'riichi-discard')).toBeNull()
 
     app.startGame(
       createBridgeMock({
@@ -374,7 +430,10 @@ describe('App', () => {
       }),
       0
     )
-    expect(getActionButton(stage, 'riichi')).toBeTruthy()
+    expect(getActionButton(stage, 'discard')).toBeTruthy()
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    expect(getActionButton(stage, 'discard')).toBeNull()
+    expect(getActionButton(stage, 'riichi-discard')).toBeTruthy()
   })
 
   it('declareRiichi が false のとき選択状態を維持する', () => {
@@ -395,10 +454,10 @@ describe('App', () => {
     app.startGame(bridge, 0)
 
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'riichi').emit('pointertap', {} as never)
+    getActionButton(stage, 'riichi-discard').emit('pointertap', {} as never)
 
     expect(riichiCount).toBe(1)
     expect(app.selectedHandIndex).toBe(0)
-    expect(getActionButton(stage, 'riichi')).toBeTruthy()
+    expect(getActionButton(stage, 'riichi-discard')).toBeTruthy()
   })
 })

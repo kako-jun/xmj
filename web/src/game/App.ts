@@ -26,6 +26,10 @@ export class App {
     this.app.stage.addChild(bg)
   }
 
+  /**
+   * bridge を使わず、与えられた GameState をそのまま静的表示する。
+   * スモークテストや初期描画確認用であり、ターン進行 UI の起点には使わない。
+   */
   showInitialTable(gameState: GameState): void {
     this.gameState = gameState
     this.selectedHandIndex = null
@@ -63,12 +67,16 @@ export class App {
     return this.gameState.players[this.humanPlayerIndex].hand.length % 3 === 1
   }
 
-  private discardSelectedTile(): boolean {
+  private confirmSelectedTile(options: { riichi: boolean } = { riichi: false }): boolean {
     if (!this.bridge || !this.gameState || this.selectedHandIndex === null) return false
     if (!this.bridge.isCurrentPlayerHuman()) return false
 
     const tile = this.gameState.players[this.humanPlayerIndex].hand[this.selectedHandIndex]
     if (!tile) return false
+
+    if (options.riichi && !this.bridge.declareRiichi()) {
+      return false
+    }
 
     const discarded = this.bridge.discardTile(tile)
     if (!discarded) return false
@@ -98,7 +106,7 @@ export class App {
     if (!this.bridge.isCurrentPlayerHuman()) return
 
     if (this.selectedHandIndex === index) {
-      this.discardSelectedTile()
+      this.confirmSelectedTile()
       return
     }
 
@@ -109,33 +117,21 @@ export class App {
   private buildActionButtons(): TableActionButton[] {
     if (!this.bridge || !this.gameState) return []
 
-    const buttons = [
+    const shouldUseRiichiConfirm =
+      this.bridge.isCurrentPlayerHuman() &&
+      this.selectedHandIndex !== null &&
+      this.bridge.canRiichi()
+
+    return [
       {
-        key: 'discard',
-        label: '打牌',
+        key: shouldUseRiichiConfirm ? 'riichi-discard' : 'discard',
+        label: shouldUseRiichiConfirm ? '立直して打牌' : '打牌',
         enabled: this.bridge.isCurrentPlayerHuman() && this.selectedHandIndex !== null,
         onTap: () => {
-          this.discardSelectedTile()
+          this.confirmSelectedTile({ riichi: shouldUseRiichiConfirm })
         },
       },
     ]
-
-    if (this.bridge.isCurrentPlayerHuman() && this.bridge.canRiichi()) {
-      buttons.push({
-        key: 'riichi',
-        label: '立直',
-        enabled: true,
-        onTap: () => {
-          if (!this.bridge) return
-          if (this.bridge.declareRiichi()) {
-            this.selectedHandIndex = null
-            this.refreshFromBridge()
-          }
-        },
-      })
-    }
-
-    return buttons
   }
 
   private renderTable(): void {
