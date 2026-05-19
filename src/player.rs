@@ -1,3 +1,4 @@
+use crate::game::GameMode;
 use crate::hand::Hand;
 use crate::tile::Tile;
 
@@ -46,6 +47,16 @@ impl Player {
 
     pub fn can_win(&self, tile: &Tile) -> bool {
         self.hand.can_win(tile)
+    }
+
+    /// モードに応じた和了判定。
+    /// - `FiveTile`: `Hand::can_win_five_tile` を呼ぶ
+    /// - その他: 既存の `Hand::can_win`（14 枚和了形）を呼ぶ
+    pub fn can_win_with_mode(&self, tile: &Tile, mode: GameMode) -> bool {
+        match mode {
+            GameMode::FiveTile => self.hand.can_win_five_tile(tile),
+            _ => self.hand.can_win(tile),
+        }
     }
 
     pub fn get_hand_string(&self) -> String {

@@ -16,6 +16,9 @@ fn main() {
         GameMode::Washizu => {
             println!("ルール: 鷲巣麻雀（3/4 透明牌、他家の glass 牌が見える）")
         }
+        GameMode::FiveTile => {
+            println!("ルール: 5枚麻雀（クライマックスだけ麻雀）")
+        }
     }
 
     let player_names = vec![
@@ -91,6 +94,7 @@ fn parse_mode_from_args() -> GameMode {
             "seikyo" => GameMode::Seikyo,
             "washizu" => GameMode::Washizu,
             "standard" => GameMode::Standard,
+            "five-tile" | "five_tile" | "fivetile" => GameMode::FiveTile,
             other => {
                 eprintln!("[warn] 未知のモード '{}'、standard で起動します", other);
                 GameMode::Standard
