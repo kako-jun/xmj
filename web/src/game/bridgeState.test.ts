@@ -23,6 +23,24 @@ describe('parseFormattedGameState', () => {
     expect(state.players[1].hand).toHaveLength(13)
     expect(state.players[1].isCPU).toBe(true)
   })
+
+  it('Round 行が欠けた文字列は失敗する', () => {
+    const invalidState = sampleState
+      .split('\n')
+      .filter(line => !line.startsWith('Round: '))
+      .join('\n')
+
+    expect(() => parseFormattedGameState(invalidState, 0)).toThrow(/不正なゲーム状態文字列/)
+  })
+
+  it('Dora indicators 行が欠けた文字列は失敗する', () => {
+    const invalidState = sampleState
+      .split('\n')
+      .filter(line => !line.startsWith('Dora indicators:'))
+      .join('\n')
+
+    expect(() => parseFormattedGameState(invalidState, 0)).toThrow(/不正なゲーム状態文字列/)
+  })
 })
 
 describe('createGameStateFromBridge', () => {
