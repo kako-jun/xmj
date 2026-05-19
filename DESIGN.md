@@ -411,3 +411,73 @@ cargo run -- --mode fivetile
 - イカサマ要素（積み込み・牌のすり替え）
 - Web UI
 
+### EastWest（東西戦 / クリア麻雀、『天』チーム戦）
+
+| 項目         | 値                  | 内容                                                                 |
+| ------------ | ------------------- | -------------------------------------------------------------------- |
+| チーム構成   | 東/西 の 2 チーム   | 東家(座席0) + 西家(座席2) = East / 南家(座席1) + 北家(座席3) = West |
+| クリア対象役 | 指定二翻役 5 種     | 三色同順 / 一気通貫 / 対々和 / 全帯么 / 混老頭                       |
+| 勝利条件     | チームとしての先取  | 5 種を先に全て揃えたチームの勝利。点数計算は副次的                   |
+
+『天』『アカギ』に登場するチーム戦ルール。座席名（東家=ton, 南家=nan, 西家=shaa, 北家=pei）と
+チーム名（East/West）は別概念であることに注意。座席→チームの対応は `team_of()` に集約。
+
+#### 現状の実装ステータス
+
+| 機能                    | 実装レベル                          | follow-up                                  |
+| ----------------------- | ----------------------------------- | ------------------------------------------ |
+| Team enum / 座席マッピング | API（`team_of`）                  | -                                          |
+| 進捗 HashMap            | `Game.team_progress`                | -                                          |
+| 役登録 / クリア判定     | API（`record_team_yaku` 等）        | -                                          |
+| CLI 表示                | 各局のゲーム状態に進捗 1 行 + 勝敗  | Web UI は follow-up                        |
+| 役判定の自動配線        | 未実装（API 単体は動作）            | 和了 → 役検出 → `record_team_yaku` の本配線 |
+
+#### API（`src/game.rs`）
+
+- `GameMode::EastWest` — モード識別子
+- `Team::{East, West}` — チーム enum
+- `team_of(seat_idx: usize) -> Team` — 座席 → チーム変換ヘルパー
+- `east_west_target_yaku() -> [Yaku; 5]` — クリア対象 5 役（並び順は CLI 表示・テスト assert で安定）
+- `Game.team_progress: HashMap<Team, HashSet<Yaku>>` — チーム別クリア進捗
+- `Game::record_team_yaku(winner_seat, yaku)` — 和了者のチームに役を 1 件登録（EastWest 以外は no-op、重複は HashSet で吸収）
+- `Game::team_clear_progress(team) -> Vec<Yaku>` — `east_west_target_yaku()` の並びでソートされた進捗
+- `Game::is_team_cleared(team) -> bool` — 5 役全て揃ったか
+- `Game::east_west_winner() -> Option<Team>` — どちらかが cleared なら Some。両方同時成立は East 優先（決定論的）
+- `Game::is_game_over()` は EastWest モードでは winner 確定時に true を返す
+
+#### Yaku enum 拡張（`src/scoring.rs`）
+
+- `Yaku::Honroutou` を二飜役に追加（既存の SanshokuDoujun / Ittsu / Toitoi / Chanta と合わせて 5 役分が揃った）
+- `Yaku` には `Hash` を追加（`HashSet<Yaku>` で進捗管理するため）
+
+#### CLI
+
+```bash
+cargo run -- --mode east-west
+cargo run -- --mode east_west
+cargo run -- --mode eastwest
+```
+
+起動時に「ルール: 東西戦（クリア麻雀）」と「クリア対象役: 三色同順 / 一気通貫 / 対々和 / 全帯么 / 混老頭」が表示される。
+ゲーム状態には毎ターン以下のような進捗行が追加される:
+
+```
+東チーム: [✓三色同順, _一気通貫, _対々和, _全帯么, _混老頭]
+西チーム: [_三色同順, _一気通貫, _対々和, _全帯么, _混老頭]
+```
+
+どちらかのチームが 5 役を揃えると `east_west_winner()` が Some を返し、メインループが終了して
+「東チーム勝利！（東家+西家）」または「西チーム勝利！（南家+北家）」が表示される。
+
+#### Limitations
+
+PR #19 時点では「Team / Yaku enum + API + CLI 表示 + テスト」までの最低限の動線。以下は follow-up:
+
+- **役判定の自動配線**: 実際に三色同順・一気通貫・対々和・全帯么・混老頭 の各役を和了から検出して
+  `record_team_yaku` を呼び出す配線は未実装。現状は API 単体で動作（テスト・外部呼び出し前提）。
+  通常モードの scoring 経路に EastWest 用フックを差し込む必要がある
+- **チーム間の協力 UX**: 「自チームの未取得役を狙う」誘導表示や、味方が和了した直後に役一覧を見せる演出は未実装
+- **得点ルール**: 通常の点数計算（誰が何点取ったか）は EastWest でも動作するが、勝敗はクリア進捗のみで決まる。
+  「点数で勝ったがクリアで負け」のような副次表示は CLI には現状無い
+- **Web UI**: WASM 側は follow-up
+
