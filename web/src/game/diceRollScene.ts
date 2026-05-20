@@ -3,7 +3,6 @@ import {
   PANEL_ACCENT_COLOR,
   PANEL_BG_COLOR,
   PANEL_BORDER_COLOR,
-  SHADOW_COLOR,
   STAGE_HEIGHT,
   STAGE_WIDTH,
   TABLE_BG_COLOR,
@@ -73,28 +72,29 @@ const PIP_POSITIONS: Record<number, Array<[number, number]>> = {
   ],
 }
 
+const DIE_SIZE = 110
+
 const createDie = (value: number | null): Container => {
   const die = new Container()
-  const size = 120
   const bg = new Graphics()
   bg
-    .roundRect(0, 0, size, size, 18)
+    .roundRect(0, 0, DIE_SIZE, DIE_SIZE, 16)
     .fill({ color: 0xece2c4 })
     .stroke({ color: PANEL_BORDER_COLOR, width: 3 })
   die.addChild(bg)
 
   if (value !== null && PIP_POSITIONS[value]) {
-    const pipRadius = 9
+    const pipRadius = 8
     for (const [rx, ry] of PIP_POSITIONS[value]) {
       const pip = new Graphics()
-      pip.circle(rx * size, ry * size, pipRadius).fill({ color: 0x1a1a1a })
+      pip.circle(rx * DIE_SIZE, ry * DIE_SIZE, pipRadius).fill({ color: 0x1a1a1a })
       die.addChild(pip)
     }
   } else {
-    const question = makeText('?', 64, 0x6f6f6f, 'center', 'bold')
+    const question = makeText('?', 58, 0x6f6f6f, 'center', 'bold')
     question.anchor.set(0.5)
-    question.x = size / 2
-    question.y = size / 2
+    question.x = DIE_SIZE / 2
+    question.y = DIE_SIZE / 2
     die.addChild(question)
   }
 
@@ -105,43 +105,44 @@ export const createDiceRollScene = (options: DiceRollSceneOptions): Container =>
   const root = new Container()
   root.label = 'dice-roll-scene'
 
+  const cx = STAGE_WIDTH / 2
+
   const bg = new Graphics()
   bg.rect(0, 0, STAGE_WIDTH, STAGE_HEIGHT).fill({ color: 0x040404 })
-  bg.circle(STAGE_WIDTH / 2, 240, 380).fill({ color: TABLE_GLOW_COLOR, alpha: 0.12 })
-  bg.circle(STAGE_WIDTH / 2, 320, 300).fill({ color: TABLE_BG_COLOR, alpha: 0.45 })
+  bg.circle(cx, STAGE_HEIGHT / 2 - 60, STAGE_WIDTH * 0.5).fill({ color: TABLE_GLOW_COLOR, alpha: 0.12 })
+  bg.circle(cx, STAGE_HEIGHT / 2, STAGE_WIDTH * 0.4).fill({ color: TABLE_BG_COLOR, alpha: 0.45 })
   root.addChild(bg)
 
+  const frameMargin = 32
   const frame = new Graphics()
   frame
-    .roundRect(280, 110, 720, 510, 36)
+    .roundRect(frameMargin, frameMargin, STAGE_WIDTH - frameMargin * 2, STAGE_HEIGHT - frameMargin * 2, 24)
     .fill({ color: PANEL_BG_COLOR, alpha: 0.9 })
     .stroke({ color: PANEL_BORDER_COLOR, width: 3 })
   root.addChild(frame)
 
-  const heading = makeText('場決め', 38, TEXT_PRIMARY_COLOR, 'center', 'bold')
+  const heading = makeText('場決め', 34, TEXT_PRIMARY_COLOR, 'center', 'bold')
   heading.anchor.set(0.5)
-  heading.x = STAGE_WIDTH / 2
-  heading.y = 170
+  heading.x = cx
+  heading.y = 100
   root.addChild(heading)
 
   const subheading = makeText(
     'サイコロ 2 個の合計で起家を決める。',
-    16,
+    14,
     TEXT_MUTED_COLOR,
     'center'
   )
   subheading.anchor.set(0.5)
-  subheading.x = STAGE_WIDTH / 2
-  subheading.y = 214
+  subheading.x = cx
+  subheading.y = 138
   root.addChild(subheading)
 
-  // ダイス 2 個を中央に並べる
   const diceRow = new Container()
   diceRow.label = 'dice-row'
-  const dieSize = 120
-  const dieGap = 36
-  diceRow.x = (STAGE_WIDTH - (dieSize * 2 + dieGap)) / 2
-  diceRow.y = 260
+  const dieGap = 28
+  diceRow.x = (STAGE_WIDTH - (DIE_SIZE * 2 + dieGap)) / 2
+  diceRow.y = 200
 
   const die1 = createDie(options.roll?.d1 ?? null)
   die1.label = 'die-1'
@@ -149,11 +150,10 @@ export const createDiceRollScene = (options: DiceRollSceneOptions): Container =>
 
   const die2 = createDie(options.roll?.d2 ?? null)
   die2.label = 'die-2'
-  die2.x = dieSize + dieGap
+  die2.x = DIE_SIZE + dieGap
   diceRow.addChild(die2)
   root.addChild(diceRow)
 
-  // 結果テキスト
   if (options.roll && options.humanSeat !== null) {
     const sumText = makeText(
       `合計 ${options.roll.d1 + options.roll.d2}`,
@@ -162,40 +162,42 @@ export const createDiceRollScene = (options: DiceRollSceneOptions): Container =>
       'center'
     )
     sumText.anchor.set(0.5)
-    sumText.x = STAGE_WIDTH / 2
-    sumText.y = 410
+    sumText.x = cx
+    sumText.y = 350
     sumText.label = 'dice-sum'
     root.addChild(sumText)
 
     const seatText = makeText(
       `あなたは${SEAT_NAMES[options.humanSeat]}からスタート`,
-      24,
+      22,
       PANEL_ACCENT_COLOR,
       'center',
       'bold'
     )
     seatText.anchor.set(0.5)
-    seatText.x = STAGE_WIDTH / 2
-    seatText.y = 446
+    seatText.x = cx
+    seatText.y = 386
     seatText.label = 'dice-seat-result'
     root.addChild(seatText)
 
+    const buttonW = 260
+    const buttonH = 56
     const startButton = new Container()
     startButton.label = 'dice-roll-start-button'
-    startButton.x = STAGE_WIDTH / 2 - 140
-    startButton.y = 506
+    startButton.x = cx - buttonW / 2
+    startButton.y = 450
 
     const buttonBg = new Graphics()
     buttonBg
-      .roundRect(0, 0, 280, 58, 18)
+      .roundRect(0, 0, buttonW, buttonH, 16)
       .fill({ color: 0x281608, alpha: 0.96 })
       .stroke({ color: PANEL_ACCENT_COLOR, width: 3 })
     startButton.addChild(buttonBg)
 
-    const buttonLabel = makeText('対局を始める', 24, TEXT_PRIMARY_COLOR, 'center', 'bold')
+    const buttonLabel = makeText('対局を始める', 22, TEXT_PRIMARY_COLOR, 'center', 'bold')
     buttonLabel.anchor.set(0.5)
-    buttonLabel.x = 140
-    buttonLabel.y = 29
+    buttonLabel.x = buttonW / 2
+    buttonLabel.y = buttonH / 2
     startButton.addChild(buttonLabel)
 
     startButton.eventMode = 'static'
@@ -203,26 +205,13 @@ export const createDiceRollScene = (options: DiceRollSceneOptions): Container =>
     startButton.on('pointertap', options.onComplete)
     root.addChild(startButton)
   } else {
-    // 現状は App.showDiceRollScene が同期的に roll を確定させて渡すため、この分岐は
-    // テスト経路でしか踏まれない。将来サイコロのアニメーションを入れる時に
-    // 「振っている最中」のフレームを描画する経路として残す。
-    const rolling = makeText(
-      'サイコロを振っています…',
-      22,
-      TEXT_MUTED_COLOR,
-      'center',
-      'bold'
-    )
+    const rolling = makeText('サイコロを振っています…', 20, TEXT_MUTED_COLOR, 'center', 'bold')
     rolling.anchor.set(0.5)
-    rolling.x = STAGE_WIDTH / 2
-    rolling.y = 446
+    rolling.x = cx
+    rolling.y = 386
     rolling.label = 'dice-rolling-text'
     root.addChild(rolling)
   }
-
-  const footer = new Graphics()
-  footer.rect(0, STAGE_HEIGHT - 72, STAGE_WIDTH, 72).fill({ color: SHADOW_COLOR, alpha: 0.34 })
-  root.addChild(footer)
 
   return root
 }

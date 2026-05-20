@@ -1,10 +1,17 @@
 // xmj Web 表示まわりの定数。
 //
-// 麻雀卓の基本ステージサイズは 16:9。下辺右側に操作 UI をまとめ、
-// スマホでも親指圏内で操作できる配置を狙う。
+// Pixi のステージは正方形に固定し、操作系・実況ログ・点数表はすべて HTML 側に
+// 出すレイアウト方針。CSS Grid 側 (index.html) で「スマホ縦は卓→操作系の縦積み、
+// PC 横は卓→操作系の横並び」を切り替える。
+//
+// 卓は square (STAGE_WIDTH = STAGE_HEIGHT) を前提に対称配置を組む。
 
-export const STAGE_WIDTH = 1280
+export const STAGE_WIDTH = 720
 export const STAGE_HEIGHT = 720
+
+// 卓の中心。手牌・河はすべてここを基準に配置する。
+export const TABLE_CENTER_X = STAGE_WIDTH / 2
+export const TABLE_CENTER_Y = STAGE_HEIGHT / 2
 
 // 卓背景: 彩度を抑えたフェルトグリーン。長時間プレイで目が疲れない明度に寄せている。
 export const TABLE_BG_COLOR = 0x1f3a2a
@@ -20,33 +27,40 @@ export const TEXT_MUTED_COLOR = 0xa89c80
 export const TEXT_DANGER_COLOR = 0xb84a4a
 export const TURN_GLOW_COLOR = 0xe8c47a
 export const SHADOW_COLOR = 0x000000
-export const EVENT_LOG_LIMIT = 12
-export const EVENT_LOG_VISIBLE_COUNT = 4
+export const EVENT_LOG_LIMIT = 24
+export const EVENT_LOG_VISIBLE_COUNT = 14
 
-// 牌の基本サイズ。隣接牌との中心間距離は width 以上を確保し、重なりを避ける。
+// 牌の基本サイズ。
+// 720×720 の盤面で 13 牌 + ツモ牌 (合計 14) を中央寄せに収めるため、handSpacing は
+// 牌 width 以下にせず、合計幅 ≦ 卓内幅 (約 640px) になるよう調整する。
 export const TILE = {
-  width: 50,
-  height: 70,
-  // 手牌の隣接牌中心間ピッチ (>= width)
-  handSpacing: 54,
-  // 河 (捨牌) のグリッドピッチ
-  discardColPitch: 36,
-  discardRowPitch: 50,
+  width: 40,
+  height: 56,
+  // 自家手牌のピッチ
+  handSpacing: 44,
+  // CPU 裏向き手牌のスケールと spacing
+  cpuHandScale: 0.7,
+  cpuHandSpacing: 30,
+  // 河のグリッドピッチ
+  discardColPitch: 30,
+  discardRowPitch: 42,
   discardScale: 0.62,
-  // 牌面のベース色 (アイボリー寄り)
   faceColor: 0xf3ead2,
-  // 牌面の縁取り
   edgeColor: 0x4a4a4a,
-  // 角丸の半径
-  cornerRadius: 6,
-  // 通常文字色 (萬子・字牌)
+  cornerRadius: 5,
   textColor: 0x1a1a1a,
-  // 索子 (緑系、彩度抑制)
   souColor: 0x2f6b3a,
-  // 筒子 (青系、彩度抑制)
   pinColor: 0x365a85,
-  // 赤ドラ
   redTextColor: 0xa83a3a,
-  // 裏向き (背中) 色
   backColor: 0x33445e,
 } as const
+
+// 河 6×3 グリッドの幅・高さ (タイル本体だけ、間隔ピッチで算出)。
+export const DISCARD_COLS = 6
+export const DISCARD_ROWS = 3
+export const DISCARD_BLOCK_WIDTH = DISCARD_COLS * TILE.discardColPitch
+export const DISCARD_BLOCK_HEIGHT = DISCARD_ROWS * TILE.discardRowPitch
+
+// 河ブロックの内縁から卓中心までの距離。4 方位で同じ値を使うことで対称配置を保証する。
+// 中央に「直前打牌・流れ表示」などのちょっとした余地を残しつつ、河同士の被りを防ぐ。
+export const DISCARD_INNER_MARGIN = 56

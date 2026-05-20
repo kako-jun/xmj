@@ -4,9 +4,9 @@ import {
   STAGE_HEIGHT,
   TABLE_BG_COLOR,
   EVENT_LOG_LIMIT,
+  EVENT_LOG_VISIBLE_COUNT,
 } from './constants'
 import { createTableScene } from './table'
-import type { TableActionButton } from './table'
 import type { DiceRoll, GameMode, GameModeOption, GameState, PlayerIndex, Tile } from './types'
 import { createGameStateFromBridge } from './bridgeState'
 import { diceRollToHumanSeat, tileToCuiCode } from './types'
@@ -18,18 +18,29 @@ import { createResultScene, type ResultEntry } from './resultScene'
 import { createRoundResultScene } from './roundResultScene'
 import { parseRoundOutcome } from './types'
 import type { RoundOutcome } from './types'
+import {
+  installKeyboardShortcuts,
+  renderHtmlUi,
+  type HtmlUiActionButton,
+  type HtmlUiState,
+} from './htmlUi'
 
 interface AppOptions {
   cpuTurnDelayMs?: number
   createBridge?: ((humanSeat: PlayerIndex) => WasmGameBridge) | null
   /** 場決め用サイコロの乱数源。テストで決定的に注入できる。 */
   rollDice?: () => DiceRoll
+  /** HTML オーバーレイの描画先 (ui-side 要素)。省略時は document.getElementById('ui-side') */
+  htmlUiRoot?: HTMLElement | null
 }
 
 const defaultRollDice = (): DiceRoll => ({
   d1: 1 + Math.floor(Math.random() * 6),
   d2: 1 + Math.floor(Math.random() * 6),
 })
+
+/** 現在表示しているシーン種別。HTML overlay の表示内容を切り替えるのに使う。 */
+type ActiveScene = 'title' | 'mode-select' | 'dice-roll' | 'table' | 'round-result' | 'result'
 
 export class App {
   app: Application
@@ -42,14 +53,8 @@ export class App {
   titleNotice: string | null = null
   /** 中間結果シーン表示中の局結果。null なら表示していない (= 対局中)。 */
   pendingRoundOutcome: RoundOutcome | null = null
-  /**
-   * 他家の打牌に対して人間プレイヤーがロン可能になっている瞬間を保持する。
-   * 非 null の間は CPU ターンループを止め、「ロン / 見逃し」ボタンを表示する。
-   * `from` は放銃者の座席 index。
-   */
   pendingRonChance: { from: PlayerIndex } | null = null
   selectedGameMode: GameMode = 'tonpuusen'
-  /** 場決めで決まった人間プレイヤーの席。null なら未確定。 */
   selectedHumanSeat: PlayerIndex | null = null
   private cpuTurnDelayMs: number
   private createBridge: ((humanSeat: PlayerIndex) => WasmGameBridge) | null
@@ -57,27 +62,47 @@ export class App {
   private cpuTurnTask: Promise<void> | null = null
   private cpuTurnGeneration = 0
   private destroyedBridges = new WeakSet<WasmGameBridge>()
+  private htmlUiRoot: HTMLElement | null
+  private uninstallKeyboard: (() => void) | null = null
+  private activeScene: ActiveScene = 'title'
 
   constructor(app: Application, options: AppOptions = {}) {
     this.app = app
     this.cpuTurnDelayMs = options.cpuTurnDelayMs ?? 0
     this.createBridge = options.createBridge ?? null
     this.rollDice = options.rollDice ?? defaultRollDice
+    this.htmlUiRoot =
+      options.htmlUiRoot ??
+      (typeof document !== 'undefined' ? document.getElementById('ui-side') : null)
+    if (this.htmlUiRoot) {
+      this.uninstallKeyboard = installKeyboardShortcuts({
+        onSelect: index => this.handleHotkeySelect(index),
+        onDiscard: () => this.handleHotkeyDiscard(),
+        onTsumo: () => this.handleHotkeyTsumo(),
+        onRon: () => this.handleHotkeyRon(),
+        onRiichiDiscard: () => this.handleHotkeyRiichiDiscard(),
+        onCancel: () => this.handleHotkeyCancel(),
+        onConfirm: () => this.handleHotkeyConfirm(),
+        onBackTile: () => this.handleHotkeyShift(-1),
+        onNextTile: () => this.handleHotkeyShift(1),
+      })
+    }
   }
 
-  /**
-   * Wasm 卓の生成に失敗したときのフォールバックとして、単色の卓背景だけを描画する。
-   */
+  /** テスト用クリーンアップ。本番はページ離脱まで持つので任意。 */
+  destroy(): void {
+    this.uninstallKeyboard?.()
+    this.uninstallKeyboard = null
+    this.invalidateCpuTurnTask()
+    this.releaseCurrentBridge()
+  }
+
   showTableBackground(): void {
     const bg = new Graphics()
     bg.rect(0, 0, STAGE_WIDTH, STAGE_HEIGHT).fill({ color: TABLE_BG_COLOR })
     this.app.stage.addChild(bg)
   }
 
-  /**
-   * bridge を使わず、与えられた GameState をそのまま静的表示する。
-   * スモークテストや初期描画確認用であり、ターン進行 UI の起点には使わない。
-   */
   showInitialTable(gameState: GameState): void {
     this.invalidateCpuTurnTask()
     this.releaseCurrentBridge()
@@ -88,6 +113,7 @@ export class App {
     this.titleNotice = null
     this.pendingRoundOutcome = null
     this.pendingRonChance = null
+    this.activeScene = 'table'
     this.renderTable()
   }
 
@@ -101,6 +127,7 @@ export class App {
     this.titleNotice = notice
     this.pendingRoundOutcome = null
     this.pendingRonChance = null
+    this.activeScene = 'title'
     this.replaceStageRoot(
       createTitleScene({
         notice: this.titleNotice,
@@ -110,20 +137,16 @@ export class App {
         },
       })
     )
+    this.renderHtmlOverlay()
   }
 
-  /**
-   * モード選択 (東風戦 / 半荘戦) シーン。半荘戦は現状無効。
-   */
   showModeSelectScene(): void {
     this.invalidateCpuTurnTask()
+    this.activeScene = 'mode-select'
     this.replaceStageRoot(
       createModeSelectScene({
         selectedMode: this.selectedGameMode,
         modes: this.buildGameModes(),
-        // モード切替で scene を丸ごと再構築している。カードが 2 枚なので毎回 destroy
-        // & 再生成しても十分軽い。カードが増える場合は selected フラグだけ差分更新する
-        // 設計に切り替えること。
         onSelectMode: mode => {
           this.selectedGameMode = mode
           this.showModeSelectScene()
@@ -136,15 +159,12 @@ export class App {
         },
       })
     )
+    this.renderHtmlOverlay()
   }
 
-  /**
-   * 場決めシーン。
-   * - 引数なしで呼ぶと内部の rollDice() で席を決める。
-   * - テストやアニメ完了後の置き換え用に、明示の DiceRoll を渡せる。
-   */
   showDiceRollScene(roll?: DiceRoll): void {
     this.invalidateCpuTurnTask()
+    this.activeScene = 'dice-roll'
     const settledRoll = roll ?? this.rollDice()
     const humanSeat = diceRollToHumanSeat(settledRoll)
     this.selectedHumanSeat = humanSeat
@@ -158,6 +178,7 @@ export class App {
         },
       })
     )
+    this.renderHtmlOverlay()
   }
 
   startNewGame(): boolean {
@@ -199,6 +220,7 @@ export class App {
     this.titleNotice = null
     this.pendingRoundOutcome = null
     this.pendingRonChance = null
+    this.activeScene = 'table'
     this.refreshFromBridge()
 
     if (this.shouldDrawHumanTile()) {
@@ -262,7 +284,6 @@ export class App {
   private releaseCurrentBridge(): void {
     this.destroyBridgeOnce(this.bridge)
     this.bridge = null
-    // S5: bridge を解放したらロン待ち状態も必ずクリア (再戦時の幽霊状態防止)
     this.pendingRonChance = null
   }
 
@@ -274,7 +295,6 @@ export class App {
     if (!this.bridge) return false
     const drew = this.bridge.drawTile()
     if (!drew) {
-      // 山牌が尽きていれば中間結果シーンに集約する (M2: 競合ガード)。
       this.maybeFinalizeRoundFromDraw()
       return false
     }
@@ -283,11 +303,6 @@ export class App {
     return true
   }
 
-  /**
-   * `bridge.drawTile()` が失敗した場面で「山牌切れ & 未確定」を検出したら
-   * `finalizeRoundFromDraw` に流す。`pendingRoundOutcome` が既にセットされていたら
-   * 何もしない (多重ガード)。
-   */
   private maybeFinalizeRoundFromDraw(): void {
     if (!this.bridge) return
     if (this.pendingRoundOutcome) return
@@ -296,10 +311,6 @@ export class App {
     this.finalizeRoundFromDraw()
   }
 
-  /**
-   * 流局 (山牌切れ) の確定処理を 1 箇所に集約する。
-   * テンパイ者の自動算出 → `resolveDraw` → 中間結果シーンの流れを担う。
-   */
   private finalizeRoundFromDraw(): void {
     if (!this.bridge) return
     if (this.pendingRoundOutcome) return
@@ -364,7 +375,6 @@ export class App {
       this.appendLog(`${playerName} が ${discardedTile} を打牌 ${this.wallSummary()}`)
       this.finalizeGameIfNeeded()
       if (this.checkRonChanceAfterDiscard(currentPlayer)) {
-        // ロン判断を人間に委ねるためループを抜ける。
         return
       }
     }
@@ -399,7 +409,6 @@ export class App {
       this.appendLog(`${playerName} が ${discardedTile} を打牌 ${this.wallSummary()}`)
       this.finalizeGameIfNeeded()
       if (this.checkRonChanceAfterDiscard(currentPlayer)) {
-        // 人間ロン待ちに突入したので CPU ターンループを終了する。
         return
       }
 
@@ -422,13 +431,6 @@ export class App {
     }
   }
 
-  /**
-   * 他家 (CPU) の打牌直後に人間プレイヤーがロン可能か確認する。
-   * 可能なら `pendingRonChance` をセットし、CPU ループ側に「停止せよ」を伝える。
-   * 中間結果シーン表示中 (pendingRoundOutcome != null) の場合は判定スキップ。
-   *
-   * 戻り値: true ならロン待ちに入った（呼び出し側はループを抜けるべき）。
-   */
   private checkRonChanceAfterDiscard(discarder: PlayerIndex): boolean {
     if (!this.bridge) return false
     if (this.pendingRoundOutcome) return false
@@ -456,11 +458,14 @@ export class App {
     this.renderTable()
   }
 
-  private buildActionButtons(): TableActionButton[] {
+  /**
+   * 「打牌」「ツモ」「ロン」「立直して打牌」「見逃し」など、現在の状況で有効な
+   * 行動ボタンを構築する。HTML overlay と内部のキーボードハンドラの両方で使う。
+   */
+  private buildActionButtons(): HtmlUiActionButton[] {
     if (!this.bridge || !this.gameState) return []
     if (this.bridge.isGameOver()) return []
 
-    // ロン待ちフェーズ: 他家打牌に対する人間のロン判断。CPU ターンループは停止済み。
     if (this.pendingRonChance) {
       const { from } = this.pendingRonChance
       return [
@@ -468,7 +473,8 @@ export class App {
           key: 'ron',
           label: 'ロン',
           enabled: true,
-          onTap: () => {
+          hotkey: 'R',
+          onActivate: () => {
             this.confirmRon(from)
           },
         },
@@ -476,7 +482,8 @@ export class App {
           key: 'ron-skip',
           label: '見逃し',
           enabled: true,
-          onTap: () => {
+          hotkey: 'Esc',
+          onActivate: () => {
             this.skipRon()
           },
         },
@@ -486,16 +493,15 @@ export class App {
     const isHumanTurn = this.bridge.isCurrentPlayerHuman()
     const canTsumo = isHumanTurn && this.bridge.canTsumo(this.humanPlayerIndex)
     const shouldUseRiichiConfirm =
-      isHumanTurn &&
-      this.selectedHandIndex !== null &&
-      this.bridge.canRiichi()
+      isHumanTurn && this.selectedHandIndex !== null && this.bridge.canRiichi()
 
-    const buttons: TableActionButton[] = [
+    const buttons: HtmlUiActionButton[] = [
       {
         key: shouldUseRiichiConfirm ? 'riichi-discard' : 'discard',
         label: shouldUseRiichiConfirm ? '立直して打牌' : '打牌',
         enabled: isHumanTurn && this.selectedHandIndex !== null,
-        onTap: () => {
+        hotkey: shouldUseRiichiConfirm ? 'L' : 'D',
+        onActivate: () => {
           this.confirmSelectedTile({ riichi: shouldUseRiichiConfirm })
         },
       },
@@ -506,7 +512,8 @@ export class App {
         key: 'tsumo',
         label: 'ツモ',
         enabled: true,
-        onTap: () => {
+        hotkey: 'T',
+        onActivate: () => {
           this.confirmTsumo()
         },
       })
@@ -515,33 +522,21 @@ export class App {
     return buttons
   }
 
-  /**
-   * 人間プレイヤーのツモ和了確定。`resolveWinTsumo` 成功時のみ中間結果へ遷移する。
-   * 何らかの理由で和了形が確定できなければ何もしない（ボタンは canTsumo true 時のみ
-   * 表示されるため通常ここには来ない安全網）。
-   */
   private confirmTsumo(): void {
     if (!this.bridge) return
     if (!this.bridge.isCurrentPlayerHuman()) return
-    // M1: 押下時にもう一度 canTsumo を再確認 (canTsumo が false なら早期 return)
     if (!this.bridge.canTsumo(this.humanPlayerIndex)) return
     const summary = this.bridge.resolveWinTsumo(this.humanPlayerIndex)
     if (!summary) {
-      // M1: 失敗時の無言を解消。canTsumo は true だったのに resolve に失敗した稀ケース
       this.appendLog('ツモ宣言失敗')
       return
     }
-    // N4: ツモ成功ログ
     this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がツモ和了`)
     this.showRoundResultIfPending()
   }
 
-  /**
-   * 人間プレイヤーのロン和了確定。`pendingRonChance.from` を放銃者として渡す。
-   */
   private confirmRon(fromIdx: PlayerIndex): void {
     if (!this.bridge) return
-    // M2: pendingRonChance / canRon を再確認して早期 return
     if (!this.pendingRonChance) return
     if (!this.bridge.canRon(this.humanPlayerIndex)) {
       this.pendingRonChance = null
@@ -551,7 +546,6 @@ export class App {
     const summary = this.bridge.resolveWinRon(this.humanPlayerIndex, fromIdx)
     this.pendingRonChance = null
     if (!summary) {
-      // M2: 和了形が成立しないケース。失敗ログを残してから CPU ループに戻す。
       this.appendLog('ロン宣言失敗（和了形不成立）')
       this.advanceTurnLoop()
       return
@@ -559,27 +553,91 @@ export class App {
     this.showRoundResultIfPending()
   }
 
-  /**
-   * ロン見逃し。`pendingRonChance` をクリアして CPU ターンループを再開する。
-   *
-   * TODO(フリテン): 現状フリテン未実装。見逃し後の同巡内 canRon 抑止は将来の課題。
-   * 現実装では CPU 次自摸まで進めば last_discard が更新されて自然に canRon=false になるため
-   * 表面的な再ロンは起こらないが、厳密なフリテンルールは未対応。
-   */
   private skipRon(): void {
     this.pendingRonChance = null
     this.appendLog('ロン見逃し')
     this.advanceTurnLoop()
   }
 
+  // ============================================================================
+  // キーボードショートカット
+  // ============================================================================
+
+  private isHumanTurnInteractive(): boolean {
+    return (
+      this.bridge !== null &&
+      this.bridge.isCurrentPlayerHuman() &&
+      !this.bridge.isGameOver() &&
+      !this.pendingRonChance &&
+      this.activeScene === 'table'
+    )
+  }
+
+  private handleHotkeySelect(index: number): void {
+    if (!this.isHumanTurnInteractive() || !this.gameState) return
+    const hand = this.gameState.players[this.humanPlayerIndex].hand
+    if (index < 0 || index >= hand.length) return
+    this.handleHandTileTap(index)
+  }
+
+  private handleHotkeyShift(delta: -1 | 1): void {
+    if (!this.isHumanTurnInteractive() || !this.gameState) return
+    const hand = this.gameState.players[this.humanPlayerIndex].hand
+    if (hand.length === 0) return
+    const current = this.selectedHandIndex ?? (delta > 0 ? -1 : hand.length)
+    const next = ((current + delta) % hand.length + hand.length) % hand.length
+    this.selectedHandIndex = next
+    this.renderTable()
+  }
+
+  private handleHotkeyDiscard(): void {
+    if (!this.isHumanTurnInteractive() || this.selectedHandIndex === null) return
+    this.confirmSelectedTile()
+  }
+
+  private handleHotkeyTsumo(): void {
+    if (this.activeScene !== 'table') return
+    if (!this.bridge?.isCurrentPlayerHuman()) return
+    if (!this.bridge.canTsumo(this.humanPlayerIndex)) return
+    this.confirmTsumo()
+  }
+
+  private handleHotkeyRon(): void {
+    if (!this.pendingRonChance) return
+    this.confirmRon(this.pendingRonChance.from)
+  }
+
+  private handleHotkeyRiichiDiscard(): void {
+    if (!this.isHumanTurnInteractive() || this.selectedHandIndex === null) return
+    if (!this.bridge?.canRiichi()) return
+    this.confirmSelectedTile({ riichi: true })
+  }
+
+  private handleHotkeyCancel(): void {
+    if (this.pendingRonChance) {
+      this.skipRon()
+    }
+  }
+
+  private handleHotkeyConfirm(): void {
+    // 卓: 「打牌」を確定 (選択中の牌があれば)
+    if (this.activeScene === 'table' && this.isHumanTurnInteractive()) {
+      this.handleHotkeyDiscard()
+    }
+  }
+
+  // ============================================================================
+  // 描画
+  // ============================================================================
+
   private renderTable(): void {
     if (!this.gameState) return
+    this.activeScene = 'table'
     const isInteractive =
       this.bridge !== null &&
       this.bridge.isCurrentPlayerHuman() &&
       !this.bridge.isGameOver() &&
       this.gameState.currentTurn === this.humanPlayerIndex &&
-      // M3: ロン待ち中は手牌タップ無効化 (ロン/見逃しボタン以外の操作を遮断)
       !this.pendingRonChance
 
     const table = createTableScene(this.gameState, {
@@ -589,10 +647,50 @@ export class App {
       onHandTileTap: index => {
         this.handleHandTileTap(index)
       },
-      actionButtons: this.buildActionButtons(),
-      eventLog: this.eventLog,
     })
     this.replaceStageRoot(table)
+    this.renderHtmlOverlay()
+  }
+
+  /**
+   * HTML overlay (#ui-side) を最新状態で描画する。
+   * 卓以外のシーンでも、最低限「タイトル中」「モード選択中」等のラベルとログを出す。
+   */
+  private renderHtmlOverlay(): void {
+    if (!this.htmlUiRoot) return
+    const actions = this.activeScene === 'table' ? this.buildActionButtons() : []
+    const hint = this.computeHint()
+    const visibleLog = this.eventLog.slice(-EVENT_LOG_VISIBLE_COUNT)
+    const state: HtmlUiState = {
+      game: this.activeScene === 'table' ? this.gameState : null,
+      humanPlayerIndex: this.humanPlayerIndex,
+      eventLog: visibleLog,
+      actions,
+      hint,
+    }
+    renderHtmlUi(this.htmlUiRoot, state)
+  }
+
+  private computeHint(): string {
+    if (this.pendingRonChance) {
+      return 'ロン: R / 見逃し: Esc'
+    }
+    if (this.activeScene !== 'table') {
+      if (this.activeScene === 'title') return '対局開始でモード選択へ'
+      if (this.activeScene === 'mode-select') return '東風戦/半荘戦を選び「次へ」'
+      if (this.activeScene === 'dice-roll') return 'サイコロで起家を決定中'
+      if (this.activeScene === 'round-result') return '次局へ / タイトルへ'
+      if (this.activeScene === 'result') return '再戦 / タイトルへ'
+      return ''
+    }
+    if (!this.bridge) return ''
+    if (this.bridge.isCurrentPlayerHuman()) {
+      if (this.selectedHandIndex === null) {
+        return '手牌の数字キー (1-9) か牌をタップで選択。 ←/→ で移動'
+      }
+      return '同じ牌タップ・D・Enter で打牌。T ツモ / L 立直して打牌'
+    }
+    return 'CPU の手番'
   }
 
   private buildGameModes(): GameModeOption[] {
@@ -621,7 +719,6 @@ export class App {
   }
 
   private buildResultEntries(gameState: GameState): ResultEntry[] {
-    // 同点時の正式な順位規則は Rust core 側の API 整備後に再検討する。
     return [...gameState.players]
       .sort((a, b) => b.score - a.score || a.id - b.id)
       .map((player, index) => ({
@@ -643,6 +740,7 @@ export class App {
     this.releaseCurrentBridge()
     this.gameState = finalState
     this.selectedHandIndex = null
+    this.activeScene = 'result'
 
     this.replaceStageRoot(
       createResultScene({
@@ -650,8 +748,6 @@ export class App {
         entries,
         detailPlaceholder: '現 API では未取得',
         onRematch: () => {
-          // 再戦はモード選択からやり直す (場決めもサイコロからもう一度)。
-          // モードは前回選択を引き継ぐので一度押すだけで再開できる。
           this.showModeSelectScene()
         },
         onBackToTitle: () => {
@@ -659,15 +755,13 @@ export class App {
         },
       })
     )
+    this.renderHtmlOverlay()
   }
 
   private finalizeGameIfNeeded(): void {
     if (!this.bridge || !this.gameState) return
-
-    // 中間結果シーンを既に表示している（次局ボタン待ち）ならスキップ
     if (this.pendingRoundOutcome) return
 
-    // 山牌切れだが対局はまだ続く可能性 → resolveDraw → 中間結果シーン
     if (!this.bridge.isGameOver() && this.bridge.getWallCount() === 0) {
       this.finalizeRoundFromDraw()
       return
@@ -679,11 +773,6 @@ export class App {
     this.showResultScene()
   }
 
-  /**
-   * 終局時の表示メッセージを `resultMessage` にセットし、eventLog にも積む。
-   * 飛び (score <= 0) を最優先、続いて山牌切れ、いずれでもなければ汎用文言。
-   * 一度セット済みなら何もしない。
-   */
   private computeAndAppendResultMessage(): void {
     if (this.resultMessage) return
     if (!this.gameState) return
@@ -698,11 +787,6 @@ export class App {
     this.appendLog(this.resultMessage)
   }
 
-  /**
-   * `bridge.getLastOutcomeJson()` を読み、結果があれば中間結果シーンを表示する。
-   * 結果が読めない / パース失敗のときは何もしない（呼び出し側で finalizeGameIfNeeded
-   * 経由のフォールバックが走る）。
-   */
   private showRoundResultIfPending(): void {
     if (!this.bridge) return
     const json = this.bridge.getLastOutcomeJson()
@@ -710,6 +794,7 @@ export class App {
     if (!outcome) return
     this.pendingRoundOutcome = outcome
     this.invalidateCpuTurnTask()
+    this.activeScene = 'round-result'
 
     if (outcome.kind === 'win') {
       const w = outcome.data
@@ -736,26 +821,22 @@ export class App {
         },
       })
     )
+    this.renderHtmlOverlay()
   }
 
-  /**
-   * 中間結果シーンの「次局へ」処理。
-   * `bridge.nextRound()` の戻り値で続行 / 終局を分岐する。
-   */
   private advanceToNextRound(bridge: WasmGameBridge): void {
     if (this.bridge !== bridge) return
     this.pendingRoundOutcome = null
     this.pendingRonChance = null
     const cont = bridge.nextRound()
     if (!cont) {
-      // 対局終了 → 通常の結果画面へ
-      // 先に gameState を最新化してから飛び判定/順位確定を行う (S6)。
       this.refreshFromBridge()
       this.computeAndAppendResultMessage()
       this.showResultScene()
       return
     }
     this.appendLog(`次局: ${bridge.getRound()}局 ${bridge.getHonba()}本場`)
+    this.activeScene = 'table'
     this.refreshFromBridge()
     if (this.shouldDrawHumanTile()) {
       this.drawHumanTileAndRefresh()
