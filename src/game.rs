@@ -1196,8 +1196,12 @@ impl Game {
     /// 各プレイヤーの `Player::is_tenpai()` を呼び、テンパイしている座席 index を集める。
     /// 流局時に `resolve_draw` へ渡すノーテン罰符徴収用の補助 API。
     ///
-    /// 副露ありの聴牌判定は `Player::is_tenpai` / `Hand::is_tenpai` の実装に従う
-    /// （現状は門前限定 → 副露ありは常に false。`#33` でカバー予定）。
+    /// 副露ありの聴牌判定は `Player::is_tenpai` / `Hand::is_tenpai` 経由で
+    /// `Hand::shanten()` を呼び、`melds_needed = 4 - melds.len()` として
+    /// `shanten_normal` を実行する（src/hand.rs:417-427）。
+    /// つまり副露ありでも shanten 計算自体は動くが、現状の `shanten_normal` は
+    /// 簡易実装のため精度が低く、副露ありや複雑な待ち形では誤判定し得る。
+    /// 精度改善は `#33` / `#34` で対応予定。
     pub fn compute_tenpai_players(&self) -> Vec<usize> {
         self.players
             .iter()
@@ -1231,8 +1235,17 @@ impl Game {
         }
 
         // 連荘フラグ更新（親テンパイで連荘）
+        //
+        // 仕様（意図的挙動）:
+        // - 0 人テンパイ: dealer_tenpai == false → 親もノーテン扱い → 親流れ
+        // - 4 人テンパイ: dealer_tenpai == true  → 親も聴牌扱い → 連荘
+        // - 1〜3 人テンパイ: 親が tenpai_players に含まれるか否かで分岐
+        //   罰符の支払い有無（per_tenpai == 0 のケース）とは独立に連荘判定する。
         self.dealer_won_last = dealer_tenpai;
 
+        // TODO: 流し満貫 / 9 種 9 牌 / 四風連打 / 三家和 / 四開槓 / リーチ後チョンボ等の
+        // 特殊流局は未対応。`RoundOutcome::Draw` に種別フィールド (enum) を追加して
+        // 別 Issue で扱う。現状は通常流局（荒牌平局）のみ。
         self.last_outcome = Some(RoundOutcome::Draw { tenpai_players });
     }
 
@@ -2368,6 +2381,12 @@ mod tests {
         assert_eq!(game.players[2].score, scores_before[2] + 1000);
         assert_eq!(game.players[3].score, scores_before[3] - 3000);
         assert_score_conservation(&before, &game);
+        // 親 (idx=0) が聴牌側に含まれるので連荘
+        // 罰符配分と連荘判定が独立して保たれることを固定
+        assert!(
+            game.dealer_won_last,
+            "親 (idx=0) が聴牌のとき dealer_won_last == true（連荘）"
+        );
     }
 
     /// 流局 0 テンパイ → 罰符無し（スコア不変）
@@ -2384,6 +2403,11 @@ mod tests {
                 "0 テンパイは罰符無し (player {i})"
             );
         }
+        // 0 人テンパイ → 親もノーテン → 親流れ
+        assert!(
+            !game.dealer_won_last,
+            "0 人テンパイは親流れ (dealer_won_last == false)"
+        );
     }
 
     /// 流局 4 テンパイ → 罰符無し（スコア不変）
@@ -2400,6 +2424,11 @@ mod tests {
                 "4 テンパイは罰符無し (player {i})"
             );
         }
+        // 4 人テンパイ → 親も聴牌 → 連荘
+        assert!(
+            game.dealer_won_last,
+            "4 人テンパイは連荘 (dealer_won_last == true)"
+        );
     }
 
     /// `Game::compute_tenpai_players` が `Player::is_tenpai` を 4 人分まわした

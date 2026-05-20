@@ -122,6 +122,8 @@ const summarizeDraw = (
     // 1人 → 聴牌 +3000 / ノーテン -1000
     // 2人 → 聴牌 +1500 / ノーテン -1500
     // 3人 → 聴牌 +1000 / ノーテン -3000
+    // 罰符配分定数は src/game.rs::resolve_draw の真値。
+    // Rust 側を変更したら追従が必要 (本来は resolve_draw 結果から差分を逆算すべき)。
     const perTenpai = tenpaiCount === 1 ? 3000 : tenpaiCount === 2 ? 1500 : 1000
     const perNoten = tenpaiCount === 1 ? 1000 : tenpaiCount === 2 ? 1500 : 3000
     lines.push(
