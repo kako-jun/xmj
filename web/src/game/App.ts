@@ -42,6 +42,12 @@ export class App {
   titleNotice: string | null = null
   /** 中間結果シーン表示中の局結果。null なら表示していない (= 対局中)。 */
   pendingRoundOutcome: RoundOutcome | null = null
+  /**
+   * 他家の打牌に対して人間プレイヤーがロン可能になっている瞬間を保持する。
+   * 非 null の間は CPU ターンループを止め、「ロン / 見逃し」ボタンを表示する。
+   * `from` は放銃者の座席 index。
+   */
+  pendingRonChance: { from: PlayerIndex } | null = null
   selectedGameMode: GameMode = 'tonpuusen'
   /** 場決めで決まった人間プレイヤーの席。null なら未確定。 */
   selectedHumanSeat: PlayerIndex | null = null
@@ -81,6 +87,7 @@ export class App {
     this.resultMessage = null
     this.titleNotice = null
     this.pendingRoundOutcome = null
+    this.pendingRonChance = null
     this.renderTable()
   }
 
@@ -93,6 +100,7 @@ export class App {
     this.resultMessage = null
     this.titleNotice = notice
     this.pendingRoundOutcome = null
+    this.pendingRonChance = null
     this.replaceStageRoot(
       createTitleScene({
         notice: this.titleNotice,
@@ -190,6 +198,7 @@ export class App {
     this.resultMessage = null
     this.titleNotice = null
     this.pendingRoundOutcome = null
+    this.pendingRonChance = null
     this.refreshFromBridge()
 
     if (this.shouldDrawHumanTile()) {
@@ -253,6 +262,8 @@ export class App {
   private releaseCurrentBridge(): void {
     this.destroyBridgeOnce(this.bridge)
     this.bridge = null
+    // S5: bridge を解放したらロン待ち状態も必ずクリア (再戦時の幽霊状態防止)
+    this.pendingRonChance = null
   }
 
   private isCpuTurnGenerationCurrent(generation: number): boolean {
@@ -352,6 +363,10 @@ export class App {
       this.appendLog(`${playerName} がツモ ${this.wallSummary()}`)
       this.appendLog(`${playerName} が ${discardedTile} を打牌 ${this.wallSummary()}`)
       this.finalizeGameIfNeeded()
+      if (this.checkRonChanceAfterDiscard(currentPlayer)) {
+        // ロン判断を人間に委ねるためループを抜ける。
+        return
+      }
     }
 
     if (!this.bridge) return
@@ -383,6 +398,10 @@ export class App {
       this.appendLog(`${playerName} がツモ ${this.wallSummary()}`)
       this.appendLog(`${playerName} が ${discardedTile} を打牌 ${this.wallSummary()}`)
       this.finalizeGameIfNeeded()
+      if (this.checkRonChanceAfterDiscard(currentPlayer)) {
+        // 人間ロン待ちに突入したので CPU ターンループを終了する。
+        return
+      }
 
       if (
         this.isCpuTurnGenerationCurrent(generation) &&
@@ -403,6 +422,27 @@ export class App {
     }
   }
 
+  /**
+   * 他家 (CPU) の打牌直後に人間プレイヤーがロン可能か確認する。
+   * 可能なら `pendingRonChance` をセットし、CPU ループ側に「停止せよ」を伝える。
+   * 中間結果シーン表示中 (pendingRoundOutcome != null) の場合は判定スキップ。
+   *
+   * 戻り値: true ならロン待ちに入った（呼び出し側はループを抜けるべき）。
+   */
+  private checkRonChanceAfterDiscard(discarder: PlayerIndex): boolean {
+    if (!this.bridge) return false
+    if (this.pendingRoundOutcome) return false
+    if (this.pendingRonChance) return false
+    if (discarder === this.humanPlayerIndex) return false
+    if (this.bridge.isGameOver()) return false
+    if (!this.bridge.canRon(this.humanPlayerIndex)) return false
+    this.pendingRonChance = { from: discarder }
+    this.invalidateCpuTurnTask()
+    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} にロン可能`)
+    this.renderTable()
+    return true
+  }
+
   private handleHandTileTap(index: number): void {
     if (!this.bridge || !this.gameState) return
     if (!this.bridge.isCurrentPlayerHuman()) return
@@ -420,21 +460,116 @@ export class App {
     if (!this.bridge || !this.gameState) return []
     if (this.bridge.isGameOver()) return []
 
+    // ロン待ちフェーズ: 他家打牌に対する人間のロン判断。CPU ターンループは停止済み。
+    if (this.pendingRonChance) {
+      const { from } = this.pendingRonChance
+      return [
+        {
+          key: 'ron',
+          label: 'ロン',
+          enabled: true,
+          onTap: () => {
+            this.confirmRon(from)
+          },
+        },
+        {
+          key: 'ron-skip',
+          label: '見逃し',
+          enabled: true,
+          onTap: () => {
+            this.skipRon()
+          },
+        },
+      ]
+    }
+
+    const isHumanTurn = this.bridge.isCurrentPlayerHuman()
+    const canTsumo = isHumanTurn && this.bridge.canTsumo(this.humanPlayerIndex)
     const shouldUseRiichiConfirm =
-      this.bridge.isCurrentPlayerHuman() &&
+      isHumanTurn &&
       this.selectedHandIndex !== null &&
       this.bridge.canRiichi()
 
-    return [
+    const buttons: TableActionButton[] = [
       {
         key: shouldUseRiichiConfirm ? 'riichi-discard' : 'discard',
         label: shouldUseRiichiConfirm ? '立直して打牌' : '打牌',
-        enabled: this.bridge.isCurrentPlayerHuman() && this.selectedHandIndex !== null,
+        enabled: isHumanTurn && this.selectedHandIndex !== null,
         onTap: () => {
           this.confirmSelectedTile({ riichi: shouldUseRiichiConfirm })
         },
       },
     ]
+
+    if (canTsumo) {
+      buttons.unshift({
+        key: 'tsumo',
+        label: 'ツモ',
+        enabled: true,
+        onTap: () => {
+          this.confirmTsumo()
+        },
+      })
+    }
+
+    return buttons
+  }
+
+  /**
+   * 人間プレイヤーのツモ和了確定。`resolveWinTsumo` 成功時のみ中間結果へ遷移する。
+   * 何らかの理由で和了形が確定できなければ何もしない（ボタンは canTsumo true 時のみ
+   * 表示されるため通常ここには来ない安全網）。
+   */
+  private confirmTsumo(): void {
+    if (!this.bridge) return
+    if (!this.bridge.isCurrentPlayerHuman()) return
+    // M1: 押下時にもう一度 canTsumo を再確認 (canTsumo が false なら早期 return)
+    if (!this.bridge.canTsumo(this.humanPlayerIndex)) return
+    const summary = this.bridge.resolveWinTsumo(this.humanPlayerIndex)
+    if (!summary) {
+      // M1: 失敗時の無言を解消。canTsumo は true だったのに resolve に失敗した稀ケース
+      this.appendLog('ツモ宣言失敗')
+      return
+    }
+    // N4: ツモ成功ログ
+    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がツモ和了`)
+    this.showRoundResultIfPending()
+  }
+
+  /**
+   * 人間プレイヤーのロン和了確定。`pendingRonChance.from` を放銃者として渡す。
+   */
+  private confirmRon(fromIdx: PlayerIndex): void {
+    if (!this.bridge) return
+    // M2: pendingRonChance / canRon を再確認して早期 return
+    if (!this.pendingRonChance) return
+    if (!this.bridge.canRon(this.humanPlayerIndex)) {
+      this.pendingRonChance = null
+      this.advanceTurnLoop()
+      return
+    }
+    const summary = this.bridge.resolveWinRon(this.humanPlayerIndex, fromIdx)
+    this.pendingRonChance = null
+    if (!summary) {
+      // M2: 和了形が成立しないケース。失敗ログを残してから CPU ループに戻す。
+      this.appendLog('ロン宣言失敗（和了形不成立）')
+      this.advanceTurnLoop()
+      return
+    }
+    this.showRoundResultIfPending()
+  }
+
+  /**
+   * ロン見逃し。`pendingRonChance` をクリアして CPU ターンループを再開する。
+   *
+   * TODO(フリテン): 現状フリテン未実装。見逃し後の同巡内 canRon 抑止は将来の課題。
+   * 現実装では CPU 次自摸まで進めば last_discard が更新されて自然に canRon=false になるため
+   * 表面的な再ロンは起こらないが、厳密なフリテンルールは未対応。
+   */
+  private skipRon(): void {
+    this.pendingRonChance = null
+    this.appendLog('ロン見逃し')
+    this.advanceTurnLoop()
   }
 
   private renderTable(): void {
@@ -443,7 +578,9 @@ export class App {
       this.bridge !== null &&
       this.bridge.isCurrentPlayerHuman() &&
       !this.bridge.isGameOver() &&
-      this.gameState.currentTurn === this.humanPlayerIndex
+      this.gameState.currentTurn === this.humanPlayerIndex &&
+      // M3: ロン待ち中は手牌タップ無効化 (ロン/見逃しボタン以外の操作を遮断)
+      !this.pendingRonChance
 
     const table = createTableScene(this.gameState, {
       humanPlayerIndex: this.humanPlayerIndex,
@@ -608,6 +745,7 @@ export class App {
   private advanceToNextRound(bridge: WasmGameBridge): void {
     if (this.bridge !== bridge) return
     this.pendingRoundOutcome = null
+    this.pendingRonChance = null
     const cont = bridge.nextRound()
     if (!cont) {
       // 対局終了 → 通常の結果画面へ

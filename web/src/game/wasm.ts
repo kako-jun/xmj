@@ -208,6 +208,36 @@ export class WasmGameBridge {
     return this.game.isPlayerRiichi(playerIdx)
   }
 
+  // ---- 和了宣言 (Issue #35) ----
+
+  /**
+   * 指定プレイヤーがツモ和了可能か。
+   * UI 側はこれが true のときだけ「ツモ」ボタンを enable する。
+   *
+   * @param playerIdx 判定対象プレイヤーの座席 index。省略時は内部 currentPlayer
+   *   (主にテスト用途。アプリ実装側からは明示指定すること)
+   */
+  canTsumo(playerIdx?: PlayerIndex): boolean {
+    const idx = playerIdx ?? (this.game.getCurrentPlayerId() as PlayerIndex)
+    return this.game.canTsumo(idx)
+  }
+
+  /**
+   * 指定プレイヤーが直前打牌に対してロン可能か。
+   * @param playerIdx 判定対象プレイヤーの座席 index (必須)
+   */
+  canRon(playerIdx: PlayerIndex): boolean {
+    return this.game.canRon(playerIdx)
+  }
+
+  /**
+   * 直前に打牌したプレイヤーの座席 index。`last_discard` が無ければ undefined。
+   */
+  getLastDiscarder(): PlayerIndex | undefined {
+    const v = this.game.getLastDiscarder()
+    return v === undefined || v === null ? undefined : (v as PlayerIndex)
+  }
+
   // ---- 局結着 / 次局 (Issue #27) ----
 
   /**

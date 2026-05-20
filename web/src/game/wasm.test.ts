@@ -23,6 +23,9 @@ class MockWasmGame {
   static lastResolveTsumoArg: number | null = null
   /** resolveWinRon に渡された [winner_idx, from_idx] */
   static lastResolveRonArgs: [number, number] | null = null
+  /** canTsumo / canRon に渡された player_idx */
+  static lastCanTsumoArg: number | null = null
+  static lastCanRonArg: number | null = null
 
   drawCalled = 0
 
@@ -90,6 +93,17 @@ class MockWasmGame {
   }
   isPlayerRiichi(_idx: number): boolean {
     return false
+  }
+  canTsumo(idx: number): boolean {
+    MockWasmGame.lastCanTsumoArg = idx
+    return idx === 0
+  }
+  canRon(idx: number): boolean {
+    MockWasmGame.lastCanRonArg = idx
+    return idx === 2
+  }
+  getLastDiscarder(): number | undefined {
+    return 3
   }
   free(): void {
     /* noop */
@@ -161,6 +175,8 @@ describe('WasmGameBridge', () => {
     MockWasmGame.lastResolveDrawArg = null
     MockWasmGame.lastResolveTsumoArg = null
     MockWasmGame.lastResolveRonArgs = null
+    MockWasmGame.lastCanTsumoArg = null
+    MockWasmGame.lastCanRonArg = null
     __setWasmModuleForTest(fakeModule)
   })
 
@@ -266,6 +282,30 @@ describe('WasmGameBridge', () => {
     const bridge = WasmGameBridge.createHybrid('me', 0)
     expect(bridge.resolveWinTsumo(0)).toBeNull()
     expect(bridge.resolveWinRon(0, 1)).toBeNull()
+  })
+
+  // ---- Tsumo / Ron 宣言 (Issue #35) ----
+
+  it('canTsumo は引数省略時は現在のプレイヤー idx を Rust に渡す', () => {
+    const bridge = WasmGameBridge.createHybrid('me', 0)
+    // mock の getCurrentPlayerId() は 1 を返す → canTsumo() は false
+    expect(bridge.canTsumo()).toBe(false)
+    expect(MockWasmGame.lastCanTsumoArg).toBe(1)
+    // 明示 idx は素通し
+    expect(bridge.canTsumo(0 as 0)).toBe(true)
+    expect(MockWasmGame.lastCanTsumoArg).toBe(0)
+  })
+
+  it('canRon は指定 idx を Rust に渡す', () => {
+    const bridge = WasmGameBridge.createHybrid('me', 0)
+    expect(bridge.canRon(2 as 2)).toBe(true)
+    expect(MockWasmGame.lastCanRonArg).toBe(2)
+    expect(bridge.canRon(0 as 0)).toBe(false)
+  })
+
+  it('getLastDiscarder は number を PlayerIndex として返す', () => {
+    const bridge = WasmGameBridge.createHybrid('me', 0)
+    expect(bridge.getLastDiscarder()).toBe(3)
   })
 
   it('round 系 getter / nextRound / getLastOutcomeJson が透過する', () => {
