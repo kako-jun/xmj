@@ -165,6 +165,21 @@ describe('App', () => {
     expect(table.getChildByLabel('last-discard')).toBeNull()
   })
 
+  it('lastDiscard が指定されているとき卓中央に last-discard を描画する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    const state = initWithState({
+      phase: 'game',
+      lastDiscard: { suit: 'man', value: 7 },
+    })
+
+    app.showInitialTable(state)
+
+    const table = getTable(stage)
+    expect(table.getChildByLabel('last-discard')).toBeTruthy()
+  })
+
   it.each([
     { currentTurn: 0, wind: '東', markerText: 'あなた (あなた)' },
     { currentTurn: 1, wind: '南', markerText: 'CPU 南' },

@@ -213,7 +213,7 @@ export const keyEventToIntent = (event: KeyboardEvent): HotkeyIntent | null => {
   const key = event.key
   // 数字 1-9: 1-indexed の手牌選択
   if (/^[1-9]$/.test(key)) return { kind: 'select', index: Number(key) - 1 }
-  // 14 牌目までは QWERT で拾う
+  // 10-12 牌目は Q W E で拾う (R/T はロン/ツモと衝突するため使用不可)
   const extraSelect: Record<string, number> = { q: 9, w: 10, e: 11 }
   const lower = key.toLowerCase()
   if (extraSelect[lower] !== undefined) return { kind: 'select', index: extraSelect[lower] }
@@ -268,9 +268,14 @@ export const installKeyboardShortcuts = (options: KeyboardBindingOptions): (() =
   const handler = (event: KeyboardEvent): void => {
     const intent = keyEventToIntent(event)
     if (!intent) return
-    // ボタン上で Enter / Space を押した場合はブラウザのデフォルト発火に任せる。
+    // 直前にボタンをクリックすると focus が残り、続けて `1` / `D` / `T` を押しても
+    // 全部無視されてしまうので、Enter / Space (= 'confirm' or 'discard' で Space を拾う)
+    // だけブラウザ既定の発火に任せ、それ以外の意味論キーは focus 場所に関わらず通す。
     const target = event.target as HTMLElement | null
-    if (target && target.tagName === 'BUTTON') {
+    const isButtonFocused = target?.tagName === 'BUTTON'
+    const isBrowserDefaultKey =
+      (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar')
+    if (isButtonFocused && isBrowserDefaultKey) {
       return
     }
     switch (intent.kind) {
