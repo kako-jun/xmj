@@ -69,6 +69,74 @@ describe('createRoundResultScene', () => {
     expect(texts.some(t => t.includes('全員ノーテン'))).toBe(true)
   })
 
+  it('流局 1 テンパイで罰符 +3000 / -1000 を表示する', () => {
+    const outcome: RoundOutcome = {
+      kind: 'draw',
+      data: { tenpaiPlayers: [2] },
+    }
+    const scene = createRoundResultScene({
+      outcome,
+      getPlayerName: namer,
+      onNext: () => undefined,
+      onBackToTitle: () => undefined,
+    })
+    const texts = collectTexts(scene).map(t => t.text)
+    expect(
+      texts.some(t => t.includes('聴牌者 +3,000') && t.includes('ノーテン者 -1,000'))
+    ).toBe(true)
+  })
+
+  it('流局 2 テンパイで罰符 ±1500 を表示する', () => {
+    const outcome: RoundOutcome = {
+      kind: 'draw',
+      data: { tenpaiPlayers: [0, 1] },
+    }
+    const scene = createRoundResultScene({
+      outcome,
+      getPlayerName: namer,
+      onNext: () => undefined,
+      onBackToTitle: () => undefined,
+    })
+    const texts = collectTexts(scene).map(t => t.text)
+    expect(
+      texts.some(t => t.includes('聴牌者 +1,500') && t.includes('ノーテン者 -1,500'))
+    ).toBe(true)
+  })
+
+  it('流局 3 テンパイで罰符 +1000 / -3000 を表示する', () => {
+    const outcome: RoundOutcome = {
+      kind: 'draw',
+      data: { tenpaiPlayers: [0, 1, 2] },
+    }
+    const scene = createRoundResultScene({
+      outcome,
+      getPlayerName: namer,
+      onNext: () => undefined,
+      onBackToTitle: () => undefined,
+    })
+    const texts = collectTexts(scene).map(t => t.text)
+    expect(
+      texts.some(t => t.includes('聴牌者 +1,000') && t.includes('ノーテン者 -3,000'))
+    ).toBe(true)
+  })
+
+  it('流局 4 テンパイ・0 テンパイは罰符無しと表示する', () => {
+    for (const tenpai of [[], [0, 1, 2, 3]]) {
+      const outcome: RoundOutcome = {
+        kind: 'draw',
+        data: { tenpaiPlayers: tenpai as PlayerIndex[] },
+      }
+      const scene = createRoundResultScene({
+        outcome,
+        getPlayerName: namer,
+        onNext: () => undefined,
+        onBackToTitle: () => undefined,
+      })
+      const texts = collectTexts(scene).map(t => t.text)
+      expect(texts.some(t => t.includes('ノーテン罰符') && t.includes('なし'))).toBe(true)
+    }
+  })
+
   it('「次局へ」ボタンで onNext、「タイトルへ」で onBackToTitle が発火', () => {
     const onNext = vi.fn()
     const onBackToTitle = vi.fn()

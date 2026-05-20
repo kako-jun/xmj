@@ -1193,6 +1193,20 @@ impl Game {
     /// - 親ノーテン → `dealer_won_last = false`（親流れ）
     /// - 供託リーチ棒は持ち越し（誰も取らない）
     /// - `last_outcome` に Draw を記録
+    /// 各プレイヤーの `Player::is_tenpai()` を呼び、テンパイしている座席 index を集める。
+    /// 流局時に `resolve_draw` へ渡すノーテン罰符徴収用の補助 API。
+    ///
+    /// 副露ありの聴牌判定は `Player::is_tenpai` / `Hand::is_tenpai` の実装に従う
+    /// （現状は門前限定 → 副露ありは常に false。`#33` でカバー予定）。
+    pub fn compute_tenpai_players(&self) -> Vec<usize> {
+        self.players
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.is_tenpai())
+            .map(|(i, _)| i)
+            .collect()
+    }
+
     pub fn resolve_draw(&mut self, tenpai_players: Vec<usize>) {
         let tenpai_count = tenpai_players.len();
         let dealer_tenpai = tenpai_players.contains(&self.dealer);
@@ -2322,6 +2336,85 @@ mod tests {
         assert_eq!(game.players[1].score, scores_before[1] + 1500);
         assert_eq!(game.players[2].score, scores_before[2] - 1500);
         assert_eq!(game.players[3].score, scores_before[3] - 1500);
+    }
+
+    /// 流局 1 テンパイ → 聴牌者 +3000、ノーテン各 -1000
+    #[test]
+    fn test_tenpai_payments_1_3() {
+        let mut game = Game::new(round_loop_names());
+        let before = game.clone();
+        let scores_before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+
+        game.resolve_draw(vec![2]);
+
+        assert_eq!(game.players[0].score, scores_before[0] - 1000);
+        assert_eq!(game.players[1].score, scores_before[1] - 1000);
+        assert_eq!(game.players[2].score, scores_before[2] + 3000);
+        assert_eq!(game.players[3].score, scores_before[3] - 1000);
+        assert_score_conservation(&before, &game);
+    }
+
+    /// 流局 3 テンパイ → 聴牌者各 +1000、ノーテン -3000
+    #[test]
+    fn test_tenpai_payments_3_1() {
+        let mut game = Game::new(round_loop_names());
+        let before = game.clone();
+        let scores_before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+
+        game.resolve_draw(vec![0, 1, 2]);
+
+        assert_eq!(game.players[0].score, scores_before[0] + 1000);
+        assert_eq!(game.players[1].score, scores_before[1] + 1000);
+        assert_eq!(game.players[2].score, scores_before[2] + 1000);
+        assert_eq!(game.players[3].score, scores_before[3] - 3000);
+        assert_score_conservation(&before, &game);
+    }
+
+    /// 流局 0 テンパイ → 罰符無し（スコア不変）
+    #[test]
+    fn test_tenpai_payments_0_4() {
+        let mut game = Game::new(round_loop_names());
+        let scores_before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+
+        game.resolve_draw(vec![]);
+
+        for i in 0..4 {
+            assert_eq!(
+                game.players[i].score, scores_before[i],
+                "0 テンパイは罰符無し (player {i})"
+            );
+        }
+    }
+
+    /// 流局 4 テンパイ → 罰符無し（スコア不変）
+    #[test]
+    fn test_tenpai_payments_4_0() {
+        let mut game = Game::new(round_loop_names());
+        let scores_before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+
+        game.resolve_draw(vec![0, 1, 2, 3]);
+
+        for i in 0..4 {
+            assert_eq!(
+                game.players[i].score, scores_before[i],
+                "4 テンパイは罰符無し (player {i})"
+            );
+        }
+    }
+
+    /// `Game::compute_tenpai_players` が `Player::is_tenpai` を 4 人分まわした
+    /// 結果と一致する（WASM bridge は本関数を委譲する）。
+    #[test]
+    fn test_compute_tenpai_players_matches_is_tenpai() {
+        let game = Game::new(round_loop_names());
+        let expected: Vec<usize> = game
+            .players
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.is_tenpai())
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(game.compute_tenpai_players(), expected);
     }
 
     /// 1 本場で和了 → 和了者に +300 追加で乗る

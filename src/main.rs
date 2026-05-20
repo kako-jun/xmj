@@ -74,12 +74,22 @@ fn main() {
             break;
         }
 
-        // 山牌が尽きたら流局処理 → 次局へ。和了の認定 CLI 配線は未実装なので
-        // ここでは「全員ノーテン扱い」で流局し、ループを次の局に進める。
-        // 役の認定・ロン宣言の配線後にテンパイ判定を組み込む。
+        // 山牌が尽きたら流局処理 → 次局へ。
+        // `compute_tenpai_players` で各プレイヤーの聴牌状態を判定し、
+        // ノーテン罰符 (1人 +3000/-1000, 2人 ±1500, 3人 +1000/-3000) を徴収する。
         if game.wall.is_empty() {
             println!("\n山牌切れ → 流局");
-            game.resolve_draw(Vec::new());
+            let tenpai = game.compute_tenpai_players();
+            if tenpai.is_empty() {
+                println!("テンパイ者: なし (全員ノーテン、罰符無し)");
+            } else {
+                let names: Vec<&str> = tenpai
+                    .iter()
+                    .map(|&i| game.players[i].name.as_str())
+                    .collect();
+                println!("テンパイ者: {}", names.join(" / "));
+            }
+            game.resolve_draw(tenpai);
             if !game.next_round() {
                 break;
             }

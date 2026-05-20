@@ -108,11 +108,25 @@ const summarizeDraw = (
   getPlayerName: (idx: PlayerIndex) => string
 ): string[] => {
   const lines: string[] = ['流局']
-  if (outcome.data.tenpaiPlayers.length === 0) {
+  const tenpaiCount = outcome.data.tenpaiPlayers.length
+  if (tenpaiCount === 0) {
     lines.push('テンパイ者: なし (全員ノーテン)')
+    lines.push('ノーテン罰符: なし')
+  } else if (tenpaiCount === 4) {
+    const names = outcome.data.tenpaiPlayers.map(i => getPlayerName(i)).join(' / ')
+    lines.push(`テンパイ: ${names}`)
+    lines.push('ノーテン罰符: なし (全員聴牌)')
   } else {
     const names = outcome.data.tenpaiPlayers.map(i => getPlayerName(i)).join(' / ')
     lines.push(`テンパイ: ${names}`)
+    // 1人 → 聴牌 +3000 / ノーテン -1000
+    // 2人 → 聴牌 +1500 / ノーテン -1500
+    // 3人 → 聴牌 +1000 / ノーテン -3000
+    const perTenpai = tenpaiCount === 1 ? 3000 : tenpaiCount === 2 ? 1500 : 1000
+    const perNoten = tenpaiCount === 1 ? 1000 : tenpaiCount === 2 ? 1500 : 3000
+    lines.push(
+      `ノーテン罰符: 聴牌者 +${perTenpai.toLocaleString()} / ノーテン者 -${perNoten.toLocaleString()}`
+    )
   }
   return lines
 }
