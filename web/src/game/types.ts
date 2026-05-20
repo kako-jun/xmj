@@ -85,6 +85,83 @@ export interface GameState {
   lastDiscard: Tile | null
   /** 何局目か (1: 東1局, 2: 東2局, ...)。 */
   round: number
+  /** 本場 (連荘・流局でインクリメント)。Rust core `Game::honba` と一致。 */
+  honba: number
+  /** 親の座席 index。Rust core `Game::dealer` と一致。 */
+  dealer: PlayerIndex
+  /** 供託リーチ棒の本数。Rust core `Game::riichi_sticks` と一致。 */
+  riichiSticks: number
+}
+
+// ============================================================================
+// 局結果 (Issue #27 round loop)
+// ============================================================================
+
+/**
+ * 和了局の結果サマリ。Rust 側 `getLastOutcomeJson()` の `kind=="win"` 形に対応。
+ * yaku は現状 Rust 側 `format!("{:?}", Yaku)` の Debug 表記をそのまま受ける
+ * （表示用ラベリングは別 Issue でやる）。
+ */
+export interface RoundWinSummary {
+  winner: PlayerIndex
+  winType: 'tsumo' | 'ron'
+  from?: PlayerIndex
+  han: number
+  fu: number
+  totalPoints: number
+  yaku: string[]
+}
+
+/** 流局の結果サマリ。聴牌者の座席 index 一覧。 */
+export interface RoundDrawSummary {
+  tenpaiPlayers: PlayerIndex[]
+}
+
+/** 局結果の判別共用体。UI の中間結果シーンが switch で分岐する。 */
+export type RoundOutcome =
+  | { kind: 'win'; data: RoundWinSummary }
+  | { kind: 'draw'; data: RoundDrawSummary }
+
+/**
+ * Rust 側の生 JSON を `RoundOutcome` に変換する。
+ * 空文字（未確定）や JSON エラーは null を返す。
+ */
+export const parseRoundOutcome = (json: string): RoundOutcome | null => {
+  if (!json) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(json)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object') return null
+  const obj = parsed as Record<string, unknown>
+  if (obj.kind === 'win') {
+    const winner = obj.winner as number
+    const winType = obj.winType as 'tsumo' | 'ron'
+    const from = typeof obj.from === 'number' ? (obj.from as PlayerIndex) : undefined
+    const yaku = Array.isArray(obj.yaku) ? (obj.yaku as string[]) : []
+    return {
+      kind: 'win',
+      data: {
+        winner: winner as PlayerIndex,
+        winType,
+        ...(from !== undefined ? { from } : {}),
+        han: (obj.han as number) ?? 0,
+        fu: (obj.fu as number) ?? 0,
+        totalPoints: (obj.totalPoints as number) ?? 0,
+        yaku,
+      },
+    }
+  }
+  if (obj.kind === 'draw') {
+    const arr = Array.isArray(obj.tenpaiPlayers) ? (obj.tenpaiPlayers as number[]) : []
+    return {
+      kind: 'draw',
+      data: { tenpaiPlayers: arr.map(n => n as PlayerIndex) },
+    }
+  }
+  return null
 }
 
 // ============================================================================

@@ -5,6 +5,10 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "wasm")]
 use crate::{Game, Tile, Hand, Player, AiEngine, AiLevel};
+#[cfg(feature = "wasm")]
+use crate::game::{RoundOutcome, WinKind};
+#[cfg(feature = "wasm")]
+use crate::scoring::{ScoringEngine, ScoringResult};
 
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
@@ -244,6 +248,233 @@ impl WasmGame {
             false
         }
     }
+
+    // ==================== Round loop (Issue #27) ====================
+    //
+    // 局結着 (`resolve_win` / `resolve_draw`) 〜 次局遷移 (`next_round`) を
+    // Web UI から駆動するための bridge。`get_last_outcome_json` は UI が
+    // 直前局の結果画面（和了 / 流局）を描画するための JSON を返す。
+    //
+    // TODO(#28): 役満ご祝儀 (Seikyo モード) の配線は本 Issue 範囲外。
+    //   ScoringEngine 側で yakuman を検出したあと `pay_yakuman_tip` を呼ぶ
+    //   経路はここでは張らない。
+    // TODO(#29): 東西戦 (EastWest) の team_yaku 進捗更新も本 Issue 範囲外。
+
+    /// 山牌 0 / 全員ノーテンの簡易流局。
+    /// 呼び出し側がテンパイ者の座席 index を渡す。
+    /// テンパイ者の自動算出は `compute_tenpai_players` を併用する。
+    #[wasm_bindgen(js_name = resolveDraw)]
+    pub fn resolve_draw(&mut self, tenpai_player_indices: Vec<usize>) {
+        self.game.resolve_draw(tenpai_player_indices);
+    }
+
+    /// 流局時のテンパイ者の座席 index を全プレイヤーから抽出する。
+    /// `Player::is_tenpai()` で判定し、テンパイしているプレイヤーの index 配列を返す。
+    /// `resolve_draw` に渡してノーテン罰符を正しく徴収するための補助 API。
+    #[wasm_bindgen(js_name = computeTenpaiPlayers)]
+    pub fn compute_tenpai_players(&self) -> Vec<usize> {
+        self.game
+            .players
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.is_tenpai())
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// ツモ和了を確定する。`ScoringResult` は本関数内で `ScoringEngine` に計算させる。
+    ///
+    /// winning_tile の決定:
+    ///   `Hand` は `add_tile` 時に自動ソートされるため「最後に引いた牌」を
+    ///   末尾位置から復元できない。代わりに「手牌から 1 枚抜いて
+    ///   `can_win(その牌)` が true になる牌」を winning_tile とみなす。
+    ///   候補が複数あっても点数計算には大きく影響しないため最初の候補を採用。
+    ///
+    /// 戻り値: 計算できた `ScoringResult` のサマリ JSON
+    ///   `{ "han": n, "fu": n, "totalPoints": n, "yaku": [...] }`
+    ///   和了形でなければ "" を返す（呼び出し側の安全網）。
+    #[wasm_bindgen(js_name = resolveWinTsumo)]
+    pub fn resolve_win_tsumo(&mut self, winner_idx: usize) -> String {
+        if winner_idx >= self.game.players.len() {
+            return String::new();
+        }
+        let is_dealer = winner_idx == self.game.dealer;
+        let hand_clone = self.game.players[winner_idx].hand.clone();
+        let Some((sub_hand, winning_tile)) = extract_agari(&hand_clone) else {
+            return String::new();
+        };
+        let Some(result) = ScoringEngine::calculate_score(&sub_hand, &winning_tile, true, is_dealer) else {
+            return String::new();
+        };
+        let summary = scoring_summary_json(&result);
+        self.game
+            .resolve_win(winner_idx, WinKind::Tsumo, result);
+        summary
+    }
+
+    /// ロン和了を確定する。打牌者は `from_idx` で指定。
+    /// winning_tile は `game.last_discard` を使用する。
+    #[wasm_bindgen(js_name = resolveWinRon)]
+    pub fn resolve_win_ron(&mut self, winner_idx: usize, from_idx: usize) -> String {
+        if winner_idx >= self.game.players.len() || from_idx >= self.game.players.len() {
+            return String::new();
+        }
+        let Some(winning_tile) = self.game.last_discard else {
+            return String::new();
+        };
+        let is_dealer = winner_idx == self.game.dealer;
+        let hand = &self.game.players[winner_idx].hand;
+        if !hand.can_win(&winning_tile) {
+            return String::new();
+        }
+        let Some(result) = ScoringEngine::calculate_score(hand, &winning_tile, false, is_dealer) else {
+            return String::new();
+        };
+        let summary = scoring_summary_json(&result);
+        self.game
+            .resolve_win(winner_idx, WinKind::Ron { from: from_idx }, result);
+        summary
+    }
+
+    /// 次の局へ。戻り値: true = 続行 / false = 対局終了。
+    #[wasm_bindgen(js_name = nextRound)]
+    pub fn next_round(&mut self) -> bool {
+        self.game.next_round()
+    }
+
+    #[wasm_bindgen(js_name = getRound)]
+    pub fn get_round(&self) -> u32 {
+        self.game.round
+    }
+
+    #[wasm_bindgen(js_name = getHonba)]
+    pub fn get_honba(&self) -> u32 {
+        self.game.honba
+    }
+
+    #[wasm_bindgen(js_name = getDealer)]
+    pub fn get_dealer(&self) -> usize {
+        self.game.dealer
+    }
+
+    #[wasm_bindgen(js_name = getRiichiSticks)]
+    pub fn get_riichi_sticks(&self) -> u32 {
+        self.game.riichi_sticks
+    }
+
+    /// 直前局の結果。
+    /// - 和了: `{"kind":"win","winner":idx,"winType":"tsumo"|"ron","from":idx?,"han":n,"fu":n,"totalPoints":n,"yaku":[...]}`
+    /// - 流局: `{"kind":"draw","tenpaiPlayers":[...]}`
+    /// - 未確定 (`last_outcome.is_none()`): "" を返す。
+    #[wasm_bindgen(js_name = getLastOutcomeJson)]
+    pub fn get_last_outcome_json(&self) -> String {
+        match &self.game.last_outcome {
+            None => String::new(),
+            Some(RoundOutcome::Win { winner, kind, result }) => {
+                let (win_type, from) = match kind {
+                    WinKind::Tsumo => ("tsumo", None),
+                    WinKind::Ron { from } => ("ron", Some(*from)),
+                };
+                let mut obj = serde_json::Map::new();
+                obj.insert("kind".into(), serde_json::Value::String("win".into()));
+                obj.insert("winner".into(), serde_json::Value::Number((*winner).into()));
+                obj.insert("winType".into(), serde_json::Value::String(win_type.into()));
+                if let Some(f) = from {
+                    obj.insert("from".into(), serde_json::Value::Number(f.into()));
+                }
+                obj.insert("han".into(), serde_json::Value::Number(result.han.into()));
+                obj.insert("fu".into(), serde_json::Value::Number(result.fu.into()));
+                obj.insert(
+                    "totalPoints".into(),
+                    serde_json::Value::Number(result.total_points.into()),
+                );
+                obj.insert(
+                    "yaku".into(),
+                    serde_json::Value::Array(
+                        result
+                            .yaku
+                            .iter()
+                            .map(|y| serde_json::Value::String(format!("{:?}", y)))
+                            .collect(),
+                    ),
+                );
+                serde_json::Value::Object(obj).to_string()
+            }
+            Some(RoundOutcome::Draw { tenpai_players }) => {
+                let mut obj = serde_json::Map::new();
+                obj.insert("kind".into(), serde_json::Value::String("draw".into()));
+                obj.insert(
+                    "tenpaiPlayers".into(),
+                    serde_json::Value::Array(
+                        tenpai_players
+                            .iter()
+                            .map(|i| serde_json::Value::Number((*i).into()))
+                            .collect(),
+                    ),
+                );
+                serde_json::Value::Object(obj).to_string()
+            }
+        }
+    }
+}
+
+#[cfg(feature = "wasm")]
+fn scoring_summary_json(result: &ScoringResult) -> String {
+    let mut obj = serde_json::Map::new();
+    obj.insert("han".into(), serde_json::Value::Number(result.han.into()));
+    obj.insert("fu".into(), serde_json::Value::Number(result.fu.into()));
+    obj.insert(
+        "totalPoints".into(),
+        serde_json::Value::Number(result.total_points.into()),
+    );
+    obj.insert(
+        "yaku".into(),
+        serde_json::Value::Array(
+            result
+                .yaku
+                .iter()
+                .map(|y| serde_json::Value::String(format!("{:?}", y)))
+                .collect(),
+        ),
+    );
+    serde_json::Value::Object(obj).to_string()
+}
+
+/// 14 枚手牌から「抜くと残りが winning 形になる 1 枚」を探す。
+///
+/// ツモ和了直後は `Hand` がソート済で「最後に引いた牌」を末尾から復元できない。
+/// 代わりに各ユニークな牌を winning_tile 候補として試し、
+/// 残り 13 枚の手牌に対して `can_win(候補)` が成立するものを返す。
+///
+/// 返り値: `(13 枚に縮めた Hand, winning_tile)`
+///
+/// # 既知の制限
+/// - 副露 (チー / ポン / カン) を含む手は本関数では和了確定できない (Issue #33)。
+///   `Hand::tile_count()` が 14 でないケース（メルド込みで 14 枚）の処理が未配線で、
+///   現状は早期 None で返している。
+/// - 単騎 / 嵌張 / 両面など待ち形により符が変わる場合があるが、本実装は
+///   最初に発見した winning_tile 候補を採用する近似である (Issue #34)。
+///   ScoringEngine が待ち形を正しく評価できるようになるまでの暫定対応。
+#[cfg(feature = "wasm")]
+fn extract_agari(hand: &Hand) -> Option<(Hand, Tile)> {
+    let tiles = hand.get_tiles().clone();
+    // メルド込みで 14 枚相当か確認
+    if hand.tile_count() != 14 {
+        return None;
+    }
+    // ユニークな牌で 1 枚ずつ試す
+    let mut seen: Vec<Tile> = Vec::new();
+    for tile in tiles.iter() {
+        if seen.iter().any(|t| t == tile) {
+            continue;
+        }
+        seen.push(*tile);
+        let mut sub = hand.clone();
+        if sub.remove_tile(tile) && sub.can_win(tile) {
+            return Some((sub, *tile));
+        }
+    }
+    None
 }
 
 // ==================== Nostr P2P機能 ====================
@@ -531,5 +762,115 @@ mod tests {
 
         let state = wasm_game.get_game_state();
         assert!(!state.is_empty());
+    }
+
+    // ==================== Round loop bridge tests (Issue #27) ====================
+
+    fn make_game() -> WasmGame {
+        WasmGame::new(vec![
+            "P1".into(),
+            "P2".into(),
+            "P3".into(),
+            "P4".into(),
+        ])
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn round_getters_initial_values() {
+        let g = make_game();
+        assert_eq!(g.get_round(), 1);
+        assert_eq!(g.get_honba(), 0);
+        assert_eq!(g.get_dealer(), 0);
+        assert_eq!(g.get_riichi_sticks(), 0);
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn last_outcome_empty_initially() {
+        let g = make_game();
+        assert_eq!(g.get_last_outcome_json(), "");
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn resolve_draw_writes_outcome_json() {
+        let mut g = make_game();
+        g.resolve_draw(vec![0, 2]);
+        let json = g.get_last_outcome_json();
+        assert!(json.contains("\"kind\":\"draw\""), "got {}", json);
+        assert!(json.contains("\"tenpaiPlayers\":[0,2]"), "got {}", json);
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn resolve_win_tsumo_non_winning_hand_returns_empty() {
+        // 配牌直後の親 (13 枚) は 14 枚ではないので extract_agari が失敗する
+        let mut g = make_game();
+        let s = g.resolve_win_tsumo(0);
+        assert_eq!(s, "");
+        // last_outcome も書かれていない
+        assert_eq!(g.get_last_outcome_json(), "");
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn compute_tenpai_players_classifies_hands() {
+        // 配牌直後は player.hand が 13 枚ランダムに埋まる。
+        // テンパイ判定の本物の挙動はゲーム進行で発生する。ここでは
+        // 「player 0 だけ強制的にテンパイ手 (1-9m + 1-3p + 1z 雀頭候補) を持たせる」
+        // 形で挙動を直接確認する。
+        use crate::tile::{Tile, Suit, Honor};
+        let mut g = make_game();
+        // player 0 を七対子テンパイ (6 対子 + 1 単騎) にする
+        let tenpai_tiles = vec![
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 4, false),
+            Tile::new_number(Suit::Man, 4, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 7, false),
+            Tile::new_number(Suit::Pin, 7, false),
+            Tile::new_number(Suit::Sou, 3, false),
+            Tile::new_number(Suit::Sou, 3, false),
+            Tile::new_number(Suit::Sou, 8, false),
+            Tile::new_number(Suit::Sou, 8, false),
+            Tile::new_honor(Honor::Ton),
+        ];
+        g.game.players[0].hand = crate::Hand::new();
+        for t in tenpai_tiles {
+            g.game.players[0].hand.add_tile(t);
+        }
+        // player 1 を完全ノーテン (バラバラ)
+        let noten_tiles = vec![
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 4, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 7, false),
+            Tile::new_number(Suit::Sou, 5, false),
+            Tile::new_number(Suit::Sou, 8, false),
+            Tile::new_honor(Honor::Ton),
+        ];
+        g.game.players[1].hand = crate::Hand::new();
+        for t in noten_tiles {
+            g.game.players[1].hand.add_tile(t);
+        }
+        let tenpai = g.compute_tenpai_players();
+        assert!(tenpai.contains(&0), "player0 should be tenpai: got {:?}", tenpai);
+        assert!(!tenpai.contains(&1), "player1 should be noten: got {:?}", tenpai);
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn next_round_progresses_or_ends() {
+        let mut g = make_game();
+        // 子和了相当: dealer_won_last=false にして親流れさせる
+        g.resolve_draw(vec![]); // 全員ノーテン → dealer_won_last=false
+        let cont = g.next_round();
+        // 東風戦の途中なので continue するはず
+        assert!(cont);
+        assert_eq!(g.get_round(), 2);
+        assert_eq!(g.get_dealer(), 1);
     }
 }

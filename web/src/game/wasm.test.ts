@@ -17,6 +17,12 @@ class MockWasmGame {
   static constructorArgs: string[] | null = null
   /** 最後に discardTile に渡された CUI コード。WasmGameBridge.discardTile の検証用。 */
   static lastDiscardArg: string | null = null
+  /** resolveDraw に渡された Uint32Array の中身 (テスト検証用) */
+  static lastResolveDrawArg: number[] | null = null
+  /** resolveWinTsumo に渡された winner_idx */
+  static lastResolveTsumoArg: number | null = null
+  /** resolveWinRon に渡された [winner_idx, from_idx] */
+  static lastResolveRonArgs: [number, number] | null = null
 
   drawCalled = 0
 
@@ -88,6 +94,55 @@ class MockWasmGame {
   free(): void {
     /* noop */
   }
+
+  // ---- Round loop (Issue #27) ----
+  resolveDraw(arr: Uint32Array): void {
+    MockWasmGame.lastResolveDrawArg = Array.from(arr)
+  }
+  resolveWinTsumo(winnerIdx: number): string {
+    MockWasmGame.lastResolveTsumoArg = winnerIdx
+    return JSON.stringify({
+      han: 3,
+      fu: 30,
+      totalPoints: 3900,
+      yaku: ['Riichi', 'Pinfu', 'Tsumo'],
+    })
+  }
+  resolveWinRon(winnerIdx: number, fromIdx: number): string {
+    MockWasmGame.lastResolveRonArgs = [winnerIdx, fromIdx]
+    return JSON.stringify({
+      han: 2,
+      fu: 40,
+      totalPoints: 2600,
+      yaku: ['Pinfu', 'Tanyao'],
+    })
+  }
+  nextRound(): boolean {
+    return true
+  }
+  getRound(): number {
+    return 2
+  }
+  getHonba(): number {
+    return 1
+  }
+  getDealer(): number {
+    return 0
+  }
+  getRiichiSticks(): number {
+    return 1
+  }
+  getLastOutcomeJson(): string {
+    return JSON.stringify({
+      kind: 'win',
+      winner: 0,
+      winType: 'tsumo',
+      han: 3,
+      fu: 30,
+      totalPoints: 3900,
+      yaku: ['Riichi'],
+    })
+  }
 }
 
 const fakeModule = {
@@ -103,6 +158,9 @@ describe('WasmGameBridge', () => {
     MockWasmGame.newHybridArgs = null
     MockWasmGame.constructorArgs = null
     MockWasmGame.lastDiscardArg = null
+    MockWasmGame.lastResolveDrawArg = null
+    MockWasmGame.lastResolveTsumoArg = null
+    MockWasmGame.lastResolveRonArgs = null
     __setWasmModuleForTest(fakeModule)
   })
 
@@ -156,5 +214,68 @@ describe('WasmGameBridge', () => {
     expect(() => WasmGameBridge.createAllHuman(['a', 'b', 'c', 'd'])).toThrow(
       /初期化/
     )
+  })
+
+  // ---- Round loop (Issue #27) ----
+
+  it('resolveDraw は number[] を Uint32Array にして Rust に渡す', () => {
+    const bridge = WasmGameBridge.createHybrid('me', 0)
+    bridge.resolveDraw([0, 2])
+    expect(MockWasmGame.lastResolveDrawArg).toEqual([0, 2])
+  })
+
+  it('resolveWinTsumo は ScoringResult JSON を RoundWinSummary に整形する', () => {
+    const bridge = WasmGameBridge.createHybrid('me', 0)
+    const summary = bridge.resolveWinTsumo(1)
+    expect(MockWasmGame.lastResolveTsumoArg).toBe(1)
+    expect(summary).not.toBeNull()
+    expect(summary?.winner).toBe(1)
+    expect(summary?.winType).toBe('tsumo')
+    expect(summary?.from).toBeUndefined()
+    expect(summary?.han).toBe(3)
+    expect(summary?.fu).toBe(30)
+    expect(summary?.totalPoints).toBe(3900)
+    expect(summary?.yaku).toEqual(['Riichi', 'Pinfu', 'Tsumo'])
+  })
+
+  it('resolveWinRon は from を埋めた RoundWinSummary を返す', () => {
+    const bridge = WasmGameBridge.createHybrid('me', 0)
+    const summary = bridge.resolveWinRon(0, 2)
+    expect(MockWasmGame.lastResolveRonArgs).toEqual([0, 2])
+    expect(summary?.winType).toBe('ron')
+    expect(summary?.from).toBe(2)
+    expect(summary?.totalPoints).toBe(2600)
+  })
+
+  it('和了形でないとき (空文字) は null を返す', () => {
+    class EmptyGame extends MockWasmGame {
+      static override newHybrid(_n: string, _p: number): EmptyGame {
+        return new EmptyGame()
+      }
+      override resolveWinTsumo(): string {
+        return ''
+      }
+      override resolveWinRon(): string {
+        return ''
+      }
+    }
+    __setWasmModuleForTest({
+      ...fakeModule,
+      WasmGame: EmptyGame as unknown as typeof import('../../pkg/xmj_core.js').WasmGame,
+    } as typeof import('../../pkg/xmj_core.js'))
+    const bridge = WasmGameBridge.createHybrid('me', 0)
+    expect(bridge.resolveWinTsumo(0)).toBeNull()
+    expect(bridge.resolveWinRon(0, 1)).toBeNull()
+  })
+
+  it('round 系 getter / nextRound / getLastOutcomeJson が透過する', () => {
+    const bridge = WasmGameBridge.createHybrid('me', 0)
+    expect(bridge.getRound()).toBe(2)
+    expect(bridge.getHonba()).toBe(1)
+    expect(bridge.getDealer()).toBe(0)
+    expect(bridge.getRiichiSticks()).toBe(1)
+    expect(bridge.nextRound()).toBe(true)
+    const json = bridge.getLastOutcomeJson()
+    expect(json).toContain('"kind":"win"')
   })
 })

@@ -40,6 +40,7 @@ const createBridgeMock = (overrides: Partial<import('./wasm').WasmGameBridge> = 
     executeCpuTurn: () => '5m',
     canRiichi: () => false,
     declareRiichi: () => false,
+    computeTenpaiPlayers: () => [],
     destroy: () => undefined,
     ...overrides,
   }) as unknown as import('./wasm').WasmGameBridge
@@ -1076,6 +1077,145 @@ Last discard: 5m`,
     expect(app.eventLog.some(entry => entry.includes('CPU 南 が 5m を打牌'))).toBe(true)
     expect(app.eventLog.some(entry => entry.includes('あなた がツモ'))).toBe(true)
     expect(app.eventLog.some(entry => entry.includes('思考中'))).toBe(false)
+  })
+
+  // ==================== Round loop (Issue #27) ====================
+
+  it('山牌切れで対局継続中なら resolveDraw → 中間結果シーン → nextRound で復帰', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    let wall = 0
+    let resolveDrawCalled: number[] | null = null
+    let nextRoundCalled = false
+    let isGameOverVal = false
+
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      discardTile: () => true,
+      isGameOver: () => isGameOverVal,
+      getWallCount: () => wall,
+      resolveDraw: (idx: number[]) => {
+        resolveDrawCalled = idx
+      },
+      nextRound: () => {
+        nextRoundCalled = true
+        wall = 69
+        return true
+      },
+      getRound: () => 2,
+      getHonba: () => 0,
+      getDealer: () => 1,
+      getRiichiSticks: () => 0,
+      getLastOutcomeJson: () =>
+        JSON.stringify({ kind: 'draw', tenpaiPlayers: [] }),
+    } as unknown as Partial<import('./wasm').WasmGameBridge>)
+
+    app.startGame(bridge, 0)
+    // 打牌して finalizeGameIfNeeded を起こす
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+
+    // 中間結果シーンに切り替わったこと
+    expect((stage.children[0] as Container).label).toBe('round-result-scene')
+    expect(resolveDrawCalled).toEqual([])
+    expect(app.pendingRoundOutcome?.kind).toBe('draw')
+
+    // 「次局へ」ボタン押下
+    const nextBtn = (stage.children[0] as Container).getChildByLabel(
+      'round-result-next-button'
+    ) as Container
+    nextBtn.emit('pointertap', {} as never)
+    expect(nextRoundCalled).toBe(true)
+    expect(app.pendingRoundOutcome).toBeNull()
+    // 卓に復帰している
+    expect((stage.children[0] as Container).label).toBe('game-table')
+
+    // sanity: isGameOver を立てれば終局画面に進む
+    isGameOverVal = true
+  })
+
+  it('山牌切れ時は computeTenpaiPlayers の結果を resolveDraw に渡す (M1 ノーテン罰符防止)', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    let wall = 0
+    let resolveDrawArg: number[] | null = null
+    let computeTenpaiCalled = 0
+
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      discardTile: () => true,
+      isGameOver: () => false,
+      getWallCount: () => wall,
+      computeTenpaiPlayers: () => {
+        computeTenpaiCalled += 1
+        return [0, 2]
+      },
+      resolveDraw: (idx: number[]) => {
+        resolveDrawArg = idx
+      },
+      nextRound: () => {
+        wall = 69
+        return true
+      },
+      getRound: () => 2,
+      getHonba: () => 0,
+      getDealer: () => 1,
+      getRiichiSticks: () => 0,
+      getLastOutcomeJson: () =>
+        JSON.stringify({ kind: 'draw', tenpaiPlayers: [0, 2] }),
+    } as unknown as Partial<import('./wasm').WasmGameBridge>)
+
+    app.startGame(bridge, 0)
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+
+    expect(computeTenpaiCalled).toBeGreaterThanOrEqual(1)
+    expect(resolveDrawArg).toEqual([0, 2])
+    expect((stage.children[0] as Container).label).toBe('round-result-scene')
+  })
+
+  it('nextRound が false を返したら result-scene に進む', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    let wall = 0
+    let isGameOverVal = false
+
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      discardTile: () => true,
+      isGameOver: () => isGameOverVal,
+      getWallCount: () => wall,
+      resolveDraw: () => undefined,
+      nextRound: () => {
+        // 終局相当
+        isGameOverVal = true
+        return false
+      },
+      getRound: () => 4,
+      getHonba: () => 0,
+      getDealer: () => 0,
+      getRiichiSticks: () => 0,
+      getLastOutcomeJson: () =>
+        JSON.stringify({ kind: 'draw', tenpaiPlayers: [] }),
+    } as unknown as Partial<import('./wasm').WasmGameBridge>)
+
+    app.startGame(bridge, 0)
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+    expect((stage.children[0] as Container).label).toBe('round-result-scene')
+
+    const nextBtn = (stage.children[0] as Container).getChildByLabel(
+      'round-result-next-button'
+    ) as Container
+    nextBtn.emit('pointertap', {} as never)
+    expect((stage.children[0] as Container).label).toBe('result-scene')
+    expect(app.resultMessage).toBeTruthy()
   })
 
   it('eventLog は 12 件を上限に古い順から切り詰める', () => {
