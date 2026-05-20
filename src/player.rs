@@ -145,6 +145,33 @@ impl Player {
         }
     }
 
+    /// クランプせず素直に減算する（負スコア許可）。
+    ///
+    /// 飛び（`score < 0`）検知や、ゼロサム保証が必要な局終了精算で使う。
+    /// `subtract_score` は UI 表示の都合で 0 クランプするが、ルール上の点数移動
+    /// （`Game::resolve_win` 等）はゼロサム必須なので本 API 経由で処理する。
+    pub fn pay_unclamped(&mut self, amount: i32) {
+        self.score -= amount;
+    }
+
+    /// 次局開始時にリセットすべきプレイヤー状態をまとめて初期化する。
+    ///
+    /// `Hand::new()` で手牌・副露は別途リセットされるが、
+    /// 以下の「局スコープ」フラグはここで明示的に戻す必要がある:
+    /// - `is_riichi` / `riichi_turn` / `ippatsu` / `double_riichi`
+    /// - 河 (`discards`)
+    ///
+    /// `score` / `id` / `name` / `is_dealer` は局を跨いで保持するため触らない
+    /// （`is_dealer` は `Game::next_round` 側で席ローテーションに合わせて再設定）。
+    pub fn reset_for_next_round(&mut self) {
+        self.hand = Hand::new();
+        self.discards.clear();
+        self.is_riichi = false;
+        self.riichi_turn = None;
+        self.ippatsu = false;
+        self.double_riichi = false;
+    }
+
     /// リーチ可能かチェック
     pub fn can_riichi(&self) -> bool {
         // 門前（副露なし）
