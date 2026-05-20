@@ -1,7 +1,7 @@
 // 牌文字列変換のラウンドトリップ確認 (Issue #3)
 
 import { describe, it, expect } from 'vitest'
-import { tileToCuiCode, tileFromCuiCode, type Tile } from './types'
+import { tileToCuiCode, tileFromCuiCode, parseRoundOutcome, type Tile } from './types'
 
 describe('tileToCuiCode / tileFromCuiCode', () => {
   it('数牌 1-9 のラウンドトリップ (萬・筒・索)', () => {
@@ -50,5 +50,60 @@ describe('tileToCuiCode / tileFromCuiCode', () => {
     expect(tileToCuiCode({ suit: 'dragon', value: 4 })).toBe('?')
     // '?' を再パースしても null
     expect(tileFromCuiCode('?')).toBeNull()
+  })
+})
+
+describe('parseRoundOutcome (Issue #27)', () => {
+  it('空文字 / 不正 JSON は null', () => {
+    expect(parseRoundOutcome('')).toBeNull()
+    expect(parseRoundOutcome('not-json')).toBeNull()
+    expect(parseRoundOutcome('{"kind":"unknown"}')).toBeNull()
+  })
+
+  it('win (ツモ) を整形する', () => {
+    const out = parseRoundOutcome(
+      JSON.stringify({
+        kind: 'win',
+        winner: 1,
+        winType: 'tsumo',
+        han: 2,
+        fu: 30,
+        totalPoints: 2000,
+        yaku: ['Riichi'],
+      })
+    )
+    expect(out?.kind).toBe('win')
+    if (out?.kind !== 'win') throw new Error('unreachable')
+    expect(out.data.winner).toBe(1)
+    expect(out.data.winType).toBe('tsumo')
+    expect(out.data.from).toBeUndefined()
+    expect(out.data.totalPoints).toBe(2000)
+    expect(out.data.yaku).toEqual(['Riichi'])
+  })
+
+  it('win (ロン) は from を保持', () => {
+    const out = parseRoundOutcome(
+      JSON.stringify({
+        kind: 'win',
+        winner: 0,
+        winType: 'ron',
+        from: 2,
+        han: 1,
+        fu: 30,
+        totalPoints: 1000,
+        yaku: [],
+      })
+    )
+    if (out?.kind !== 'win') throw new Error('unreachable')
+    expect(out.data.from).toBe(2)
+    expect(out.data.yaku).toEqual([])
+  })
+
+  it('draw は tenpaiPlayers を抽出', () => {
+    const out = parseRoundOutcome(
+      JSON.stringify({ kind: 'draw', tenpaiPlayers: [0, 3] })
+    )
+    if (out?.kind !== 'draw') throw new Error('unreachable')
+    expect(out.data.tenpaiPlayers).toEqual([0, 3])
   })
 })

@@ -137,6 +137,56 @@ describe('createGameStateFromBridge', () => {
     ])
   })
 
+  it('bridge の round/honba/dealer/riichiSticks を GameState に伝搬する (Issue #27)', () => {
+    const bridge = {
+      getGameStateJson: () => sampleState,
+      getPlayerScore: () => 25000,
+      getPlayerName: () => 'P',
+      getPlayerDiscards: () => '',
+      isPlayerRiichi: () => false,
+      getCurrentHandString: () => '',
+      getCurrentPlayerId: () => 0,
+      getWallCount: () => 68,
+      getDoraIndicators: () => '5p',
+      isGameOver: () => false,
+      getRound: () => 4,
+      getHonba: () => 2,
+      getDealer: () => 1,
+      getRiichiSticks: () => 3,
+    } as const
+
+    const state = createGameStateFromBridge(
+      bridge as unknown as import('./wasm').WasmGameBridge,
+      0
+    )
+    expect(state.round).toBe(4)
+    expect(state.honba).toBe(2)
+    expect(state.dealer).toBe(1)
+    expect(state.riichiSticks).toBe(3)
+  })
+
+  it('round 系 getter が未実装な旧 bridge mock では default に落とす', () => {
+    const bridge = {
+      getGameStateJson: () => sampleState,
+      getPlayerScore: () => 25000,
+      getPlayerName: () => 'P',
+      getPlayerDiscards: () => '',
+      isPlayerRiichi: () => false,
+      getCurrentHandString: () => '',
+      getCurrentPlayerId: () => 0,
+      getWallCount: () => 68,
+      getDoraIndicators: () => '5p',
+      isGameOver: () => false,
+    } as const
+    const state = createGameStateFromBridge(
+      bridge as unknown as import('./wasm').WasmGameBridge,
+      0
+    )
+    expect(state.honba).toBe(0)
+    expect(state.dealer).toBe(0)
+    expect(state.riichiSticks).toBe(0)
+  })
+
   it('humanPlayerIndex が手番のときだけ getCurrentHandString() で人間席を上書きする', () => {
     const bridge = {
       getGameStateJson: () => sampleState,

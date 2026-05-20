@@ -283,8 +283,31 @@ impl WasmGame {
     pub fn draw_tile(&mut self) -> bool { ... }
     pub fn discard_tile(&mut self, tile_str: &str) -> bool { ... }
     pub fn get_game_state(&self) -> String { ... }
+
+    // --- Round loop bridge (Issue #27) ---
+    pub fn resolve_draw(&mut self, tenpai_player_indices: Vec<usize>);
+    pub fn resolve_win_tsumo(&mut self, winner_idx: usize) -> String; // 役/han/fu/totalPoints の JSON
+    pub fn resolve_win_ron(&mut self, winner_idx: usize, from_idx: usize) -> String;
+    pub fn next_round(&mut self) -> bool;          // true=続行 / false=終局
+    pub fn get_round(&self) -> u32;
+    pub fn get_honba(&self) -> u32;
+    pub fn get_dealer(&self) -> usize;
+    pub fn get_riichi_sticks(&self) -> u32;
+    pub fn get_last_outcome_json(&self) -> String; // "" or {kind:"win"|"draw", ...}
 }
 ```
+
+`resolve_win_tsumo` は内部で `ScoringEngine::calculate_score` を呼ぶ。winning_tile は
+手牌 14 枚から「抜くと残りが和了形になる 1 枚」を探索することで決定する（`Hand` は
+add_tile 時に自動ソートされるため末尾位置から復元できないため）。
+和了形でない手牌に対しては空文字を返し、`last_outcome` は更新しない（呼び出し側の
+安全網）。
+
+TS 側のラッパは `web/src/game/wasm.ts` の `WasmGameBridge` および
+`web/src/game/types.ts` の `RoundOutcome` / `parseRoundOutcome`。UI は
+`web/src/game/roundResultScene.ts` の中間結果シーンを描画し、「次局へ」
+ボタンで `nextRound()` を呼ぶ。役満ご祝儀 (#28) / 東西戦 team_yaku (#29) /
+和了 UI ボタンの本実装は別 Issue。
 
 ## セキュリティ設計
 

@@ -15,6 +15,9 @@ import { createTitleScene } from './titleScene'
 import { createModeSelectScene } from './modeSelectScene'
 import { createDiceRollScene } from './diceRollScene'
 import { createResultScene, type ResultEntry } from './resultScene'
+import { createRoundResultScene } from './roundResultScene'
+import { parseRoundOutcome } from './types'
+import type { RoundOutcome } from './types'
 
 interface AppOptions {
   cpuTurnDelayMs?: number
@@ -37,6 +40,8 @@ export class App {
   eventLog: string[] = []
   resultMessage: string | null = null
   titleNotice: string | null = null
+  /** 中間結果シーン表示中の局結果。null なら表示していない (= 対局中)。 */
+  pendingRoundOutcome: RoundOutcome | null = null
   selectedGameMode: GameMode = 'tonpuusen'
   /** 場決めで決まった人間プレイヤーの席。null なら未確定。 */
   selectedHumanSeat: PlayerIndex | null = null
@@ -75,6 +80,7 @@ export class App {
     this.eventLog = []
     this.resultMessage = null
     this.titleNotice = null
+    this.pendingRoundOutcome = null
     this.renderTable()
   }
 
@@ -86,6 +92,7 @@ export class App {
     this.eventLog = []
     this.resultMessage = null
     this.titleNotice = notice
+    this.pendingRoundOutcome = null
     this.replaceStageRoot(
       createTitleScene({
         notice: this.titleNotice,
@@ -182,6 +189,7 @@ export class App {
     this.eventLog = ['対局開始']
     this.resultMessage = null
     this.titleNotice = null
+    this.pendingRoundOutcome = null
     this.refreshFromBridge()
 
     if (this.shouldDrawHumanTile()) {
@@ -254,10 +262,42 @@ export class App {
   private drawHumanTileAndRefresh(): boolean {
     if (!this.bridge) return false
     const drew = this.bridge.drawTile()
-    if (!drew) return false
+    if (!drew) {
+      // 山牌が尽きていれば中間結果シーンに集約する (M2: 競合ガード)。
+      this.maybeFinalizeRoundFromDraw()
+      return false
+    }
     this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がツモ ${this.wallSummary()}`)
     this.refreshFromBridge()
     return true
+  }
+
+  /**
+   * `bridge.drawTile()` が失敗した場面で「山牌切れ & 未確定」を検出したら
+   * `finalizeRoundFromDraw` に流す。`pendingRoundOutcome` が既にセットされていたら
+   * 何もしない (多重ガード)。
+   */
+  private maybeFinalizeRoundFromDraw(): void {
+    if (!this.bridge) return
+    if (this.pendingRoundOutcome) return
+    if (this.bridge.isGameOver()) return
+    if (this.bridge.getWallCount() !== 0) return
+    this.finalizeRoundFromDraw()
+  }
+
+  /**
+   * 流局 (山牌切れ) の確定処理を 1 箇所に集約する。
+   * テンパイ者の自動算出 → `resolveDraw` → 中間結果シーンの流れを担う。
+   */
+  private finalizeRoundFromDraw(): void {
+    if (!this.bridge) return
+    if (this.pendingRoundOutcome) return
+    const tenpai =
+      typeof this.bridge.computeTenpaiPlayers === 'function'
+        ? this.bridge.computeTenpaiPlayers()
+        : []
+    this.bridge.resolveDraw(tenpai)
+    this.showRoundResultIfPending()
   }
 
   private confirmSelectedTile(options: { riichi: boolean } = { riichi: false }): boolean {
@@ -485,20 +525,103 @@ export class App {
   }
 
   private finalizeGameIfNeeded(): void {
-    if (!this.bridge || !this.gameState || !this.bridge.isGameOver()) return
+    if (!this.bridge || !this.gameState) return
 
-    if (!this.resultMessage) {
-      const bankruptPlayer = this.gameState.players.find(player => player.score <= 0)
-      if (bankruptPlayer) {
-        this.resultMessage = `${bankruptPlayer.name} が飛んで終局`
-      } else if (this.bridge.getWallCount() === 0) {
-        this.resultMessage = '山牌が尽きて終局'
-      } else {
-        this.resultMessage = '対局終了'
-      }
-      this.appendLog(this.resultMessage)
+    // 中間結果シーンを既に表示している（次局ボタン待ち）ならスキップ
+    if (this.pendingRoundOutcome) return
+
+    // 山牌切れだが対局はまだ続く可能性 → resolveDraw → 中間結果シーン
+    if (!this.bridge.isGameOver() && this.bridge.getWallCount() === 0) {
+      this.finalizeRoundFromDraw()
+      return
     }
 
+    if (!this.bridge.isGameOver()) return
+
+    this.computeAndAppendResultMessage()
     this.showResultScene()
+  }
+
+  /**
+   * 終局時の表示メッセージを `resultMessage` にセットし、eventLog にも積む。
+   * 飛び (score <= 0) を最優先、続いて山牌切れ、いずれでもなければ汎用文言。
+   * 一度セット済みなら何もしない。
+   */
+  private computeAndAppendResultMessage(): void {
+    if (this.resultMessage) return
+    if (!this.gameState) return
+    const bankruptPlayer = this.gameState.players.find(player => player.score <= 0)
+    if (bankruptPlayer) {
+      this.resultMessage = `${bankruptPlayer.name} が飛んで終局`
+    } else if (this.bridge && this.bridge.getWallCount() === 0) {
+      this.resultMessage = '山牌が尽きて終局'
+    } else {
+      this.resultMessage = '対局終了'
+    }
+    this.appendLog(this.resultMessage)
+  }
+
+  /**
+   * `bridge.getLastOutcomeJson()` を読み、結果があれば中間結果シーンを表示する。
+   * 結果が読めない / パース失敗のときは何もしない（呼び出し側で finalizeGameIfNeeded
+   * 経由のフォールバックが走る）。
+   */
+  private showRoundResultIfPending(): void {
+    if (!this.bridge) return
+    const json = this.bridge.getLastOutcomeJson()
+    const outcome = parseRoundOutcome(json)
+    if (!outcome) return
+    this.pendingRoundOutcome = outcome
+    this.invalidateCpuTurnTask()
+
+    if (outcome.kind === 'win') {
+      const w = outcome.data
+      const winnerName = this.getPlayerName(w.winner)
+      const tag =
+        w.winType === 'tsumo'
+          ? 'ツモ'
+          : `ロン (放銃: ${this.getPlayerName((w.from ?? 0) as PlayerIndex)})`
+      this.appendLog(`${winnerName} が ${tag} / ${w.han}飜 ${w.fu}符 ${w.totalPoints}点`)
+    } else {
+      this.appendLog('流局')
+    }
+
+    const bridge = this.bridge
+    this.replaceStageRoot(
+      createRoundResultScene({
+        outcome,
+        getPlayerName: idx => this.getPlayerName(idx),
+        onNext: () => {
+          this.advanceToNextRound(bridge)
+        },
+        onBackToTitle: () => {
+          this.showTitleScene()
+        },
+      })
+    )
+  }
+
+  /**
+   * 中間結果シーンの「次局へ」処理。
+   * `bridge.nextRound()` の戻り値で続行 / 終局を分岐する。
+   */
+  private advanceToNextRound(bridge: WasmGameBridge): void {
+    if (this.bridge !== bridge) return
+    this.pendingRoundOutcome = null
+    const cont = bridge.nextRound()
+    if (!cont) {
+      // 対局終了 → 通常の結果画面へ
+      // 先に gameState を最新化してから飛び判定/順位確定を行う (S6)。
+      this.refreshFromBridge()
+      this.computeAndAppendResultMessage()
+      this.showResultScene()
+      return
+    }
+    this.appendLog(`次局: ${bridge.getRound()}局 ${bridge.getHonba()}本場`)
+    this.refreshFromBridge()
+    if (this.shouldDrawHumanTile()) {
+      this.drawHumanTileAndRefresh()
+    }
+    this.advanceTurnLoop()
   }
 }

@@ -39,6 +39,9 @@ export const createInitialGameState = (): GameState => ({
   doraIndicators: [],
   lastDiscard: null,
   round: 1,
+  honba: 0,
+  dealer: 0,
+  riichiSticks: 0,
 })
 
 /**
@@ -55,6 +58,9 @@ export const initWithState = (partial: Partial<GameState> = {}): GameState => {
     doraIndicators: partial.doraIndicators ?? base.doraIndicators,
     lastDiscard: partial.lastDiscard ?? base.lastDiscard,
     round: partial.round ?? base.round,
+    honba: partial.honba ?? base.honba,
+    dealer: partial.dealer ?? base.dealer,
+    riichiSticks: partial.riichiSticks ?? base.riichiSticks,
   }
 
   if (partial.players) {

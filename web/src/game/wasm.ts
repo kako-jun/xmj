@@ -10,8 +10,8 @@
 //   - pkg からの動的 import は vi.mock で差し替える (wasm.test.ts)
 //   - ロジック自体はラッパなので、引数の素通しと initialized フラグを確認する
 
-import type { Tile } from './types'
-import { tileToCuiCode } from './types'
+import type { PlayerIndex, RoundWinSummary, Tile } from './types'
+import { parseRoundOutcome, tileToCuiCode } from './types'
 
 // pkg の型を再 export しないが、JSDoc で参照できるよう型 import だけしておく。
 // (実体は dynamic import なので tree-shaking には影響しない)
@@ -57,6 +57,43 @@ export const __setWasmModuleForTest = (mod: WasmModule | null): void => {
   wasmModule = mod
   initialized = mod !== null
 }
+
+// ============================================================================
+// 内部ヘルパ
+// ============================================================================
+
+/**
+ * `resolveWinTsumo` / `resolveWinRon` の戻り値 JSON
+ * (`{"han":n,"fu":n,"totalPoints":n,"yaku":[...]}`) を `RoundWinSummary` に整形。
+ * 空文字 / パースエラーは null。
+ */
+const parseSummaryAsWin = (
+  json: string,
+  winner: PlayerIndex,
+  winType: 'tsumo' | 'ron',
+  from: PlayerIndex | undefined
+): RoundWinSummary | null => {
+  if (!json) return null
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(json) as Record<string, unknown>
+  } catch {
+    return null
+  }
+  const yaku = Array.isArray(parsed.yaku) ? (parsed.yaku as string[]) : []
+  return {
+    winner,
+    winType,
+    ...(from !== undefined ? { from } : {}),
+    han: (parsed.han as number) ?? 0,
+    fu: (parsed.fu as number) ?? 0,
+    totalPoints: (parsed.totalPoints as number) ?? 0,
+    yaku,
+  }
+}
+
+// 再 export: 呼び出し側が wasm.ts 1 つだけ import すれば parse まで済む
+export { parseRoundOutcome }
 
 // ============================================================================
 // WasmGame ラッパ
@@ -169,6 +206,75 @@ export class WasmGameBridge {
 
   isPlayerRiichi(playerIdx: number): boolean {
     return this.game.isPlayerRiichi(playerIdx)
+  }
+
+  // ---- 局結着 / 次局 (Issue #27) ----
+
+  /**
+   * 流局を確定する。聴牌者の座席 index 配列を渡す。
+   * Rust 側 wasm-bindgen は `Vec<usize>` を `Uint32Array` として受け取るため変換する。
+   */
+  resolveDraw(tenpaiPlayerIndices: number[]): void {
+    const arr = new Uint32Array(tenpaiPlayerIndices)
+    // wasm-bindgen が生成した `pkg/xmj_core.d.ts` の `WasmGame.resolveDraw`
+    // は `Uint32Array` を直接受ける宣言になっているのでそのまま渡す。
+    this.game.resolveDraw(arr)
+  }
+
+  /**
+   * 流局時のテンパイ者の座席 index 配列を WASM 側で算出して返す。
+   * `Player::is_tenpai()` を 4 人ぶん回した結果をそのまま貰う。
+   * 戻り値は `Uint32Array` なので素の `PlayerIndex[]` に変換して返す。
+   */
+  computeTenpaiPlayers(): PlayerIndex[] {
+    const arr = this.game.computeTenpaiPlayers()
+    return Array.from(arr).map(n => n as PlayerIndex)
+  }
+
+  /**
+   * ツモ和了を確定する。和了形でなければ null を返す。
+   * 戻り値は ScoringResult のサマリ。`getLastOutcomeJson` 経由でも取得可能。
+   */
+  resolveWinTsumo(winnerIdx: PlayerIndex): RoundWinSummary | null {
+    const json = this.game.resolveWinTsumo(winnerIdx)
+    return parseSummaryAsWin(json, winnerIdx, 'tsumo', undefined)
+  }
+
+  /**
+   * ロン和了を確定する。打牌者は fromIdx で指定。和了形でなければ null。
+   */
+  resolveWinRon(winnerIdx: PlayerIndex, fromIdx: PlayerIndex): RoundWinSummary | null {
+    const json = this.game.resolveWinRon(winnerIdx, fromIdx)
+    return parseSummaryAsWin(json, winnerIdx, 'ron', fromIdx)
+  }
+
+  /** 次の局へ。true=続行 / false=対局終了。 */
+  nextRound(): boolean {
+    return this.game.nextRound()
+  }
+
+  getRound(): number {
+    return this.game.getRound()
+  }
+
+  getHonba(): number {
+    return this.game.getHonba()
+  }
+
+  getDealer(): PlayerIndex {
+    return this.game.getDealer() as PlayerIndex
+  }
+
+  getRiichiSticks(): number {
+    return this.game.getRiichiSticks()
+  }
+
+  /**
+   * 直前局の結果 JSON を生で返す。空文字なら未確定。
+   * UI 側は `parseRoundOutcome` で `RoundOutcome` に変換する。
+   */
+  getLastOutcomeJson(): string {
+    return this.game.getLastOutcomeJson()
   }
 
   /**

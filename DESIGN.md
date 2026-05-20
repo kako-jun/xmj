@@ -305,7 +305,7 @@ PR #21 時点では **API 提供レベル**まで。本番ゲームフローへ�
 
 | 機能         | 実装レベル                                                       | follow-up                              |
 | ------------ | ---------------------------------------------------------------- | -------------------------------------- |
-| 局ループ     | **API 実装済** (`resolve_win` / `resolve_draw` / `next_round`)   | WASM bridge への公開と Web UI 連携     |
+| 局ループ     | **WASM bridge 公開済** (Issue #27)。`resolveDraw` / `resolveWinTsumo` / `resolveWinRon` / `nextRound` / `getRound` / `getHonba` / `getDealer` / `getRiichiSticks` / `getLastOutcomeJson` を Web UI から駆動可能。山牌切れで自動 resolveDraw → 中間結果シーン → nextRound 復帰までの最小フローまで実装。 | 和了 UI ボタン (ツモ / ロン宣言)、テンパイ判定の本実装、役満ご祝儀配線 (#28)、東西戦 team_yaku (#29) |
 | 場代         | API + `next_round` で各局自動再徴収 (Seikyo モード)              | UI 表示                                |
 | 二度ヅモ     | API + CLI 即捨て UX、`resolve_win` で `dealer_won_last` 自動更新 | （配線完了）                           |
 | 役満祝儀     | API（ゼロサム保証）                                              | 役満和了→放銃者特定→自動授受の配線     |

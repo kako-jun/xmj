@@ -109,6 +109,9 @@ export const parseFormattedGameState = (
     doraIndicators,
     lastDiscard,
     round,
+    honba: 0,
+    dealer: 0,
+    riichiSticks: 0,
   }
 }
 
@@ -134,6 +137,16 @@ export const createGameStateFromBridge = (
     }
   }
 
+  // round-loop bridge (Issue #27) で追加された getter を取得。
+  // 旧 bridge mock (テスト等) では undefined になり得るので default を当てる。
+  // テスト互換のためのフォールバックであり、本番 bridge はこれらを必ず実装する。
+  const round = typeof bridge.getRound === 'function' ? bridge.getRound() : base.round
+  const honba = typeof bridge.getHonba === 'function' ? bridge.getHonba() : 0
+  const dealer =
+    typeof bridge.getDealer === 'function' ? (bridge.getDealer() as PlayerIndex) : 0
+  const riichiSticks =
+    typeof bridge.getRiichiSticks === 'function' ? bridge.getRiichiSticks() : 0
+
   return {
     ...base,
     phase: bridge.isGameOver() ? 'over' : base.phase,
@@ -141,5 +154,9 @@ export const createGameStateFromBridge = (
     wall: Array.from({ length: bridge.getWallCount() }, () => ({ suit: 'man', value: 1 })),
     doraIndicators: parseTileList(bridge.getDoraIndicators()),
     players,
+    round,
+    honba,
+    dealer,
+    riichiSticks,
   }
 }

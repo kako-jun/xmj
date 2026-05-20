@@ -112,11 +112,29 @@ const createInfoPanel = (state: GameState): Container => {
   title.y = 16
   panel.addChild(title)
 
+  // 本場 (honba) 表示: state.honba > 0 のときだけ題字の右隣に小さく出す。
+  if (state.honba > 0) {
+    const honba = makeText(`${state.honba}本場`, 14, TEXT_MUTED_COLOR, 'left', 'bold')
+    honba.anchor.set(0, 0)
+    honba.x = 232
+    honba.y = 28
+    panel.addChild(honba)
+  }
+
   const subtitle = makeText('極限の配牌', 14, TEXT_MUTED_COLOR, 'center')
   subtitle.anchor.set(0.5, 0)
   subtitle.x = 145
   subtitle.y = 48
   panel.addChild(subtitle)
+
+  // 供託リーチ棒の本数表示。0 本なら何も出さない。
+  if (state.riichiSticks > 0) {
+    const sticks = makeText(`供託 ${state.riichiSticks}本`, 14, TEXT_MUTED_COLOR, 'center')
+    sticks.anchor.set(0.5, 0)
+    sticks.x = 145
+    sticks.y = 100
+    panel.addChild(sticks)
+  }
 
   const wall = makeText(`山牌 ${state.wall.length}枚`, 22, TEXT_PRIMARY_COLOR, 'center', 'bold')
   wall.anchor.set(0.5, 0)
