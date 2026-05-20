@@ -127,6 +127,30 @@ pub enum RoundOutcome {
 }
 
 /// 闇麻の固定額
+/// `Vec<Yaku>` に含まれる役満の個数を数える (倍役満は 2 として扱う等の拡張は将来)。
+/// 現状は単役満 = 1、複数の役満が同時成立した場合はその個数を返す。
+pub fn count_yakuman(yaku: &[Yaku]) -> u32 {
+    yaku.iter()
+        .filter(|y| {
+            matches!(
+                y,
+                Yaku::Kokushi
+                    | Yaku::Suuankou
+                    | Yaku::Daisangen
+                    | Yaku::Tsuuiisou
+                    | Yaku::Shousuushii
+                    | Yaku::Daisuushii
+                    | Yaku::Ryuuiisou
+                    | Yaku::Chinroutou
+                    | Yaku::Chuuren
+                    | Yaku::Suukantsu
+                    | Yaku::Tenhou
+                    | Yaku::Chiihou
+            )
+        })
+        .count() as u32
+}
+
 pub const YAMIMA_HIDDEN_COST: i32 = 1000;
 pub const YAMIMA_LIGHT_UP_COST: i32 = 500;
 
@@ -1076,8 +1100,9 @@ impl Game {
     /// - 親和了なら `dealer_won_last = true`（連荘）、子和了なら false（親流れ）
     /// - `last_outcome` に Win を記録、供託リーチ棒は 0 にリセット
     ///
-    /// **役満ご祝儀は本関数では扱わない**（follow-up）。誠京モードの
-    /// `SEIKYO_YAKUMAN_TIP` 配線（`pay_yakuman_tip` / `receive_yakuman_tip`）は別タスク。
+    /// **役満ご祝儀**（誠京モードのみ）: `SEIKYO_YAKUMAN_TIP` を放銃者 (ロン) or
+    /// 他家全員 (ツモ) から winner に追加で授受する。`Player::pay_yakuman_tip` /
+    /// `receive_yakuman_tip` を経由するため 0 クランプせず、ゼロサムが保たれる。
     pub fn resolve_win(
         &mut self,
         winner: usize,
@@ -1092,6 +1117,7 @@ impl Game {
         let honba_bonus = HONBA_BONUS * self.honba as i32;
         let riichi_bonus = 1000 * self.riichi_sticks as i32;
         let is_dealer_win = winner == self.dealer;
+        let yakuman_count = count_yakuman(&result.yaku);
 
         // 点数移動（本場ボーナス込みで一括）
         self.apply_payment(winner, kind, total, honba_bonus, is_dealer_win);
@@ -1105,6 +1131,18 @@ impl Game {
         // 誠京モード: pot を winner に渡す
         self.winner_takes_pot(winner);
 
+        // 誠京モード: 役満ご祝儀の授受
+        if self.mode == GameMode::Seikyo && yakuman_count > 0 {
+            self.pay_yakuman_tip(winner, kind, yakuman_count);
+        }
+
+        // 東西戦モード: 和了者のチームに役を全て記録 (5 役クリア判定用)
+        if self.mode == GameMode::EastWest {
+            for y in &result.yaku {
+                self.record_team_yaku(winner, y.clone());
+            }
+        }
+
         // 連荘フラグ更新
         self.dealer_won_last = is_dealer_win;
 
@@ -1114,6 +1152,33 @@ impl Game {
             kind,
             result,
         });
+    }
+
+    /// 誠京モードの役満ご祝儀を授受する。
+    /// - ロン: 放銃者から winner へ `SEIKYO_YAKUMAN_TIP * yakuman_count` の一括移動
+    /// - ツモ: 他家全員から winner へ各 `SEIKYO_YAKUMAN_TIP * yakuman_count` ずつ移動
+    ///   (winner の合計受取は `3 * tip`)
+    /// 倍役満等で `yakuman_count >= 2` の場合は単純に倍率を乗じる。
+    fn pay_yakuman_tip(&mut self, winner: usize, kind: WinKind, yakuman_count: u32) {
+        let tip = SEIKYO_YAKUMAN_TIP * yakuman_count as i32;
+        match kind {
+            WinKind::Ron { from } => {
+                if from >= self.players.len() || from == winner {
+                    return;
+                }
+                self.players[from].pay_yakuman_tip(tip);
+                self.players[winner].receive_yakuman_tip(tip);
+            }
+            WinKind::Tsumo => {
+                for i in 0..self.players.len() {
+                    if i == winner {
+                        continue;
+                    }
+                    self.players[i].pay_yakuman_tip(tip);
+                    self.players[winner].receive_yakuman_tip(tip);
+                }
+            }
+        }
     }
 
     /// 流局（山牌 0 で誰も和了せず）を確定させ、聴牌料を計算する。
@@ -2611,5 +2676,164 @@ mod tests {
         assert!(!game.next_round(), "南 4 局親流れで終了");
         assert!(game.game_over);
         assert_eq!(game.round, 8, "round は最終局 8 にクランプされる（9 ではない）");
+    }
+
+    // ========================================================================
+    // Issue #28: 誠京モードの役満ご祝儀
+    // ========================================================================
+
+    fn yakuman_result(total: u32, yakuman: Yaku) -> ScoringResult {
+        ScoringResult {
+            han: 13,
+            fu: 0,
+            yaku: vec![yakuman],
+            base_points: 0,
+            total_points: total,
+        }
+    }
+
+    /// `count_yakuman` が役満バリアントを 1 つカウントし、非役満は 0
+    #[test]
+    fn test_count_yakuman_identifies_yakuman_variants() {
+        use Yaku::*;
+        assert_eq!(count_yakuman(&[Kokushi]), 1);
+        assert_eq!(count_yakuman(&[Daisangen, Suuankou]), 2);
+        assert_eq!(count_yakuman(&[Riichi, Tanyao, Pinfu]), 0);
+        // Chuuren / Tenhou 等も役満として認識される
+        assert_eq!(count_yakuman(&[Chuuren]), 1);
+        assert_eq!(count_yakuman(&[Tenhou, Suuankou]), 2);
+    }
+
+    /// 誠京モードで役満ロン: 放銃者から winner へ祝儀 8000 が移動、ゼロサム保持
+    #[test]
+    fn test_seikyo_yakuman_ron_pays_tip_from_loser() {
+        let mut game = Game::new_with_mode(round_loop_names(), GameMode::Seikyo);
+        // collect_seat_fee は手動で呼ぶ (本テストは pot を整える)
+        game.collect_seat_fee(SEIKYO_SEAT_FEE);
+        let before = game.clone();
+        let winner = 1;
+        let from = 2;
+        let result = yakuman_result(32000, Yaku::Kokushi);
+        game.resolve_win(winner, WinKind::Ron { from }, result);
+
+        // 放銃者は祝儀 8000 を追加で支払う
+        let from_diff = game.players[from].score - before.players[from].score;
+        let winner_diff = game.players[winner].score - before.players[winner].score;
+        // 通常点 + 祝儀 8000 + pot の合計が反映されている
+        assert!(from_diff <= -32000 - SEIKYO_YAKUMAN_TIP, "from 差分: {}", from_diff);
+        assert!(winner_diff >= 32000 + SEIKYO_YAKUMAN_TIP, "winner 差分: {}", winner_diff);
+        // ゼロサム保証
+        assert_score_conservation(&before, &game);
+    }
+
+    /// 誠京モードで役満ツモ: 他家全員から winner へ各 8000 移動、合計 24000、ゼロサム保持
+    #[test]
+    fn test_seikyo_yakuman_tsumo_pays_tip_from_all_others() {
+        let mut game = Game::new_with_mode(round_loop_names(), GameMode::Seikyo);
+        game.collect_seat_fee(SEIKYO_SEAT_FEE);
+        let before = game.clone();
+        let winner = game.dealer; // 親役満ツモ
+        let result = yakuman_result(48000, Yaku::Daisangen);
+        game.resolve_win(winner, WinKind::Tsumo, result);
+
+        // 他家 3 人全員から祝儀 8000 ずつ徴収されている
+        for i in 0..4 {
+            if i == winner {
+                continue;
+            }
+            let diff = game.players[i].score - before.players[i].score;
+            // 親ツモなら通常 16000 + 祝儀 8000 = -24000 以下
+            assert!(diff <= -16000 - SEIKYO_YAKUMAN_TIP, "player {} 差分: {}", i, diff);
+        }
+        // ゼロサム保証 (pot + riichi_sticks 含む)
+        assert_score_conservation(&before, &game);
+    }
+
+    /// Standard モードでは役満でも祝儀は移動しない
+    #[test]
+    fn test_standard_mode_no_yakuman_tip_even_if_yakuman() {
+        let mut game = Game::new(round_loop_names());
+        let before_winner_score = game.players[1].score;
+        let before_from_score = game.players[2].score;
+        let result = yakuman_result(8000, Yaku::Suuankou);
+        game.resolve_win(1, WinKind::Ron { from: 2 }, result);
+
+        let winner_diff = game.players[1].score - before_winner_score;
+        let from_diff = before_from_score - game.players[2].score;
+        // 通常点数のみ、祝儀 8000 は乗らない
+        assert_eq!(winner_diff, 8000, "Standard では祝儀なし");
+        assert_eq!(from_diff, 8000, "Standard では祝儀なし");
+    }
+
+    // ========================================================================
+    // Issue #29: 東西戦の record_team_yaku 自動配線
+    // ========================================================================
+
+    /// 東西戦モードで和了 → 和了者のチームに役が自動記録される
+    #[test]
+    fn test_eastwest_resolve_win_records_team_yaku() {
+        let mut game = Game::new_with_mode(round_loop_names(), GameMode::EastWest);
+        let winner = 0; // East 家 (Team::East)
+        let mut result = dummy_result(8000);
+        result.yaku = vec![Yaku::SanshokuDoujun, Yaku::Toitoi];
+
+        game.resolve_win(winner, WinKind::Tsumo, result);
+
+        let east_progress = game.team_progress.get(&Team::East).expect("East 進捗");
+        assert!(east_progress.contains(&Yaku::SanshokuDoujun), "三色同順が記録されている");
+        assert!(east_progress.contains(&Yaku::Toitoi), "対々和が記録されている");
+        // 反対チームには記録されない
+        let west_progress = game.team_progress.get(&Team::West).expect("West 進捗");
+        assert!(west_progress.is_empty(), "West 側は空のまま");
+    }
+
+    /// EastWest 以外のモードでは team_progress は変更されない
+    #[test]
+    fn test_standard_mode_does_not_record_team_yaku() {
+        let mut game = Game::new(round_loop_names());
+        let mut result = dummy_result(8000);
+        result.yaku = vec![Yaku::SanshokuDoujun];
+
+        game.resolve_win(0, WinKind::Tsumo, result);
+
+        let east_progress = game.team_progress.get(&Team::East).expect("East 進捗");
+        assert!(east_progress.is_empty(), "Standard モードでは team_progress 変更なし");
+    }
+
+    /// 東西戦で 5 役クリア → east_west_winner が返り、is_game_over が true
+    #[test]
+    fn test_eastwest_team_clears_5_yaku_triggers_game_over() {
+        let mut game = Game::new_with_mode(round_loop_names(), GameMode::EastWest);
+        let east_seat = 0; // Team::East の代表
+        let targets = east_west_target_yaku();
+
+        // 5 役を 1 度ずつ和了で積む
+        for y in &targets {
+            let mut result = dummy_result(2000);
+            result.yaku = vec![y.clone()];
+            game.resolve_win(east_seat, WinKind::Tsumo, result);
+        }
+
+        assert_eq!(game.east_west_winner(), Some(Team::East));
+        assert!(game.is_game_over(), "5 役クリアで game over");
+    }
+
+    /// ダブル役満 (役満 2 個同時) はご祝儀も 2 倍 (8000 × 2 = 16000)
+    #[test]
+    fn test_seikyo_double_yakuman_doubles_tip() {
+        let mut game = Game::new_with_mode(round_loop_names(), GameMode::Seikyo);
+        game.collect_seat_fee(SEIKYO_SEAT_FEE);
+        let before = game.clone();
+        let winner = 1;
+        let from = 2;
+        let mut result = yakuman_result(64000, Yaku::Daisuushii);
+        result.yaku.push(Yaku::Suuankou); // ダブル役満
+
+        game.resolve_win(winner, WinKind::Ron { from }, result);
+
+        let from_diff = before.players[from].score - game.players[from].score;
+        // 通常 64000 + 祝儀 16000 (8000 × 2) = 80000 以上引かれている
+        assert!(from_diff >= 64000 + SEIKYO_YAKUMAN_TIP * 2, "ダブル役満で祝儀 2 倍: {}", from_diff);
+        assert_score_conservation(&before, &game);
     }
 }
