@@ -795,7 +795,8 @@ Last discard: 5m`,
   it('canTsumo=true のとき「ツモ」ボタンが表示され押下で resolveWinTsumo が呼ばれる (Issue #35)', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
-    const app = new App(fakeApp)
+    // N5: テストでは CPU ターン遅延を明示的に 0 にして flake を避ける
+    const app = new App(fakeApp, { cpuTurnDelayMs: 0 })
     let resolveTsumoCalls: number[] = []
 
     const bridge = createBridgeMock({
@@ -839,7 +840,8 @@ Last discard: 5m`,
   it('CPU 打牌後に canRon=true なら CPU ループを停止し「ロン」「見逃し」ボタンを出す (Issue #35)', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
-    const appInst = new App(fakeApp)
+    // N5: cpuTurnDelayMs を 0 にして同期的にループを回す
+    const appInst = new App(fakeApp, { cpuTurnDelayMs: 0 })
     let currentPlayerId = 0
     let canRonState = false
     const cpuTurnLog: number[] = []
@@ -886,7 +888,8 @@ Last discard: 5m`,
   it('「見逃し」ボタンで pendingRonChance がクリアされて CPU ターンが再開する (Issue #35)', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
-    const appInst = new App(fakeApp)
+    // N5: cpuTurnDelayMs=0 でループ再開を同期的に確認
+    const appInst = new App(fakeApp, { cpuTurnDelayMs: 0 })
     let currentPlayerId = 0
     let canRonState = false
     const cpuTurnLog: number[] = []

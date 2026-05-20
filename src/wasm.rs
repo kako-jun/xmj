@@ -326,6 +326,10 @@ impl WasmGame {
     pub fn get_last_discarder(&self) -> Option<usize> {
         // 打牌が成功すると `next_player()` が呼ばれて current_player が次の手番に移っている。
         // よって直前打牌者は (current_player + 3) % 4。ただし `last_discard` が無いなら None。
+        //
+        // TODO(#33 副露): 鳴き対応後は last_discarder フィールドを Game に持たせて
+        // (current_player+3)%4 計算を廃止する。鳴きで current_player が任意席に飛ぶと
+        // 座席ずれが発生するため、現状の計算式は門前進行前提の暫定実装。
         if self.game.last_discard.is_none() {
             return None;
         }
@@ -979,6 +983,163 @@ mod tests {
     fn get_last_discarder_none_initially() {
         let g = make_game();
         assert!(g.get_last_discarder().is_none());
+    }
+
+    /// S1: 親 14 枚 (配牌直後 + ツモ無し相当で 14 枚を持たせた状態) でも
+    /// 和了形が組めなければ can_tsumo は false。手作り 14 枚で extract_agari 不成立。
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn can_tsumo_false_for_14_tile_non_winning_hand() {
+        use crate::tile::{Tile, Suit, Honor};
+        let mut g = make_game();
+        // 14 枚で和了形が組めないバラバラの手牌を作る
+        let tiles = vec![
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 3, false),
+            Tile::new_number(Suit::Man, 5, false),
+            Tile::new_number(Suit::Man, 7, false),
+            Tile::new_number(Suit::Man, 9, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Pin, 6, false),
+            Tile::new_number(Suit::Pin, 8, false),
+            Tile::new_number(Suit::Sou, 1, false),
+            Tile::new_number(Suit::Sou, 5, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Nan),
+        ];
+        g.game.players[0].hand = crate::Hand::new();
+        for t in tiles {
+            g.game.players[0].hand.add_tile(t);
+        }
+        assert!(!g.can_tsumo(0), "14 枚でも和了形不成立なら false");
+    }
+
+    /// S1 (補): 親 14 枚 (配牌直後) で完成形なら can_tsumo は true。
+    /// `can_tsumo_true_for_completed_hand` で実質カバー済みだが「14 枚親直後」を明示する。
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn can_tsumo_true_for_14_tile_dealer_initial_winning() {
+        use crate::tile::{Tile, Suit, Honor};
+        let mut g = make_game();
+        // 七対子 14 枚を親 (idx 0) に持たせる
+        let tiles = vec![
+            Tile::new_number(Suit::Man, 2, false),
+            Tile::new_number(Suit::Man, 2, false),
+            Tile::new_number(Suit::Man, 5, false),
+            Tile::new_number(Suit::Man, 5, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 8, false),
+            Tile::new_number(Suit::Pin, 8, false),
+            Tile::new_number(Suit::Sou, 4, false),
+            Tile::new_number(Suit::Sou, 4, false),
+            Tile::new_number(Suit::Sou, 7, false),
+            Tile::new_number(Suit::Sou, 7, false),
+            Tile::new_honor(Honor::Nan),
+            Tile::new_honor(Honor::Nan),
+        ];
+        g.game.players[0].hand = crate::Hand::new();
+        for t in tiles {
+            g.game.players[0].hand.add_tile(t);
+        }
+        assert!(g.can_tsumo(0), "親配牌相当の 14 枚完成形は can_tsumo=true");
+    }
+
+    /// S2: last_discard が存在し completed な手牌に対しても、`last_discard_hidden=true`
+    /// (闇牌・暗槓中など) なら can_ron は false を返す。
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn can_ron_returns_false_when_last_discard_hidden() {
+        use crate::tile::{Tile, Suit};
+        let mut g = make_game();
+        // 単騎待ち 13 枚を player 1 に持たせる (1m * 13 → 1m が出れば四暗刻相当だが
+        // ここでは can_win の判定のみが目的)
+        let win_tile = Tile::new_number(Suit::Man, 1, false);
+        let mut tiles = vec![];
+        // 簡易: 二二三三四四 五五六六 七七 + 単騎 → 七対子テンパイ (待ち 1m)
+        for v in [2u8, 3, 4, 5, 6, 7] {
+            tiles.push(Tile::new_number(Suit::Man, v, false));
+            tiles.push(Tile::new_number(Suit::Man, v, false));
+        }
+        tiles.push(Tile::new_number(Suit::Man, 1, false)); // 単騎の片割れ
+        g.game.players[1].hand = crate::Hand::new();
+        for t in tiles {
+            g.game.players[1].hand.add_tile(t);
+        }
+        g.game.last_discard = Some(win_tile);
+
+        // まず可視で can_ron=true (前提条件確認)
+        g.game.last_discard_hidden = false;
+        let visible = g.can_ron(1);
+
+        // 闇牌で can_ron=false (本テストの主目的)
+        g.game.last_discard_hidden = true;
+        assert!(!g.can_ron(1), "last_discard_hidden=true なら can_ron は必ず false");
+
+        // 前提条件 (可視時) が崩れていないことも確認
+        // 注: 七対子テンパイなので can_win は true のはず
+        assert!(visible, "可視時は和了形なので can_ron=true (前提条件)");
+    }
+
+    /// S3: 副露ありで手牌 11 枚 + ポン 1 = tile_count() 14 のとき、can_tsumo は
+    /// 「tile_count == 14」の関門を通過し extract_agari にかかる。現在の
+    /// `extract_agari` は副露込み 14 枚相当を許容するため、和了形なら true を返す。
+    ///
+    /// TODO(#33 副露): 副露ありの和了形を確定させるためのスコアリング統合は未完。
+    /// `extract_agari` を呼ぶこと自体は通るが、`resolveWinTsumo` 側で `ScoringEngine` が
+    /// 副露込みの手牌を正しく評価できる保証はない。本テストは現状の挙動を固定するだけ。
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn can_tsumo_with_open_meld_reflects_extract_agari() {
+        use crate::tile::{Tile, Suit, Honor};
+        use crate::hand::{Meld, MeldType};
+        let mut g = make_game();
+
+        // 手牌 11 枚 + ポン 1 = 14 枚相当。
+        // 和了形例: 234m / 567p / 11s / 333s + ポン(発発発)
+        let tiles = vec![
+            Tile::new_number(Suit::Man, 2, false),
+            Tile::new_number(Suit::Man, 3, false),
+            Tile::new_number(Suit::Man, 4, false),
+            Tile::new_number(Suit::Pin, 5, false),
+            Tile::new_number(Suit::Pin, 6, false),
+            Tile::new_number(Suit::Pin, 7, false),
+            Tile::new_number(Suit::Sou, 1, false),
+            Tile::new_number(Suit::Sou, 1, false),
+            Tile::new_number(Suit::Sou, 3, false),
+            Tile::new_number(Suit::Sou, 3, false),
+            Tile::new_number(Suit::Sou, 3, false),
+        ];
+        let mut hand = crate::Hand::new();
+        for t in tiles {
+            hand.add_tile(t);
+        }
+        // 発のポンを追加 (add_meld は対応する tiles を tiles 配列から remove するが、
+        // ここでは元から発を持っていないので tiles からは何も消えない → tile_count は
+        // 11 + 3 = 14 になる)
+        let hatsu = Tile::new_honor(Honor::Hatsu);
+        hand.add_meld(Meld {
+            meld_type: MeldType::Pon,
+            tiles: vec![hatsu, hatsu, hatsu],
+            is_open: true,
+        });
+        assert_eq!(hand.tile_count(), 14, "副露 1 + 手牌 11 = tile_count 14");
+        g.game.players[0].hand = hand;
+
+        // 現状の挙動: tile_count == 14 関門は通過する。
+        // extract_agari の結果が true / false どちらかは hand.can_win の副露対応に依存。
+        // ここでは「副露ありで一律 false になっていないこと」を確認する。
+        // もし将来「副露ありで一生 can_tsumo=false」になるリグレッションが入った場合、
+        // このアサーションが落ちて気づける。
+        let result = g.can_tsumo(0);
+        // 副露込みでも和了形なら true (現状の extract_agari 実装が許容するなら)。
+        // 副露未対応で false になるなら本テストが赤くなり Issue #33 のシグナルになる。
+        assert!(
+            result,
+            "副露 1 + 手牌 11 の和了形は can_tsumo=true (もし false なら Issue #33 副露対応のリグレッション)"
+        );
     }
 
     #[test]

@@ -211,8 +211,11 @@ export class WasmGameBridge {
   // ---- 和了宣言 (Issue #35) ----
 
   /**
-   * 指定プレイヤーがツモ和了可能か。引数省略時は現在のプレイヤー。
+   * 指定プレイヤーがツモ和了可能か。
    * UI 側はこれが true のときだけ「ツモ」ボタンを enable する。
+   *
+   * @param playerIdx 判定対象プレイヤーの座席 index。省略時は内部 currentPlayer
+   *   (主にテスト用途。アプリ実装側からは明示指定すること)
    */
   canTsumo(playerIdx?: PlayerIndex): boolean {
     const idx = playerIdx ?? (this.game.getCurrentPlayerId() as PlayerIndex)
@@ -221,8 +224,7 @@ export class WasmGameBridge {
 
   /**
    * 指定プレイヤーが直前打牌に対してロン可能か。
-   * 引数省略時は人間プレイヤーの判定ではなく「呼び出し側で決めた idx」を渡す前提なので、
-   * 安全のため省略時は 0 を返す呼び出しは避け、必ず idx を指定する。
+   * @param playerIdx 判定対象プレイヤーの座席 index (必須)
    */
   canRon(playerIdx: PlayerIndex): boolean {
     return this.game.canRon(playerIdx)

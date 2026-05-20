@@ -262,6 +262,8 @@ export class App {
   private releaseCurrentBridge(): void {
     this.destroyBridgeOnce(this.bridge)
     this.bridge = null
+    // S5: bridge を解放したらロン待ち状態も必ずクリア (再戦時の幽霊状態防止)
+    this.pendingRonChance = null
   }
 
   private isCpuTurnGenerationCurrent(generation: number): boolean {
@@ -436,7 +438,7 @@ export class App {
     if (!this.bridge.canRon(this.humanPlayerIndex)) return false
     this.pendingRonChance = { from: discarder }
     this.invalidateCpuTurnTask()
-    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} にロンチャンス`)
+    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} にロン可能`)
     this.renderTable()
     return true
   }
@@ -521,8 +523,16 @@ export class App {
   private confirmTsumo(): void {
     if (!this.bridge) return
     if (!this.bridge.isCurrentPlayerHuman()) return
+    // M1: 押下時にもう一度 canTsumo を再確認 (canTsumo が false なら早期 return)
+    if (!this.bridge.canTsumo(this.humanPlayerIndex)) return
     const summary = this.bridge.resolveWinTsumo(this.humanPlayerIndex)
-    if (!summary) return
+    if (!summary) {
+      // M1: 失敗時の無言を解消。canTsumo は true だったのに resolve に失敗した稀ケース
+      this.appendLog('ツモ宣言失敗')
+      return
+    }
+    // N4: ツモ成功ログ
+    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がツモ和了`)
     this.showRoundResultIfPending()
   }
 
@@ -531,10 +541,18 @@ export class App {
    */
   private confirmRon(fromIdx: PlayerIndex): void {
     if (!this.bridge) return
+    // M2: pendingRonChance / canRon を再確認して早期 return
+    if (!this.pendingRonChance) return
+    if (!this.bridge.canRon(this.humanPlayerIndex)) {
+      this.pendingRonChance = null
+      this.advanceTurnLoop()
+      return
+    }
     const summary = this.bridge.resolveWinRon(this.humanPlayerIndex, fromIdx)
     this.pendingRonChance = null
     if (!summary) {
-      // 和了形が成立しないケース。CPU ループに戻す。
+      // M2: 和了形が成立しないケース。失敗ログを残してから CPU ループに戻す。
+      this.appendLog('ロン宣言失敗（和了形不成立）')
       this.advanceTurnLoop()
       return
     }
@@ -543,6 +561,10 @@ export class App {
 
   /**
    * ロン見逃し。`pendingRonChance` をクリアして CPU ターンループを再開する。
+   *
+   * TODO(フリテン): 現状フリテン未実装。見逃し後の同巡内 canRon 抑止は将来の課題。
+   * 現実装では CPU 次自摸まで進めば last_discard が更新されて自然に canRon=false になるため
+   * 表面的な再ロンは起こらないが、厳密なフリテンルールは未対応。
    */
   private skipRon(): void {
     this.pendingRonChance = null
@@ -556,7 +578,9 @@ export class App {
       this.bridge !== null &&
       this.bridge.isCurrentPlayerHuman() &&
       !this.bridge.isGameOver() &&
-      this.gameState.currentTurn === this.humanPlayerIndex
+      this.gameState.currentTurn === this.humanPlayerIndex &&
+      // M3: ロン待ち中は手牌タップ無効化 (ロン/見逃しボタン以外の操作を遮断)
+      !this.pendingRonChance
 
     const table = createTableScene(this.gameState, {
       humanPlayerIndex: this.humanPlayerIndex,
