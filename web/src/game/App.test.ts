@@ -40,6 +40,11 @@ const createBridgeMock = (overrides: Partial<import('./wasm').WasmGameBridge> = 
     executeCpuTurn: () => '5m',
     canRiichi: () => false,
     declareRiichi: () => false,
+    canTsumo: () => false,
+    canRon: () => false,
+    getLastDiscarder: () => undefined,
+    resolveWinTsumo: () => null,
+    resolveWinRon: () => null,
     computeTenpaiPlayers: () => [],
     destroy: () => undefined,
     ...overrides,
@@ -785,6 +790,139 @@ Last discard: 5m`,
     tile.emit('pointertap', {} as never)
 
     expect(app.selectedHandIndex).toBe(null)
+  })
+
+  it('canTsumo=true のとき「ツモ」ボタンが表示され押下で resolveWinTsumo が呼ばれる (Issue #35)', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    let resolveTsumoCalls: number[] = []
+
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      canTsumo: () => true,
+      resolveWinTsumo: idx => {
+        resolveTsumoCalls.push(idx)
+        return {
+          winner: idx,
+          winType: 'tsumo',
+          han: 3,
+          fu: 30,
+          totalPoints: 3900,
+          yaku: ['Riichi'],
+        }
+      },
+      // 中間結果シーン表示のため getLastOutcomeJson を埋める
+      getLastOutcomeJson: () =>
+        JSON.stringify({
+          kind: 'win',
+          winner: 0,
+          winType: 'tsumo',
+          han: 3,
+          fu: 30,
+          totalPoints: 3900,
+          yaku: ['Riichi'],
+        }),
+    })
+
+    app.startGame(bridge, 0)
+
+    const tsumoBtn = getActionButton(stage, 'tsumo')
+    expect(tsumoBtn).toBeTruthy()
+    tsumoBtn.emit('pointertap', {} as never)
+
+    expect(resolveTsumoCalls).toEqual([0])
+    // 中間結果シーンに遷移している
+    expect(app.pendingRoundOutcome).not.toBeNull()
+  })
+
+  it('CPU 打牌後に canRon=true なら CPU ループを停止し「ロン」「見逃し」ボタンを出す (Issue #35)', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const appInst = new App(fakeApp)
+    let currentPlayerId = 0
+    let canRonState = false
+    const cpuTurnLog: number[] = []
+
+    const bridge = createBridgeMock({
+      isCurrentPlayerHuman: () => currentPlayerId === 0,
+      isCurrentPlayerCpu: () => currentPlayerId !== 0,
+      getCurrentPlayerId: () => currentPlayerId,
+      drawTile: () => false,
+      discardTile: () => {
+        // 人間打牌成功 → 次プレイヤー (CPU 1) へ
+        currentPlayerId = 1
+        return true
+      },
+      executeCpuTurn: () => {
+        cpuTurnLog.push(currentPlayerId)
+        // 1 巡 CPU が打ったら canRon を true にして次プレイヤーへ
+        canRonState = true
+        currentPlayerId = (currentPlayerId + 1) % 4
+        return '5m'
+      },
+      canRon: () => canRonState,
+      getLastDiscarder: () => 1,
+    })
+
+    appInst.startGame(bridge, 0)
+
+    // 人間打牌で CPU ターン開始 → 最初の CPU 打牌後 canRon=true → ループ停止
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+
+    // CPU は 1 回だけ実行されてから停止しているはず
+    expect(cpuTurnLog).toEqual([1])
+    expect(appInst.pendingRonChance).not.toBeNull()
+    expect(appInst.pendingRonChance?.from).toBe(1)
+
+    // 「ロン」「見逃し」ボタン両方表示
+    expect(getActionButton(stage, 'ron')).toBeTruthy()
+    expect(getActionButton(stage, 'ron-skip')).toBeTruthy()
+    // 通常の「打牌」ボタンは出ていない
+    expect(getActionButton(stage, 'discard')).toBeNull()
+  })
+
+  it('「見逃し」ボタンで pendingRonChance がクリアされて CPU ターンが再開する (Issue #35)', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const appInst = new App(fakeApp)
+    let currentPlayerId = 0
+    let canRonState = false
+    const cpuTurnLog: number[] = []
+
+    const bridge = createBridgeMock({
+      isCurrentPlayerHuman: () => currentPlayerId === 0,
+      isCurrentPlayerCpu: () => currentPlayerId !== 0,
+      getCurrentPlayerId: () => currentPlayerId,
+      drawTile: () => false,
+      discardTile: () => {
+        currentPlayerId = 1
+        return true
+      },
+      executeCpuTurn: () => {
+        cpuTurnLog.push(currentPlayerId)
+        if (cpuTurnLog.length === 1) {
+          canRonState = true
+        } else {
+          canRonState = false
+        }
+        currentPlayerId = (currentPlayerId + 1) % 4
+        return '5m'
+      },
+      canRon: () => canRonState,
+      getLastDiscarder: () => 1,
+    })
+
+    appInst.startGame(bridge, 0)
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+
+    expect(appInst.pendingRonChance).not.toBeNull()
+    getActionButton(stage, 'ron-skip').emit('pointertap', {} as never)
+    expect(appInst.pendingRonChance).toBeNull()
+    // CPU ターンが再開して 2 巡目以降が実行された
+    expect(cpuTurnLog.length).toBeGreaterThan(1)
   })
 
   it('canRiichi=true かつ牌選択中のときだけ確定ボタンが立直表示になる', () => {

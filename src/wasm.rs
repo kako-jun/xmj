@@ -282,6 +282,56 @@ impl WasmGame {
             .collect()
     }
 
+    /// 指定プレイヤーがツモ和了可能か。
+    ///
+    /// 手牌が 14 枚相当（ツモ直後）であり、`extract_agari` が
+    /// 「抜くと残りで `can_win` 成立」の 1 枚を見つけられる場合のみ true。
+    /// UI 側はこれが true のときだけ「ツモ」ボタンを enable する。
+    #[wasm_bindgen(js_name = canTsumo)]
+    pub fn can_tsumo(&self, player_idx: usize) -> bool {
+        if player_idx >= self.game.players.len() {
+            return false;
+        }
+        let hand = &self.game.players[player_idx].hand;
+        if hand.tile_count() != 14 {
+            return false;
+        }
+        extract_agari(hand).is_some()
+    }
+
+    /// 指定プレイヤーが直前の打牌に対してロン可能か。
+    ///
+    /// 条件: 直前打牌者ではなく、`last_discard` が存在し、闇牌で隠蔽されておらず、
+    /// `Player::can_win(last_discard)` が true。`Game::can_someone_win` の単一プレイヤー版。
+    #[wasm_bindgen(js_name = canRon)]
+    pub fn can_ron(&self, player_idx: usize) -> bool {
+        if player_idx >= self.game.players.len() {
+            return false;
+        }
+        if player_idx == self.game.current_player {
+            return false;
+        }
+        if self.game.last_discard_hidden {
+            return false;
+        }
+        let Some(tile) = self.game.last_discard else {
+            return false;
+        };
+        self.game.players[player_idx].can_win(&tile)
+    }
+
+    /// 直前打牌者の座席 index を返す。ロン宣言の `from_idx` 引数に渡すための補助。
+    /// `last_discard` が存在しない場合は `None`（JS 側は `undefined`）。
+    #[wasm_bindgen(js_name = getLastDiscarder)]
+    pub fn get_last_discarder(&self) -> Option<usize> {
+        // 打牌が成功すると `next_player()` が呼ばれて current_player が次の手番に移っている。
+        // よって直前打牌者は (current_player + 3) % 4。ただし `last_discard` が無いなら None。
+        if self.game.last_discard.is_none() {
+            return None;
+        }
+        Some((self.game.current_player + 3) % 4)
+    }
+
     /// ツモ和了を確定する。`ScoringResult` は本関数内で `ScoringEngine` に計算させる。
     ///
     /// winning_tile の決定:
@@ -859,6 +909,76 @@ mod tests {
         let tenpai = g.compute_tenpai_players();
         assert!(tenpai.contains(&0), "player0 should be tenpai: got {:?}", tenpai);
         assert!(!tenpai.contains(&1), "player1 should be noten: got {:?}", tenpai);
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn can_tsumo_false_for_13_tile_hand() {
+        // 配牌直後の player は手牌 13 枚 (親は 14 枚だが extract_agari がランダム手では基本失敗)
+        let g = make_game();
+        // 子 (idx 1) は 13 枚なので tile_count != 14 → 必ず false
+        assert!(!g.can_tsumo(1));
+        // 範囲外 idx も false
+        assert!(!g.can_tsumo(99));
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn can_tsumo_true_for_completed_hand() {
+        // 七対子完成 14 枚を強制的に持たせる
+        use crate::tile::{Tile, Suit, Honor};
+        let mut g = make_game();
+        let tiles = vec![
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 4, false),
+            Tile::new_number(Suit::Man, 4, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 7, false),
+            Tile::new_number(Suit::Pin, 7, false),
+            Tile::new_number(Suit::Sou, 3, false),
+            Tile::new_number(Suit::Sou, 3, false),
+            Tile::new_number(Suit::Sou, 8, false),
+            Tile::new_number(Suit::Sou, 8, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Ton),
+        ];
+        g.game.players[0].hand = crate::Hand::new();
+        for t in tiles {
+            g.game.players[0].hand.add_tile(t);
+        }
+        assert!(g.can_tsumo(0), "完成手なので can_tsumo は true");
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn can_ron_returns_false_when_no_last_discard() {
+        let g = make_game();
+        // last_discard が None なので全員 false
+        assert!(!g.can_ron(0));
+        assert!(!g.can_ron(1));
+        assert!(!g.can_ron(2));
+        assert!(!g.can_ron(3));
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn can_ron_self_discarder_returns_false() {
+        // current_player には絶対ロンさせない (自摸ロン防止)
+        use crate::tile::{Tile, Suit};
+        let mut g = make_game();
+        g.game.last_discard = Some(Tile::new_number(Suit::Man, 1, false));
+        g.game.last_discard_hidden = false;
+        // current_player は 0 → can_ron(0) は false
+        assert!(!g.can_ron(g.game.current_player));
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn get_last_discarder_none_initially() {
+        let g = make_game();
+        assert!(g.get_last_discarder().is_none());
     }
 
     #[test]

@@ -208,6 +208,34 @@ export class WasmGameBridge {
     return this.game.isPlayerRiichi(playerIdx)
   }
 
+  // ---- 和了宣言 (Issue #35) ----
+
+  /**
+   * 指定プレイヤーがツモ和了可能か。引数省略時は現在のプレイヤー。
+   * UI 側はこれが true のときだけ「ツモ」ボタンを enable する。
+   */
+  canTsumo(playerIdx?: PlayerIndex): boolean {
+    const idx = playerIdx ?? (this.game.getCurrentPlayerId() as PlayerIndex)
+    return this.game.canTsumo(idx)
+  }
+
+  /**
+   * 指定プレイヤーが直前打牌に対してロン可能か。
+   * 引数省略時は人間プレイヤーの判定ではなく「呼び出し側で決めた idx」を渡す前提なので、
+   * 安全のため省略時は 0 を返す呼び出しは避け、必ず idx を指定する。
+   */
+  canRon(playerIdx: PlayerIndex): boolean {
+    return this.game.canRon(playerIdx)
+  }
+
+  /**
+   * 直前に打牌したプレイヤーの座席 index。`last_discard` が無ければ undefined。
+   */
+  getLastDiscarder(): PlayerIndex | undefined {
+    const v = this.game.getLastDiscarder()
+    return v === undefined || v === null ? undefined : (v as PlayerIndex)
+  }
+
   // ---- 局結着 / 次局 (Issue #27) ----
 
   /**
