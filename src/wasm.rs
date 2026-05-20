@@ -348,7 +348,7 @@ impl WasmGame {
         }
         let is_dealer = winner_idx == self.game.dealer;
         let hand_clone = self.game.players[winner_idx].hand.clone();
-        let Some((sub_hand, winning_tile)) = extract_agari(&hand_clone) else {
+        let Some((sub_hand, winning_tile)) = extract_agari_with_context(&hand_clone, true, is_dealer) else {
             return String::new();
         };
         let Some(result) = ScoringEngine::calculate_score(&sub_hand, &winning_tile, true, is_dealer) else {
@@ -488,18 +488,24 @@ fn scoring_summary_json(result: &ScoringResult) -> String {
     serde_json::Value::Object(obj).to_string()
 }
 
-/// 14 枚手牌から「抜くと残りが winning 形になる 1 枚」を探す。
+/// 14 枚手牌から「抜くと残りが winning 形になる 1 枚」を探し、最高得点の解釈を返す。
 ///
 /// ツモ和了直後は `Hand` がソート済で「最後に引いた牌」を末尾から復元できない。
-/// 代わりに各ユニークな牌を winning_tile 候補として試し、
-/// 残り 13 枚の手牌に対して `can_win(候補)` が成立するものを返す。
+/// 各ユニークな牌を winning_tile 候補として試し、`ScoringEngine::calculate_score`
+/// に通して最も高得点 (total_points → han → fu の順で比較) の解釈を採用する。
 ///
 /// 返り値: `(13 枚に縮めた Hand, winning_tile)`
 ///
+/// # 設計メモ (Issue #34)
+/// - 多面待ち手で「両面 / 嵌張 / 辺張」が同居するとき、平和の付く両面解釈を優先する
+/// - 四暗刻単騎は「単騎雀頭が winning_tile」の解釈を捕捉する
+/// - 役なしになる候補があってもスキップされ、役あり候補が選ばれる
+/// - 全候補が役なしの場合は「最初に和了形が成立した候補」を返す (resolveWinTsumo 後段で None 扱い)
+///
 /// # 既知の制限
-/// - 単騎 / 嵌張 / 両面など待ち形により符が変わる場合があるが、本実装は
-///   最初に発見した winning_tile 候補を採用する近似である (Issue #34)。
-///   ScoringEngine が待ち形を正しく評価できるようになるまでの暫定対応。
+/// - 副露 (チー / ポン / カン) を含む手は #33 で対応済みだが、本関数の最高得点比較は
+///   `ScoringEngine::calculate_score` の精度に依存する
+/// - ties (同点候補) は手牌昇順で最初に見つかった候補を採用する
 ///
 /// # 副露 (チー / ポン / カン) を含む手 (Issue #33)
 /// `Hand::tile_count()` は副露込みで 14 枚相当をカウントするため、副露ありでも
@@ -508,25 +514,52 @@ fn scoring_summary_json(result: &ScoringResult) -> String {
 /// `melds_needed = 4 - melds.len()` で副露考慮済み)。
 #[cfg(feature = "wasm")]
 pub(crate) fn extract_agari(hand: &Hand) -> Option<(Hand, Tile)> {
+    extract_agari_with_context(hand, true, false)
+}
+
+/// `extract_agari` 本体。ツモ/ロン・親子で点数評価が変わるためコンテキストを受け取る (Issue #34)。
+#[cfg(feature = "wasm")]
+pub(crate) fn extract_agari_with_context(hand: &Hand, is_tsumo: bool, is_dealer: bool) -> Option<(Hand, Tile)> {
     let tiles = hand.get_tiles().clone();
-    // メルド込みで 14 枚相当か確認
     if hand.tile_count() != 14 {
         return None;
     }
     // ユニークな牌で 1 枚ずつ試す
     // 副露牌は和了牌候補に成り得ない (既に確定面子の一部)。winning_tile は tiles から選ぶ
     let mut seen: Vec<Tile> = Vec::new();
+    // 役あり候補の最良 + 役なし fallback を別管理
+    let mut best: Option<(Hand, Tile, u32, u32, u32)> = None; // (sub, tile, total, han, fu)
+    let mut fallback: Option<(Hand, Tile)> = None;
     for tile in tiles.iter() {
         if seen.iter().any(|t| t == tile) {
             continue;
         }
         seen.push(*tile);
         let mut sub = hand.clone();
-        if sub.remove_tile(tile) && sub.can_win(tile) {
-            return Some((sub, *tile));
+        if !(sub.remove_tile(tile) && sub.can_win(tile)) {
+            continue;
+        }
+        if fallback.is_none() {
+            fallback = Some((sub.clone(), *tile));
+        }
+        if let Some(res) = ScoringEngine::calculate_score(&sub, tile, is_tsumo, is_dealer) {
+            let cand = (sub.clone(), *tile, res.total_points, res.han, res.fu);
+            best = match best {
+                None => Some(cand),
+                Some(prev) => {
+                    if (cand.2, cand.3, cand.4) > (prev.2, prev.3, prev.4) {
+                        Some(cand)
+                    } else {
+                        Some(prev)
+                    }
+                }
+            };
         }
     }
-    None
+    if let Some((sub, tile, _, _, _)) = best {
+        return Some((sub, tile));
+    }
+    fallback
 }
 
 // ==================== Nostr P2P機能 ====================

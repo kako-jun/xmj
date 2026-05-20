@@ -66,6 +66,49 @@ impl Hand {
         self.shanten() == 0
     }
 
+    /// 13 枚手 (副露なし) の待ち牌候補を列挙する。
+    ///
+    /// 34 種の各候補牌を順に試し、加えると `is_winning_hand` 成立するものを返す。
+    /// 副露があるとき・手牌が `13 - melds*3` 枚でないときは空 Vec を返す。
+    ///
+    /// Issue #34: 多面待ちの精度確認 / UI 表示拡張のためのユーティリティ。
+    pub fn compute_machi_tiles(&self) -> Vec<Tile> {
+        let expected_tiles = 13usize.saturating_sub(self.melds.len() * 3);
+        if self.tiles.len() != expected_tiles {
+            return Vec::new();
+        }
+        // 副露ありの待ち列挙は #34 スコープ外。`is_winning_hand` が melds を考慮するので
+        // 一応動作はするが、ここでは簡明性のため副露なしに限定する。
+        if !self.melds.is_empty() {
+            return Vec::new();
+        }
+        let mut waits: Vec<Tile> = Vec::new();
+        for candidate in Self::all_34_tiles() {
+            if waits.contains(&candidate) {
+                continue;
+            }
+            if self.can_win(&candidate) {
+                waits.push(candidate);
+            }
+        }
+        waits
+    }
+
+    /// 34 種の標準牌列挙 (赤ドラなし、is_glass なし)。
+    fn all_34_tiles() -> Vec<Tile> {
+        use crate::tile::{Honor, Suit};
+        let mut out: Vec<Tile> = Vec::with_capacity(34);
+        for suit in [Suit::Man, Suit::Pin, Suit::Sou] {
+            for value in 1..=9u8 {
+                out.push(Tile::new_number(suit, value, false));
+            }
+        }
+        for h in Honor::ALL {
+            out.push(Tile::new_honor(h));
+        }
+        out
+    }
+
     pub fn can_win(&self, winning_tile: &Tile) -> bool {
         let mut test_tiles = self.tiles.clone();
         test_tiles.push(*winning_tile);
