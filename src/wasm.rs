@@ -497,20 +497,24 @@ fn scoring_summary_json(result: &ScoringResult) -> String {
 /// 返り値: `(13 枚に縮めた Hand, winning_tile)`
 ///
 /// # 既知の制限
-/// - 副露 (チー / ポン / カン) を含む手は本関数では和了確定できない (Issue #33)。
-///   `Hand::tile_count()` が 14 でないケース（メルド込みで 14 枚）の処理が未配線で、
-///   現状は早期 None で返している。
 /// - 単騎 / 嵌張 / 両面など待ち形により符が変わる場合があるが、本実装は
 ///   最初に発見した winning_tile 候補を採用する近似である (Issue #34)。
 ///   ScoringEngine が待ち形を正しく評価できるようになるまでの暫定対応。
+///
+/// # 副露 (チー / ポン / カン) を含む手 (Issue #33)
+/// `Hand::tile_count()` は副露込みで 14 枚相当をカウントするため、副露ありでも
+/// 残り手牌 (11/8/5/2 枚) から 1 枚抜いて `can_win` を呼べば「副露面子 + 残り手牌」で
+/// 4 面子 1 雀頭が構成されるかが正しく判定される (`Hand::check_normal_win` が
+/// `melds_needed = 4 - melds.len()` で副露考慮済み)。
 #[cfg(feature = "wasm")]
-fn extract_agari(hand: &Hand) -> Option<(Hand, Tile)> {
+pub(crate) fn extract_agari(hand: &Hand) -> Option<(Hand, Tile)> {
     let tiles = hand.get_tiles().clone();
     // メルド込みで 14 枚相当か確認
     if hand.tile_count() != 14 {
         return None;
     }
     // ユニークな牌で 1 枚ずつ試す
+    // 副露牌は和了牌候補に成り得ない (既に確定面子の一部)。winning_tile は tiles から選ぶ
     let mut seen: Vec<Tile> = Vec::new();
     for tile in tiles.iter() {
         if seen.iter().any(|t| t == tile) {
@@ -907,6 +911,200 @@ mod tests {
         let tenpai = g.compute_tenpai_players();
         assert!(tenpai.contains(&0), "player0 should be tenpai: got {:?}", tenpai);
         assert!(!tenpai.contains(&1), "player1 should be noten: got {:?}", tenpai);
+    }
+
+    // ==================== Issue #33: extract_agari 副露込みテスト ====================
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn extract_agari_returns_none_for_incomplete_hand() {
+        // 13 枚（聴牌前）では和了確定できない
+        use crate::tile::{Tile, Suit};
+        let mut hand = crate::Hand::new();
+        for _ in 0..13 {
+            hand.add_tile(Tile::new_number(Suit::Man, 1, false));
+        }
+        assert!(extract_agari(&hand).is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn extract_agari_succeeds_with_pon_meld() {
+        // ポン 1m1m1m + 残り手牌 11 枚 (= 14 枚相当) で和了形
+        use crate::tile::{Tile, Suit};
+        use crate::hand::{Meld, MeldType};
+        let mut hand = crate::Hand::new();
+        for tile in [
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Pin, 5, false),
+            Tile::new_number(Suit::Pin, 5, false),
+            Tile::new_number(Suit::Pin, 5, false),
+            Tile::new_number(Suit::Pin, 7, false),
+            Tile::new_number(Suit::Pin, 8, false),
+            Tile::new_number(Suit::Pin, 9, false),
+            Tile::new_number(Suit::Sou, 6, false),
+            Tile::new_number(Suit::Sou, 6, false),
+        ] {
+            hand.add_tile(tile);
+        }
+        hand.add_meld(Meld {
+            meld_type: MeldType::Pon,
+            tiles: vec![
+                Tile::new_number(Suit::Man, 1, false),
+                Tile::new_number(Suit::Man, 1, false),
+                Tile::new_number(Suit::Man, 1, false),
+            ],
+            is_open: true,
+        });
+        let result = extract_agari(&hand);
+        assert!(result.is_some(), "ポン込み和了形は extract_agari が成立");
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn extract_agari_succeeds_with_chi_meld() {
+        // チー 4m5m6m + 残り手牌 11 枚
+        use crate::tile::{Tile, Suit};
+        use crate::hand::{Meld, MeldType};
+        let mut hand = crate::Hand::new();
+        for tile in [
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Sou, 7, false),
+            Tile::new_number(Suit::Sou, 8, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_number(Suit::Pin, 5, false),
+            Tile::new_number(Suit::Pin, 5, false),
+        ] {
+            hand.add_tile(tile);
+        }
+        hand.add_meld(Meld {
+            meld_type: MeldType::Chi,
+            tiles: vec![
+                Tile::new_number(Suit::Man, 4, false),
+                Tile::new_number(Suit::Man, 5, false),
+                Tile::new_number(Suit::Man, 6, false),
+            ],
+            is_open: true,
+        });
+        let result = extract_agari(&hand);
+        assert!(result.is_some(), "チー込み和了形は extract_agari が成立");
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn extract_agari_succeeds_with_kan_meld() {
+        // 明槓 9m + 残り手牌 11 枚 (Hand::tile_count では槓も +3 扱い)
+        use crate::tile::{Tile, Suit, Honor};
+        use crate::hand::{Meld, MeldType};
+        let mut hand = crate::Hand::new();
+        for tile in [
+            Tile::new_number(Suit::Pin, 1, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Sou, 4, false),
+            Tile::new_number(Suit::Sou, 5, false),
+            Tile::new_number(Suit::Sou, 6, false),
+            Tile::new_honor(Honor::Haku),
+            Tile::new_honor(Honor::Haku),
+            Tile::new_honor(Honor::Haku),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Ton),
+        ] {
+            hand.add_tile(tile);
+        }
+        hand.add_meld(Meld {
+            meld_type: MeldType::Kan,
+            tiles: vec![
+                Tile::new_number(Suit::Man, 9, false),
+                Tile::new_number(Suit::Man, 9, false),
+                Tile::new_number(Suit::Man, 9, false),
+                Tile::new_number(Suit::Man, 9, false),
+            ],
+            is_open: true,
+        });
+        let result = extract_agari(&hand);
+        assert!(result.is_some(), "明槓込み和了形は extract_agari が成立");
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn extract_agari_fails_when_remaining_not_winning() {
+        // 副露あり、残り手牌バラバラ → 和了不成立
+        use crate::tile::{Tile, Suit, Honor};
+        use crate::hand::{Meld, MeldType};
+        let mut hand = crate::Hand::new();
+        for tile in [
+            Tile::new_number(Suit::Man, 2, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Sou, 6, false),
+            Tile::new_number(Suit::Man, 8, false),
+            Tile::new_number(Suit::Pin, 1, false),
+            Tile::new_number(Suit::Sou, 3, false),
+            Tile::new_number(Suit::Man, 5, false),
+            Tile::new_number(Suit::Pin, 7, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Nan),
+        ] {
+            hand.add_tile(tile);
+        }
+        hand.add_meld(Meld {
+            meld_type: MeldType::Pon,
+            tiles: vec![
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+            ],
+            is_open: true,
+        });
+        assert!(extract_agari(&hand).is_none(), "副露あり・バラバラ手は不成立");
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn resolve_win_tsumo_succeeds_with_meld() {
+        // 副露あり手で resolve_win_tsumo が成功する (空文字でない結果) ことの確認。
+        // 役牌白ポン + 1m1m1m暗刻 + 2p3p4p順子 + 7s8s9s順子 + 雀頭東 を作る。
+        use crate::tile::{Tile, Suit, Honor};
+        use crate::hand::{Meld, MeldType};
+        let mut g = make_game();
+        let mut hand = crate::Hand::new();
+        for tile in [
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Sou, 7, false),
+            Tile::new_number(Suit::Sou, 8, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Ton),
+        ] {
+            hand.add_tile(tile);
+        }
+        hand.add_meld(Meld {
+            meld_type: MeldType::Pon,
+            tiles: vec![
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+            ],
+            is_open: true,
+        });
+        g.game.players[0].hand = hand;
+        let s = g.resolve_win_tsumo(0);
+        assert!(!s.is_empty(), "副露あり和了で resolve_win_tsumo が成功するはず: got {:?}", s);
+        // 役牌 (白) が含まれる
+        assert!(s.contains("Yakuhai") || s.contains("\"han\""), "yaku/han 情報が含まれる: {}", s);
     }
 
     #[test]

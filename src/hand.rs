@@ -847,6 +847,195 @@ mod tests {
         );
     }
 
+    // ==================== Issue #33: 副露込み和了形抽出のテスト ====================
+
+    /// 副露ヘルパー: 順子・刻子・カンの Meld を作る
+    fn pon_meld(tile: Tile) -> Meld {
+        Meld {
+            meld_type: MeldType::Pon,
+            tiles: vec![tile, tile, tile],
+            is_open: true,
+        }
+    }
+    fn chi_meld(suit: Suit, start: u8) -> Meld {
+        Meld {
+            meld_type: MeldType::Chi,
+            tiles: vec![
+                Tile::new_number(suit, start, false),
+                Tile::new_number(suit, start + 1, false),
+                Tile::new_number(suit, start + 2, false),
+            ],
+            is_open: true,
+        }
+    }
+    fn kan_meld(tile: Tile, is_open: bool) -> Meld {
+        Meld {
+            meld_type: MeldType::Kan,
+            tiles: vec![tile, tile, tile, tile],
+            is_open,
+        }
+    }
+
+    /// ポン 1 つ + 残り手牌 10 枚 + 和了牌 1 = 副露込みで 4 面子 1 雀頭
+    /// 副露: 1m 1m 1m (ポン)
+    /// 残り手牌: 2p 3p 4p 5p 5p 7p 8p 9p 6s 6s (10 枚)
+    /// 和了牌: 5p (シャンポン待ち)
+    /// 構成: [1m1m1m] + 2p3p4p + 5p5p5p + 7p8p9p + 6s6s (雀頭)
+    #[test]
+    fn test_can_win_with_pon_meld() {
+        let mut hand = Hand::new();
+        hand.add_tile(Tile::new_number(Suit::Pin, 2, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 3, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 4, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 7, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 8, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 9, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 6, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 6, false));
+        // ポン
+        hand.melds.push(pon_meld(Tile::new_number(Suit::Man, 1, false)));
+
+        let win = Tile::new_number(Suit::Pin, 5, false);
+        assert!(
+            hand.can_win(&win),
+            "ポン 1m + 残り手牌で和了形が組めるはず"
+        );
+    }
+
+    /// チー 1 つ + 残り手牌 10 枚 + 和了牌 1
+    /// チー: 4m5m6m
+    /// 残り手牌: 1m1m1m 2p3p4p 7s8s9s 5p (10 枚)
+    /// 和了牌: 5p (単騎雀頭)
+    /// 構成: [4m5m6m] + 1m1m1m + 2p3p4p + 7s8s9s + 5p5p (雀頭)
+    #[test]
+    fn test_can_win_with_chi_meld() {
+        let mut hand = Hand::new();
+        hand.add_tile(Tile::new_number(Suit::Man, 1, false));
+        hand.add_tile(Tile::new_number(Suit::Man, 1, false));
+        hand.add_tile(Tile::new_number(Suit::Man, 1, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 2, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 3, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 4, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 7, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 8, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 9, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+        // チー
+        hand.melds.push(chi_meld(Suit::Man, 4));
+
+        let win = Tile::new_number(Suit::Pin, 5, false);
+        assert!(
+            hand.can_win(&win),
+            "チー 4m5m6m + 残り手牌で和了形が組めるはず"
+        );
+    }
+
+    /// 明槓 1 つ + 残り手牌 10 枚 + 和了牌 1
+    /// 明槓: 9m9m9m9m (4 枚で 1 面子相当、tiles 4 + tile_count 計算上 +3)
+    /// 注: Hand::tile_count() は `melds.len() * 3` なのでカンも 3 枚相当として扱う。
+    #[test]
+    fn test_can_win_with_kan_meld() {
+        let mut hand = Hand::new();
+        hand.add_tile(Tile::new_number(Suit::Pin, 1, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 2, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 3, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 4, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 5, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 6, false));
+        hand.add_tile(Tile::new_honor(Honor::Haku));
+        hand.add_tile(Tile::new_honor(Honor::Haku));
+        hand.add_tile(Tile::new_honor(Honor::Haku));
+        hand.add_tile(Tile::new_honor(Honor::Ton));
+        // カン (9m)
+        hand.melds.push(kan_meld(Tile::new_number(Suit::Man, 9, false), true));
+
+        let win = Tile::new_honor(Honor::Ton);
+        assert!(
+            hand.can_win(&win),
+            "カン 9m + 残り手牌 (123p, 456s, 白刻子, 東単騎) で東を引いて和了"
+        );
+    }
+
+    /// 副露 2 つ (ポン + チー) + 残り手牌 7 枚 + 和了牌 1
+    #[test]
+    fn test_can_win_with_two_melds() {
+        let mut hand = Hand::new();
+        hand.add_tile(Tile::new_number(Suit::Sou, 7, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 8, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 9, false));
+        hand.add_tile(Tile::new_honor(Honor::Chun));
+        hand.add_tile(Tile::new_honor(Honor::Chun));
+        hand.add_tile(Tile::new_honor(Honor::Chun));
+        hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+        // ポン (1m) + チー (4m5m6m)
+        hand.melds.push(pon_meld(Tile::new_number(Suit::Man, 1, false)));
+        hand.melds.push(chi_meld(Suit::Man, 4));
+
+        let win = Tile::new_number(Suit::Pin, 5, false);
+        assert!(
+            hand.can_win(&win),
+            "ポン + チー + 7s8s9s + 中刻子 + 5p雀頭で和了"
+        );
+    }
+
+    /// 副露 3 つ + 残り手牌 4 枚 + 和了牌 1
+    #[test]
+    fn test_can_win_with_three_melds() {
+        let mut hand = Hand::new();
+        hand.add_tile(Tile::new_number(Suit::Pin, 7, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 8, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 9, false));
+        hand.add_tile(Tile::new_honor(Honor::Ton));
+        // 副露 3 つ
+        hand.melds.push(pon_meld(Tile::new_number(Suit::Man, 1, false)));
+        hand.melds.push(chi_meld(Suit::Sou, 4));
+        hand.melds.push(pon_meld(Tile::new_honor(Honor::Haku)));
+
+        let win = Tile::new_honor(Honor::Ton);
+        assert!(
+            hand.can_win(&win),
+            "副露 3 + 7p8p9p + 東単騎で東を引いて和了"
+        );
+    }
+
+    /// 副露ありで和了形が組めないケース (バラバラの残り手牌)
+    #[test]
+    fn test_can_win_with_meld_no_agari() {
+        let mut hand = Hand::new();
+        hand.add_tile(Tile::new_number(Suit::Man, 2, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 4, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 6, false));
+        hand.add_tile(Tile::new_number(Suit::Man, 8, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 1, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 3, false));
+        hand.add_tile(Tile::new_number(Suit::Man, 5, false));
+        hand.add_tile(Tile::new_number(Suit::Pin, 7, false));
+        hand.add_tile(Tile::new_number(Suit::Sou, 9, false));
+        hand.add_tile(Tile::new_honor(Honor::Ton));
+        hand.melds.push(pon_meld(Tile::new_honor(Honor::Haku)));
+
+        let win = Tile::new_honor(Honor::Ton);
+        assert!(
+            !hand.can_win(&win),
+            "副露あり、残り手牌バラバラなら和了不可"
+        );
+    }
+
+    /// 副露ありの tile_count() が 14 相当 (副露N=2 → 残り手牌 7 + ツモ 1 = 14 枚)
+    #[test]
+    fn test_tile_count_with_melds() {
+        let mut hand = Hand::new();
+        for _ in 0..7 {
+            hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+        }
+        hand.melds.push(pon_meld(Tile::new_number(Suit::Man, 1, false)));
+        hand.melds.push(chi_meld(Suit::Sou, 4));
+        // 残り手牌 7 + 副露 2*3 = 13
+        assert_eq!(hand.tile_count(), 13);
+    }
+
     /// 5 枚麻雀: 字牌対子 + 数牌塔子（カンチャン）
     /// 手牌: to to 3p 4p 9m → 9m 捨て、3p 4p で 2p/5p のリャンメン待ち
     #[test]
