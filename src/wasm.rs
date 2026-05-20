@@ -273,13 +273,7 @@ impl WasmGame {
     /// `resolve_draw` に渡してノーテン罰符を正しく徴収するための補助 API。
     #[wasm_bindgen(js_name = computeTenpaiPlayers)]
     pub fn compute_tenpai_players(&self) -> Vec<usize> {
-        self.game
-            .players
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| p.is_tenpai())
-            .map(|(i, _)| i)
-            .collect()
+        self.game.compute_tenpai_players()
     }
 
     /// 指定プレイヤーがツモ和了可能か。
