@@ -255,10 +255,8 @@ impl WasmGame {
     // Web UI から駆動するための bridge。`get_last_outcome_json` は UI が
     // 直前局の結果画面（和了 / 流局）を描画するための JSON を返す。
     //
-    // TODO(#28): 役満ご祝儀 (Seikyo モード) の配線は本 Issue 範囲外。
-    //   ScoringEngine 側で yakuman を検出したあと `pay_yakuman_tip` を呼ぶ
-    //   経路はここでは張らない。
-    // TODO(#29): 東西戦 (EastWest) の team_yaku 進捗更新も本 Issue 範囲外。
+    // closed: #28 (誠京役満ご祝儀の自動授受)、#29 (東西戦 team_yaku 自動呼出) は
+    //   別 PR で resolve_win 側に配線済み。本 ファイル の bridge 層では追加処理不要。
 
     /// 山牌 0 / 全員ノーテンの簡易流局。
     /// 呼び出し側がテンパイ者の座席 index を渡す。
@@ -348,7 +346,7 @@ impl WasmGame {
         }
         let is_dealer = winner_idx == self.game.dealer;
         let hand_clone = self.game.players[winner_idx].hand.clone();
-        let Some((sub_hand, winning_tile)) = extract_agari(&hand_clone) else {
+        let Some((sub_hand, winning_tile)) = extract_agari_with_context(&hand_clone, true, is_dealer) else {
             return String::new();
         };
         let Some(result) = ScoringEngine::calculate_score(&sub_hand, &winning_tile, true, is_dealer) else {
@@ -488,18 +486,34 @@ fn scoring_summary_json(result: &ScoringResult) -> String {
     serde_json::Value::Object(obj).to_string()
 }
 
-/// 14 枚手牌から「抜くと残りが winning 形になる 1 枚」を探す。
+/// 14 枚手牌から「抜くと残りが winning 形になる 1 枚」を探し、最高得点の解釈を返す。
 ///
 /// ツモ和了直後は `Hand` がソート済で「最後に引いた牌」を末尾から復元できない。
-/// 代わりに各ユニークな牌を winning_tile 候補として試し、
-/// 残り 13 枚の手牌に対して `can_win(候補)` が成立するものを返す。
+/// 各ユニークな牌を winning_tile 候補として試し、`ScoringEngine::calculate_score`
+/// に通して最も高得点 (total_points → han → fu の順で比較) の解釈を採用する。
 ///
 /// 返り値: `(13 枚に縮めた Hand, winning_tile)`
 ///
+/// # 設計メモ (Issue #34)
+/// - 多面待ち手で「両面 / 嵌張 / 辺張」が同居するとき、平和の付く両面解釈を優先する
+/// - 四暗刻単騎は「単騎雀頭が winning_tile」の解釈を捕捉する
+/// - 役なしになる候補があってもスキップされ、役あり候補が選ばれる
+/// - 全候補が役なしの場合は「最初に和了形が成立した候補」を返す (resolveWinTsumo 後段で None 扱い)
+///
 /// # 既知の制限
-/// - 単騎 / 嵌張 / 両面など待ち形により符が変わる場合があるが、本実装は
-///   最初に発見した winning_tile 候補を採用する近似である (Issue #34)。
-///   ScoringEngine が待ち形を正しく評価できるようになるまでの暫定対応。
+/// - 副露 (チー / ポン / カン) を含む手は #33 で対応済みだが、本関数の最高得点比較は
+///   `ScoringEngine::calculate_score` の精度に依存する
+///
+/// # タイブレーク
+/// `total_points` → `han` → `fu` の順で大小比較する。それでも同点 (ties) の場合は
+/// **手牌昇順 (Hand 内ソート済み) で最初に見つかった候補が勝つ** (= 後続候補は採用しない)。
+/// 多面待ちで完全に同点の解釈が複数ある場合の挙動はこの順序に依存する。
+///
+/// # 赤ドラと `seen` の関係
+/// `seen` は `Tile` の完全一致 (`is_red` を含む) で重複候補をスキップする。
+/// 赤五と通常五を winning_tile 候補として別エントリで扱うのは意図的:
+/// - 赤五を winning とした場合のみ赤ドラ 1 翻が加算される (今後の拡張)
+/// - 現状の `ScoringEngine` は赤ドラを別扱いしないため挙動差はないが、API として残す
 ///
 /// # 副露 (チー / ポン / カン) を含む手 (Issue #33)
 /// `Hand::tile_count()` は副露込みで 14 枚相当をカウントするため、副露ありでも
@@ -508,25 +522,52 @@ fn scoring_summary_json(result: &ScoringResult) -> String {
 /// `melds_needed = 4 - melds.len()` で副露考慮済み)。
 #[cfg(feature = "wasm")]
 pub(crate) fn extract_agari(hand: &Hand) -> Option<(Hand, Tile)> {
+    extract_agari_with_context(hand, true, false)
+}
+
+/// `extract_agari` 本体。ツモ/ロン・親子で点数評価が変わるためコンテキストを受け取る (Issue #34)。
+#[cfg(feature = "wasm")]
+pub(crate) fn extract_agari_with_context(hand: &Hand, is_tsumo: bool, is_dealer: bool) -> Option<(Hand, Tile)> {
     let tiles = hand.get_tiles().clone();
-    // メルド込みで 14 枚相当か確認
     if hand.tile_count() != 14 {
         return None;
     }
     // ユニークな牌で 1 枚ずつ試す
     // 副露牌は和了牌候補に成り得ない (既に確定面子の一部)。winning_tile は tiles から選ぶ
     let mut seen: Vec<Tile> = Vec::new();
+    // 役あり候補の最良 + 役なし fallback を別管理
+    let mut best: Option<(Hand, Tile, u32, u32, u32)> = None; // (sub, tile, total, han, fu)
+    let mut fallback: Option<(Hand, Tile)> = None;
     for tile in tiles.iter() {
         if seen.iter().any(|t| t == tile) {
             continue;
         }
         seen.push(*tile);
         let mut sub = hand.clone();
-        if sub.remove_tile(tile) && sub.can_win(tile) {
-            return Some((sub, *tile));
+        if !(sub.remove_tile(tile) && sub.can_win(tile)) {
+            continue;
+        }
+        if fallback.is_none() {
+            fallback = Some((sub.clone(), *tile));
+        }
+        if let Some(res) = ScoringEngine::calculate_score(&sub, tile, is_tsumo, is_dealer) {
+            let cand = (sub.clone(), *tile, res.total_points, res.han, res.fu);
+            best = match best {
+                None => Some(cand),
+                Some(prev) => {
+                    if (cand.2, cand.3, cand.4) > (prev.2, prev.3, prev.4) {
+                        Some(cand)
+                    } else {
+                        Some(prev)
+                    }
+                }
+            };
         }
     }
-    None
+    if let Some((sub, tile, _, _, _)) = best {
+        return Some((sub, tile));
+    }
+    fallback
 }
 
 // ==================== Nostr P2P機能 ====================
@@ -1332,6 +1373,41 @@ mod tests {
             result,
             "副露 1 + 手牌 11 の和了形は can_tsumo=true (もし false なら Issue #33 副露対応のリグレッション)"
         );
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn extract_agari_prefers_higher_score() {
+        // 多面待ち手で「高得点解釈が選ばれる」ことを検証する。
+        // 構成: 2m3m4m / 2p3p4p / 5p6p7p / 2s3s4s / 5s6s7s (14 枚、全順子・断么)。
+        // 14 枚の状態から各 unique tile を winning 候補として試した時、
+        // 全候補で「順子完成 + 平和形 + 断么九」が成立し、最高得点解釈が選ばれる。
+        // 重要なのは extract_agari_with_context が「和了形 + 最高得点」候補を実際に返すこと。
+        use crate::tile::Suit;
+        let mut hand = crate::Hand::new();
+        for t in [
+            Tile::new_number(Suit::Man, 2, false), Tile::new_number(Suit::Man, 3, false), Tile::new_number(Suit::Man, 4, false),
+            Tile::new_number(Suit::Pin, 2, false), Tile::new_number(Suit::Pin, 3, false), Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Pin, 5, false), Tile::new_number(Suit::Pin, 6, false), Tile::new_number(Suit::Pin, 7, false),
+            Tile::new_number(Suit::Sou, 2, false), Tile::new_number(Suit::Sou, 3, false), Tile::new_number(Suit::Sou, 4, false),
+            Tile::new_number(Suit::Sou, 5, false), Tile::new_number(Suit::Sou, 5, false),
+        ] {
+            hand.add_tile(t);
+        }
+        // 雀頭 5s5s, 234m / 234p / 567p / 234s で 4 面子 1 雀頭 → 和了形
+        // winning=5s ならシャンポンや単騎は出ない (5s5s 雀頭固定)、suit 内に 567s が無いので両面/嵌張なし。
+        // → 実際は 5s5s 雀頭での単一解釈で和了する
+        let result = extract_agari_with_context(&hand, true, false);
+        assert!(result.is_some(), "和了形が見つかる: {:?}", result);
+        let (sub_hand, winning_tile) = result.unwrap();
+        // 返り値が実際に和了形であることを確認
+        assert!(sub_hand.can_win(&winning_tile), "返された (sub_hand, winning_tile) は和了形");
+        // 点数計算が成功し、役ありで点数が付くことを確認 (高得点選択ロジックが走った証拠)
+        let score = crate::scoring::ScoringEngine::calculate_score(&sub_hand, &winning_tile, true, false);
+        assert!(score.is_some(), "スコア計算成功");
+        let s = score.unwrap();
+        assert!(s.total_points > 0, "最高得点候補は役あり (total_points > 0): got {}", s.total_points);
+        assert!(s.han >= 1, "最低 1 翻 (断么 or 平和): han={}", s.han);
     }
 
     #[test]

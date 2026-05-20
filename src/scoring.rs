@@ -270,11 +270,17 @@ impl ScoringEngine {
     }
 
     // ピンフ（平和）
-    fn check_pinfu(hand: &Hand, _winning_tile: &Tile) -> bool {
-        // 副露なし、全て順子、雀頭が役牌でない、両面待ち
-        // 簡易実装: 副露なしのみチェック
-        // TODO: check_pinfu は副露無し以外の条件 (両面待ち / 雀頭が役牌でない / 全順子) を判定していない。S3 の暗カン門前扱い修正と併せて別 Issue
-        hand.get_melds().is_empty()
+    //
+    // Issue #34: 副露なし・全順子・雀頭が三元牌でない・両面待ちで取り込める分解が
+    // 存在する場合に成立する。場風 / 自風の役牌雀頭判定は本関数では未対応
+    // (ScoringEngine が場風 / 自風を持たないため簡略化)。
+    fn check_pinfu(hand: &Hand, winning_tile: &Tile) -> bool {
+        if !hand.get_melds().is_empty() {
+            return false;
+        }
+        let mut all_tiles = hand.get_tiles().clone();
+        all_tiles.push(*winning_tile);
+        crate::agari::is_pinfu_shape(&all_tiles, winning_tile)
     }
 
     // 役牌
@@ -513,20 +519,18 @@ impl ScoringEngine {
     }
 
     // 四暗刻
-    // TODO: ロンで和了した刻子は明刻扱い (四暗刻単騎以外で 1 暗刻減算)。winning_tile 未使用は意図的 (本 Issue 範囲外、別 Issue で対応)
-    fn check_suuankou(hand: &Hand, _winning_tile: &Tile, is_tsumo: bool) -> bool {
-        // 暗刻が4組（ツモの場合のみ）
-        if !is_tsumo {
+    //
+    // Issue #34: 副露なし 14 枚手で 4 つの面子全てが刻子、雀頭 1 つ。
+    // - 単騎和了 (winning_tile が雀頭) → ロン / ツモどちらでも成立 (四暗刻単騎)
+    // - シャンポン待ち → ツモのみ成立 (ロンだと最後の刻子が明刻扱いで三暗刻に格下げ)
+    // 副露あり手は構造上四暗刻不可なので false。
+    fn check_suuankou(hand: &Hand, winning_tile: &Tile, is_tsumo: bool) -> bool {
+        if !hand.get_melds().is_empty() {
             return false;
         }
-
-        let ankou_count = hand
-            .get_melds()
-            .iter()
-            .filter(|meld| !meld.is_open && matches!(meld.meld_type, MeldType::Pon | MeldType::Kan))
-            .count();
-
-        ankou_count >= 4
+        let mut all_tiles = hand.get_tiles().clone();
+        all_tiles.push(*winning_tile);
+        crate::agari::is_suuankou(&all_tiles, winning_tile, is_tsumo)
     }
 
     // 大三元
@@ -574,19 +578,14 @@ impl ScoringEngine {
     }
 
     // 九蓮宝燈
+    //
+    // Issue #34: 1112345678999 + 同色のどれか 1 枚で構成される清一色 14 枚手。
+    // 副露なしの場合のみ役満として認める。
     fn check_chuuren(tiles: &[Tile], is_menzen: bool) -> bool {
         if !is_menzen || tiles.len() != 14 {
             return false;
         }
-
-        // 清一色かチェック
-        if !Self::check_chinitsu(tiles) {
-            return false;
-        }
-
-        // 1112345678999のパターン
-        // 簡易実装: 省略
-        false
+        crate::agari::is_chuuren(tiles)
     }
     
     fn calculate_fu(_hand: &Hand, _winning_tile: &Tile, is_tsumo: bool) -> u32 {

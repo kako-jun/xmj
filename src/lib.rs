@@ -3,6 +3,7 @@ pub mod hand;
 pub mod game;
 pub mod player;
 pub mod scoring;
+pub mod agari;
 pub mod ai;
 pub mod nostr;
 pub mod realtime;
