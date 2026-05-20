@@ -6,7 +6,7 @@ import topLevelAwait from 'vite-plugin-top-level-await'
 // Wasm pkg/ は build-wasm.sh で生成される xmj_core (wasm-bindgen 出力)。
 // `--target web` 形式のため、vite-plugin-wasm + top-level-await で読み込む。
 export default defineConfig({
-  base: '/xmj/',
+  base: '/',
   plugins: [wasm(), topLevelAwait()],
   assetsInclude: ['**/*.wasm'],
   server: {

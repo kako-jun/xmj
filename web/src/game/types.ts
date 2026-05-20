@@ -29,21 +29,33 @@ export type GamePhase = 'title' | 'game' | 'over'
 /** プレイヤー位置 (東家=0, 南=1, 西=2, 北=3)。 */
 export type PlayerIndex = 0 | 1 | 2 | 3
 
-/** タイトル画面から選ぶ開始プリセット。 */
-export type GameStartMode = 'cpu-east' | 'cpu-south' | 'cpu-west' | 'cpu-north'
+/** 対局モード。麻雀の基本ルールに従って 東風戦 / 半荘戦 を選ぶ。 */
+export type GameMode = 'tonpuusen' | 'hanchan'
 
-export const startModeToPlayerIndex = (mode: GameStartMode): PlayerIndex => {
-  switch (mode) {
-    case 'cpu-east':
-      return 0
-    case 'cpu-south':
-      return 1
-    case 'cpu-west':
-      return 2
-    case 'cpu-north':
-      return 3
-  }
+/** モード選択カードの表示用構造。App と modeSelectScene 間で共有する。 */
+export interface GameModeOption {
+  key: GameMode
+  title: string
+  description: string
+  enabled: boolean
 }
+
+/**
+ * 場決め (起家決定) のサイコロ結果。
+ * 2 個のサイコロを振り、合計 (2-12) から人間プレイヤーの起家を決める。
+ * 合計の最小値が 2 なので `(sum - 2) mod 4` で 0-3 に正規化する。
+ * 対応表: 2/6/10 → 東(0), 3/7/11 → 南(1), 4/8/12 → 西(2), 5/9 → 北(3)
+ */
+export interface DiceRoll {
+  d1: number
+  d2: number
+}
+
+export const diceRollToHumanSeat = (roll: DiceRoll): PlayerIndex => {
+  const sum = roll.d1 + roll.d2
+  return ((sum - 2) % 4) as PlayerIndex
+}
+
 
 /**
  * プレイヤー 1 人の状態。手牌・河・点数を持つ。

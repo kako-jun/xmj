@@ -62,15 +62,27 @@ const getActionButton = (stage: Container, key: string): Container => {
 const getSceneButton = (stage: Container, label: string): Container =>
   (stage.children[0] as Container).getChildByLabel(label) as Container
 
-const getSceneMode = (stage: Container, key: string): Container =>
-  ((stage.children[0] as Container).getChildByLabel('title-mode-row') as Container).getChildByLabel(
-    `title-mode-${key}`
+const getModeCard = (stage: Container, key: string): Container =>
+  ((stage.children[0] as Container).getChildByLabel('mode-card-row') as Container).getChildByLabel(
+    `mode-card-${key}`
   ) as Container
 
 const getSceneTexts = (stage: Container): Text[] =>
   ((stage.children[0] as Container).children.filter(
     (child): child is Text => child instanceof Text
   ))
+
+/** モード選択→場決め→対局開始までまとめて進める。 */
+const walkToGame = (
+  app: App,
+  stage: Container,
+  roll: { d1: number; d2: number }
+): void => {
+  getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
+  getSceneButton(stage, 'mode-select-confirm').emit('pointertap', {} as never)
+  app.showDiceRollScene(roll)
+  getSceneButton(stage, 'dice-roll-start-button').emit('pointertap', {} as never)
+}
 
 describe('App', () => {
   afterEach(() => {
@@ -208,25 +220,21 @@ describe('App', () => {
     ).toBe(true)
   })
 
-  it('showTitleScene のスタートボタンから新しい bridge を作って対局を始める', () => {
+  it('title-start-button はモード選択シーンへ遷移する (bridge は作らない)', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
-    const bridges = [createBridgeMock(), createBridgeMock()]
-    const createBridge = vi.fn(
-      () => bridges.shift() as import('./wasm').WasmGameBridge
-    )
+    const createBridge = vi.fn(() => createBridgeMock())
     const app = new App(fakeApp, { createBridge })
 
     app.showTitleScene()
     getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
 
-    expect(createBridge).toHaveBeenCalledTimes(1)
-    expect(createBridge).toHaveBeenCalledWith('cpu-east')
-    expect((stage.children[0] as Container).label).toBe('game-table')
-    expect(app.bridge).not.toBe(null)
+    expect(createBridge).not.toHaveBeenCalled()
+    expect((stage.children[0] as Container).label).toBe('mode-select-scene')
+    expect(app.bridge).toBe(null)
   })
 
-  it('title-scene で開始席を切り替えてから開始できる', () => {
+  it('mode-select → dice-roll → game-table の完全フローを通る', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const createBridge = vi.fn(() =>
@@ -245,23 +253,64 @@ Dora indicators: 5p
  CPU 北 (25000点): 1s 1s 2s 2s 3s 3s 4m 4m 5m 5m 6m 6m sa`,
       })
     )
+    // d1=2, d2=1 → 合計3 → ((3-2)%4)=1 → 南家(=PlayerIndex 1)
     const app = new App(fakeApp, { createBridge })
 
     app.showTitleScene()
-    getSceneMode(stage, 'cpu-south').emit('pointertap', {} as never)
+    // タイトル → モード選択
     getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
+    expect((stage.children[0] as Container).label).toBe('mode-select-scene')
 
-    const bottomArea = getBottomArea(stage)
-    expect(app.selectedStartMode).toBe('cpu-south')
+    // モード選択 → 場決め (デフォルト tonpuusen のまま「次へ」)
+    getSceneButton(stage, 'mode-select-confirm').emit('pointertap', {} as never)
+    // テスト用に明示的な dice を注入する
+    app.showDiceRollScene({ d1: 2, d2: 1 })
+    expect((stage.children[0] as Container).label).toBe('dice-roll-scene')
+    expect(app.selectedHumanSeat).toBe(1)
+
+    // 場決め → 対局開始
+    getSceneButton(stage, 'dice-roll-start-button').emit('pointertap', {} as never)
+
+    expect(createBridge).toHaveBeenCalledTimes(1)
+    expect(createBridge).toHaveBeenCalledWith(1)
     expect(app.humanPlayerIndex).toBe(1)
-    expect(createBridge).toHaveBeenCalledWith('cpu-south')
+    expect((stage.children[0] as Container).label).toBe('game-table')
+    const bottomArea = getBottomArea(stage)
     expect(bottomArea.getChildByLabel('hand-1')).toBeTruthy()
     expect(bottomArea.getChildByLabel('hand-0')).toBeNull()
-    expect(bottomArea.getChildByLabel('turn-marker')).toBeTruthy()
-    expect((stage.children[0] as Container).label).toBe('game-table')
   })
 
-  it('showTitleScene の開始処理で createBridge が例外を投げたときは title-scene に留まり理由を表示する', () => {
+  it('mode-select-back でタイトルに戻る', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp, { createBridge: () => createBridgeMock() })
+
+    app.showTitleScene()
+    getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
+    getSceneButton(stage, 'mode-select-back').emit('pointertap', {} as never)
+
+    expect((stage.children[0] as Container).label).toBe('title-scene')
+  })
+
+  it('rollDice オプションで決定的なサイコロを注入できる', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const rollDice = vi.fn(() => ({ d1: 3, d2: 3 })) // 合計6 → (6-2)%4=0 → 東家
+    const app = new App(fakeApp, {
+      createBridge: () => createBridgeMock(),
+      rollDice,
+    })
+
+    app.showTitleScene()
+    getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
+    getSceneButton(stage, 'mode-select-confirm').emit('pointertap', {} as never)
+
+    expect(rollDice).toHaveBeenCalledTimes(1)
+    expect(app.selectedHumanSeat).toBe(0)
+    expect((stage.children[0] as Container).label).toBe('dice-roll-scene')
+  })
+
+  it('場決め後の dice-roll-start で createBridge が例外を投げたら title-scene に戻り理由を表示する', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const app = new App(fakeApp, {
@@ -271,13 +320,27 @@ Dora indicators: 5p
     })
 
     app.showTitleScene()
-    getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
+    walkToGame(app, stage, { d1: 1, d2: 1 })
 
     expect((stage.children[0] as Container).label).toBe('title-scene')
     expect(app.bridge).toBe(null)
     expect(
       getSceneTexts(stage).some(text => text.text.includes('対局の初期化に失敗しました: boom'))
     ).toBe(true)
+  })
+
+  it('mode-card で半荘戦を選んでも enabled=false のため確定ボタンが反応しない', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp, { createBridge: () => createBridgeMock() })
+
+    app.showTitleScene()
+    getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
+    // 半荘戦は disabled なのでカード自体が pointertap を受け付けない
+    const hanchanCard = getModeCard(stage, 'hanchan')
+    expect(hanchanCard.eventMode).not.toBe('static')
+    // 東風戦はちゃんと取れる
+    expect(getModeCard(stage, 'tonpuusen')).toBeTruthy()
   })
 
   it('立直中のプレイヤーだけ score badge に立直表示が出る', () => {
@@ -567,7 +630,7 @@ Last discard: 5m`,
     expect(destroyed).toBe(1)
   })
 
-  it('result-scene の再戦ボタンで新しい bridge を作り直して対局へ戻る', () => {
+  it('result-scene の再戦ボタンでモード選択シーンに戻り、もう一度走らせると新しい bridge ができる', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
 
@@ -587,6 +650,14 @@ Last discard: 5m`,
     app.startGame(finishedBridge, 0)
     ;(app as unknown as { finalizeGameIfNeeded: () => void }).finalizeGameIfNeeded()
     getSceneButton(stage, 'result-rematch-button').emit('pointertap', {} as never)
+
+    // 再戦は場決めをやり直すのでまずモード選択に戻る
+    expect((stage.children[0] as Container).label).toBe('mode-select-scene')
+
+    // モード選択 → 場決め (d1=2,d2=2 → 合計4 → (4-2)%4=2 → 西家) → 開始
+    getSceneButton(stage, 'mode-select-confirm').emit('pointertap', {} as never)
+    app.showDiceRollScene({ d1: 2, d2: 2 })
+    getSceneButton(stage, 'dice-roll-start-button').emit('pointertap', {} as never)
 
     expect(createCount).toBe(1)
     expect((stage.children[0] as Container).label).toBe('game-table')

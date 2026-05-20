@@ -10,17 +10,25 @@ Dual interfaces remain: Web (PixiJS + WASM) and CUI (Rust terminal output). The 
 
 ## 2. Color Palette & Roles
 
-### Main Battle (PixiJS table) — Dark Felt + Crimson Vignette
+### Main Battle (PixiJS table) — Muted Felt + Soft Vignette
+
+長時間プレイで目が疲れない明度・彩度に揃える。原色の緑・赤・青は避け、
+くすませた中間トーンに統一する。Crimson vignette は alpha 0.07 程度の
+かすかな滲み (画面外周のテンション暗示) として使う。
 
 | Color     | Hex       | Usage                     |
 | --------- | --------- | ------------------------- |
-| Backdrop  | `#050505` | Outer stage background    |
-| Felt      | `#003300` | Main table surface        |
-| Inner Felt| `#0d2f1d` | Center information area   |
-| Brass     | `#8f6a2f` / `#d4b06a` | Frames, accents |
-| Crimson   | `#7a0f16` | Tension glow / vignette   |
-| Ivory     | `#faf3e0` | Tile face                 |
-| Danger    | `#c93a3a` | Riichi / tension text     |
+| Backdrop  | `#0a0a0a` | Outer stage background    |
+| Felt      | `#1f3a2a` | Main table surface (muted green) |
+| Inner Felt| `#1a3024` | Center information area   |
+| Brass     | `#7a6038` / `#b39a6e` | Frames, accents (muted gold) |
+| Crimson   | `#4a1f24` | Tension glow / vignette (alpha 0.07) |
+| Ivory     | `#f3ead2` | Tile face (warm off-white) |
+| Danger    | `#b84a4a` | Riichi / tension text     |
+| Tile Sou  | `#2f6b3a` | 索子 (muted forest green) |
+| Tile Pin  | `#365a85` | 筒子 (muted slate blue)   |
+| Tile Back | `#33445e` | 裏向き (muted indigo)     |
+| Tile Red Dora | `#a83a3a` | 赤ドラ                |
 
 ### Hybrid / Legacy DOM screens — Gradient + Glass
 
@@ -131,6 +139,52 @@ Focus: border-color becomes primary, glow effect added.
 - Main table uses a fixed 16:9 composition (`1280x720`) centered in the viewport
 - Four seats wrap the center information plate rather than using DOM grid cards
 - DOM grids remain acceptable for setup, result, and debug screens
+
+### Mahjong Table Stacking (Human Player, Bottom Edge)
+
+下から上に向かって以下の順で重ねる。各帯は y 範囲を排他にして牌の重なりを禁ずる。
+
+| Layer | y range | Notes |
+| ----- | ------- | ----- |
+| Footer shadow strip | 702-720 | 視覚的底辺、操作物は置かない |
+| Hand (自家手牌)     | 612-682 | 13 牌 × handSpacing 54px (重なり禁止) |
+| Self discards (河)  | 450-595 | 6 列 × 36px × 3 行 × 50px |
+| Center info panel   | 253-443 | 局・山残・ドラ・直前打牌 |
+
+**Tile Spacing Rule (重要)** — 手牌の隣接牌中心間ピッチは必ず `TILE.width` 以上にする。
+xmj の `TILE.handSpacing` は 54px (width 50 + gap 4)。河 (捨牌) の列ピッチは
+`TILE.discardColPitch = 36px` (scale 0.62 → 実効 width 31)、行ピッチ
+`TILE.discardRowPitch = 50px` (scale 0.62 → 実効 height 43.4) で `+ gap` を確保する。
+**牌の重なりはバグとして扱う。**
+
+### Frame Minimalism (枠は必要なところだけ)
+
+「卓に札を置いた」リアリティを優先し、情報表示パネルは枠を極力持たない。
+
+| 要素 | 枠の扱い |
+| ---- | -------- |
+| スコアバッジ (各家の名前・点数) | **枠なし**。風牌 + 名前 + 点数のテキストだけステージ四隅に置く |
+| 手番マーカー | **枠なし**。`TURN_GLOW_COLOR` の小さな丸印 + テキスト |
+| 中央情報帯 (東1局・山牌枚数・ドラ表示) | 影だけ (`SHADOW_COLOR` alpha 0.22 の薄いラウンド矩形)、ストロークなし |
+| 対局ログ | 影だけ (`SHADOW_COLOR` alpha 0.32)、ストロークなし |
+| 操作 UI (行動エリア) 外周 | 影だけ (`SHADOW_COLOR` alpha 0.34)。**個別のボタン**は枠ありで押せると分かる見た目を維持 |
+| 牌 | 縁取りあり (`TILE.edgeColor`) — 牌そのものは物理オブジェクトとして強調 |
+
+**Do**: 卓画面 (game-table) の情報表示は卓に直書きされた札のように見せる。操作可能要素 (ボタン) だけ明確な枠で区別する。
+**Don't**: 卓画面の表示要素 (点数・ログ・情報帯) に明るい枠を引いて UI チップ感を出さない。
+
+**例外**: タイトル / モード選択 / 場決め等のオーバーレイ系シーン (titleScene, modeSelectScene, diceRollScene) は卓ではなくダイアログ的な性格を持つので、`PANEL_BORDER_COLOR` の枠を持つフレームを許容する。Frame Minimalism のルールは「卓上に重ねた情報表示は枠を持たない」という範囲で適用する。
+
+### Mobile Touch Targets (右下集約)
+
+スマホ片手操作を想定し、能動的な操作 UI は画面右下に集める。
+
+- **Action area** (打牌・立直など): `x = STAGE_WIDTH - 220 - 24`, `y = 底辺 - 24 - height`
+- **Turn marker** (あなたの手番): action area の真上 (`y = actionY - 44`)
+- **Event log** (受動情報): 左下、`x = 24`, `y = 底辺 - 104 - 24` で操作 UI と分離
+- **Buttons**: 最小高さ 52px (Apple HIG / Material タッチターゲット推奨 44px+)
+- ボタンは横並びではなく**縦積み**にする (親指で当てやすい)
+- ラベルは 18px 太字
 
 ### Spacing
 

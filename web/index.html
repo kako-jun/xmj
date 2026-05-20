@@ -12,7 +12,7 @@
       body {
         margin: 0;
         padding: 0;
-        background: #003300;
+        background: #0a0a0a;
         overflow: hidden;
       }
       body {
@@ -23,8 +23,12 @@
       }
       canvas {
         display: block;
-        max-width: 100vw;
-        max-height: 100vh;
+        /* PixiJS の内部解像度は 1280x720。アスペクト比 16:9 を維持したまま
+           ビューポートに収める。max-width/max-height だけだと縦横独立に
+           縮められて牌や文字が歪むので width/height を式で固定する。 */
+        width: min(100vw, calc(100vh * 16 / 9));
+        height: min(100vh, calc(100vw * 9 / 16));
+        aspect-ratio: 16 / 9;
       }
       #loading {
         position: fixed;
@@ -33,7 +37,7 @@
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        background: #001a00;
+        background: #14140f;
         color: #fff;
         font-family: sans-serif;
         z-index: 10;

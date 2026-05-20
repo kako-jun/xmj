@@ -7,17 +7,26 @@ import {
 } from './constants'
 import { createTableScene } from './table'
 import type { TableActionButton } from './table'
-import type { GameStartMode, GameState, PlayerIndex, Tile } from './types'
+import type { DiceRoll, GameMode, GameModeOption, GameState, PlayerIndex, Tile } from './types'
 import { createGameStateFromBridge } from './bridgeState'
-import { startModeToPlayerIndex, tileToCuiCode } from './types'
+import { diceRollToHumanSeat, tileToCuiCode } from './types'
 import { WasmGameBridge } from './wasm'
 import { createTitleScene } from './titleScene'
+import { createModeSelectScene } from './modeSelectScene'
+import { createDiceRollScene } from './diceRollScene'
 import { createResultScene, type ResultEntry } from './resultScene'
 
 interface AppOptions {
   cpuTurnDelayMs?: number
-  createBridge?: ((mode: GameStartMode) => WasmGameBridge) | null
+  createBridge?: ((humanSeat: PlayerIndex) => WasmGameBridge) | null
+  /** 場決め用サイコロの乱数源。テストで決定的に注入できる。 */
+  rollDice?: () => DiceRoll
 }
+
+const defaultRollDice = (): DiceRoll => ({
+  d1: 1 + Math.floor(Math.random() * 6),
+  d2: 1 + Math.floor(Math.random() * 6),
+})
 
 export class App {
   app: Application
@@ -28,9 +37,12 @@ export class App {
   eventLog: string[] = []
   resultMessage: string | null = null
   titleNotice: string | null = null
-  selectedStartMode: GameStartMode = 'cpu-east'
+  selectedGameMode: GameMode = 'tonpuusen'
+  /** 場決めで決まった人間プレイヤーの席。null なら未確定。 */
+  selectedHumanSeat: PlayerIndex | null = null
   private cpuTurnDelayMs: number
-  private createBridge: ((mode: GameStartMode) => WasmGameBridge) | null
+  private createBridge: ((humanSeat: PlayerIndex) => WasmGameBridge) | null
+  private rollDice: () => DiceRoll
   private cpuTurnTask: Promise<void> | null = null
   private cpuTurnGeneration = 0
   private destroyedBridges = new WeakSet<WasmGameBridge>()
@@ -39,6 +51,7 @@ export class App {
     this.app = app
     this.cpuTurnDelayMs = options.cpuTurnDelayMs ?? 0
     this.createBridge = options.createBridge ?? null
+    this.rollDice = options.rollDice ?? defaultRollDice
   }
 
   /**
@@ -77,13 +90,55 @@ export class App {
       createTitleScene({
         notice: this.titleNotice,
         startEnabled: this.createBridge !== null,
-        selectedMode: this.selectedStartMode,
-        modes: this.buildTitleModes(),
+        onStart: () => {
+          this.showModeSelectScene()
+        },
+      })
+    )
+  }
+
+  /**
+   * モード選択 (東風戦 / 半荘戦) シーン。半荘戦は現状無効。
+   */
+  showModeSelectScene(): void {
+    this.invalidateCpuTurnTask()
+    this.replaceStageRoot(
+      createModeSelectScene({
+        selectedMode: this.selectedGameMode,
+        modes: this.buildGameModes(),
+        // モード切替で scene を丸ごと再構築している。カードが 2 枚なので毎回 destroy
+        // & 再生成しても十分軽い。カードが増える場合は selected フラグだけ差分更新する
+        // 設計に切り替えること。
         onSelectMode: mode => {
-          this.selectedStartMode = mode
+          this.selectedGameMode = mode
+          this.showModeSelectScene()
+        },
+        onConfirm: () => {
+          this.showDiceRollScene()
+        },
+        onBack: () => {
           this.showTitleScene(this.titleNotice)
         },
-        onStart: () => {
+      })
+    )
+  }
+
+  /**
+   * 場決めシーン。
+   * - 引数なしで呼ぶと内部の rollDice() で席を決める。
+   * - テストやアニメ完了後の置き換え用に、明示の DiceRoll を渡せる。
+   */
+  showDiceRollScene(roll?: DiceRoll): void {
+    this.invalidateCpuTurnTask()
+    const settledRoll = roll ?? this.rollDice()
+    const humanSeat = diceRollToHumanSeat(settledRoll)
+    this.selectedHumanSeat = humanSeat
+
+    this.replaceStageRoot(
+      createDiceRollScene({
+        roll: settledRoll,
+        humanSeat,
+        onComplete: () => {
           this.startNewGame()
         },
       })
@@ -95,11 +150,16 @@ export class App {
       this.showTitleScene('対局開始に必要な bridge factory が未設定です。')
       return false
     }
+    const humanSeat = this.selectedHumanSeat
+    if (humanSeat === null) {
+      this.showTitleScene('場決めが行われていません。')
+      return false
+    }
 
     try {
-      const bridge = this.createBridge(this.selectedStartMode)
+      const bridge = this.createBridge(humanSeat)
       this.titleNotice = null
-      this.startGame(bridge, startModeToPlayerIndex(this.selectedStartMode))
+      this.startGame(bridge, humanSeat)
       return true
     } catch (error) {
       const message =
@@ -111,7 +171,7 @@ export class App {
     }
   }
 
-  startGame(bridge: WasmGameBridge, humanPlayerIndex: PlayerIndex = 0): void {
+  startGame(bridge: WasmGameBridge, humanPlayerIndex: PlayerIndex): void {
     this.invalidateCpuTurnTask()
     if (this.bridge !== bridge) {
       this.releaseCurrentBridge()
@@ -358,17 +418,20 @@ export class App {
     this.replaceStageRoot(table)
   }
 
-  private buildTitleModes(): Array<{
-    key: GameStartMode
-    title: string
-    description: string
-    enabled: boolean
-  }> {
+  private buildGameModes(): GameModeOption[] {
     return [
-      { key: 'cpu-east', title: '東家', description: 'あなたが親で開始', enabled: true },
-      { key: 'cpu-south', title: '南家', description: '右席から開始', enabled: true },
-      { key: 'cpu-west', title: '西家', description: '対面から開始', enabled: true },
-      { key: 'cpu-north', title: '北家', description: '左席から開始', enabled: true },
+      {
+        key: 'tonpuusen',
+        title: '東風戦',
+        description: '東場のみの短期戦',
+        enabled: true,
+      },
+      {
+        key: 'hanchan',
+        title: '半荘戦',
+        description: '東南両場を打つ標準ルール',
+        enabled: false,
+      },
     ]
   }
 
@@ -410,7 +473,9 @@ export class App {
         entries,
         detailPlaceholder: '現 API では未取得',
         onRematch: () => {
-          this.startNewGame()
+          // 再戦はモード選択からやり直す (場決めもサイコロからもう一度)。
+          // モードは前回選択を引き継ぐので一度押すだけで再開できる。
+          this.showModeSelectScene()
         },
         onBackToTitle: () => {
           this.showTitleScene()
