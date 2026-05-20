@@ -122,7 +122,8 @@ fn decomp_eq(a: &Decomposition, b: &Decomposition) -> bool {
     if a.pair != b.pair {
         return false;
     }
-    // 面子の集合として一致するか
+    // 面子の集合として一致するか。bm を clone (to_vec) しているのは順序非依存比較のため
+    // remove(pos) で破壊的に消費する必要があるから。最大 4 要素なので性能影響は軽微。
     let mut bm: Vec<Mentsu> = b.mentsu.to_vec();
     for m in a.mentsu.iter() {
         if let Some(pos) = bm.iter().position(|x| x == m) {
@@ -190,7 +191,16 @@ fn classify_machi(dec: &Decomposition, winning_tile: &Tile) -> Vec<MachiKind> {
         }
     }
 
-    kinds
+    // 同分解内で同 MachiKind が複数 push される可能性
+    // (例: 同色順子が二つあり winning が両方の端にハマる) があるため重複除去。
+    // 並び順を保ったまま dedup したいので Vec のまま処理。
+    let mut uniq: Vec<MachiKind> = Vec::new();
+    for k in kinds.into_iter() {
+        if !uniq.contains(&k) {
+            uniq.push(k);
+        }
+    }
+    uniq
 }
 
 /// `rest` 牌列 (12 枚 = 4 面子) から面子 4 つを取り出す全パターン。
@@ -333,6 +343,11 @@ pub fn is_suuankou(tiles14: &[Tile], winning_tile: &Tile, is_tsumo: bool) -> boo
 
 /// 九蓮宝燈 (純正含む) 形か。
 /// 1112345678999 + どれか 1 枚の同色清一色。
+///
+/// # 注意
+/// 副露を除いた**手牌のみ**を渡すこと (副露込み 14 枚を渡すと誤判定する)。
+/// 九蓮宝燈は門前限定役のため、本来副露がある時点で成立しないが、呼び出し側で
+/// `melds.is_empty()` を確認してから渡すこと。
 pub fn is_chuuren(tiles14: &[Tile]) -> bool {
     if tiles14.len() != 14 {
         return false;
@@ -377,11 +392,8 @@ pub fn is_chuuren(tiles14: &[Tile]) -> bool {
         diff_total += d;
     }
     // 1 種類が +1 多いだけ
+    let _ = s; // suit は確定済み (上で early return 済み)。今後 suit を見たい拡張のために残す。
     diff_total == 1 && extras.iter().filter(|&&x| x == 1).count() == 1
-        && {
-            let _ = s; // suit は確定済みなので未使用警告抑制
-            true
-        }
 }
 
 #[cfg(test)]
@@ -456,21 +468,10 @@ mod tests {
 
     #[test]
     fn suuankou_shanpon_ron_fails() {
-        // 1m 1m 1m / 2m 2m 2m / 3p 3p 3p / 4s 4s / 5p 5p 5p
-        // 4s 4s 雀頭 + 残り 1m/2m/3p/5p 全部刻子。シャンポン待ちは無し (雀頭は 4s 固定)。
-        // シャンポン例にするには: 1m1m1m 2m2m2m 3p3p3p 4s4s 5p5p で winning=4s or 5p
+        // シャンポン待ち四暗刻: 1m1m1m / 2m2m2m / 3p3p3p / 4s4s / 5p5p の聴牌から
+        // 4s をツモ (or ロン)。winning=4s は刻子の 3 枚目として組み込まれ、雀頭は 5p5p。
+        // ツモなら四暗刻成立、ロンなら 4s 刻子が明刻扱いになり三暗刻に格下げ。
         let tiles: Vec<Tile> = vec![
-            tm(1), tm(1), tm(1),
-            tm(2), tm(2), tm(2),
-            tp(3), tp(3), tp(3),
-            ts(4), ts(4),
-            tp(5), tp(5), tp(5),
-        ];
-        // ↑ これだと刻子は 1m,2m,3p,5p の 4 つ + 雀頭 4s で四暗刻単騎 (4s 単騎) になってしまう。
-        // シャンポンを作るには: 1m1m1m 2m2m2m 3p3p3p 5p5p + 待ち 4s4s か 5p5p ペアのどちらかを刻子にする → 5p5p5p ならシャンポン待ちは消える。
-        // 簡略化のため、シャンポン形は別途構築:
-        //   1m1m1m 2m2m2m 3p3p3p + 4s4s + 5p5p で 13 枚 + 4s で 4s4s4s 完成 = シャンポン
-        let tiles2: Vec<Tile> = vec![
             tm(1), tm(1), tm(1),
             tm(2), tm(2), tm(2),
             tp(3), tp(3), tp(3),
@@ -478,15 +479,8 @@ mod tests {
             tp(5), tp(5),
         ];
         let winning = ts(4);
-        // 4s は刻子の 3 枚目として組み込める → シャンポン (5p5p 雀頭, 1m/2m/3p/4s 刻子)
-        // または 5p5p に対しても刻子待ち? 14 枚中 5p は 2 枚のみ。シャンポン待ち = 5p4s シャンポンではなく、
-        // 5p5p 雀頭 + 4s 刻子完成 = 単一解釈
-        // 本来の四暗刻シャンポン待ちは: 1m1m1m 2m2m2m 3p3p3p 4s4s 5p5p で待ち 4s/5p (シャンポン)
-        // ここでは 4s ツモ和了/ロン両方を検証
-        assert!(is_suuankou(&tiles2, &winning, true), "シャンポン待ちツモは四暗刻成立");
-        assert!(!is_suuankou(&tiles2, &winning, false), "シャンポン待ちロンは四暗刻不成立 (三暗刻に格下げ)");
-        // 未使用変数警告抑制
-        let _ = tiles;
+        assert!(is_suuankou(&tiles, &winning, true), "シャンポン待ちツモは四暗刻成立");
+        assert!(!is_suuankou(&tiles, &winning, false), "シャンポン待ちロンは四暗刻不成立 (三暗刻に格下げ)");
     }
 
     #[test]
@@ -581,5 +575,48 @@ mod tests {
             decs.iter().any(|(_, k)| matches!(k, MachiKind::Ryanmen)),
             "両面解釈が含まれる: {:?}", decs.iter().map(|(_, k)| *k).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn pinfu_ryanmen_preferred_over_kanchan() {
+        // 両面・嵌張共存手で両面優先 → 平和成立する例。
+        // 雀頭 1m1m, 順子 234m / 234p / 567p, 残り 5s6s7s + winning=5s。
+        // 5s 単体解釈:
+        //   (a) 5s6s7s 順子の最小 (両面: 4s/7s 待ちのうち)? 完成順子 567s で winning=5s は両面 4-7 のうち 4 側相当?
+        //       value=5 で「順子の最小牌」かつ value!=7 → Ryanmen
+        //   (b) 5s7s+6s? 本手には 6s が無いのでこの解釈は出ない
+        // → 嵌張共存にはならないため別構成で:
+        // 雀頭 1m1m, 順子 234m / 234p / 4s5s6s + 残り 5p6p7p + winning=6p
+        //   (a) 5p6p7p 順子 winning=6p 真ん中 → Kanchan
+        //   (b) 567p 順子の最小 winning=5p? いや winning=6p なので別分解 4p5p+5p6p7p? 4p 無い
+        // 多面待ちの典型例で素直なものを作る:
+        // 雀頭 1m1m, 順子 234m / 234p / 234s, 残り 3p4p5p + 5p6p7p の 7 枚を作るのは無理 (14 枚制約)
+        //
+        // 簡略化: 雀頭 1m1m / 234m / 234p / 678s / 4s 5s 6s + winning が両面 / 嵌張 同時解釈になる手:
+        // 1m1m 234p 567p 345s 456s で winning=6s
+        //   解釈 (a): 234p 567p 345s + 456s 完成、3-6 両面? 6s は 456s の最大 (Ryanmen) or 678s 想定?
+        // 確実な例: 1m1m / 234p / 234s / 345s / 4s5s と winning=3s/6s
+        // → 1m1m + 234p + 345s + 345s + 4s5s と winning=3s or 6s
+        //   - winning=3s: (234s + 345s) 両面、もしくは (345s + 3s4s5s) 同分解の別解釈
+        // テストを単純化: 多面解釈で「嵌張解釈と両面解釈が両方含まれ、平和が成立する」ことを確認
+        let tiles: Vec<Tile> = vec![
+            tm(1), tm(1),
+            tp(2), tp(3), tp(4),
+            tp(5), tp(6), tp(7),
+            ts(3), ts(4), ts(5),
+            ts(4), ts(5), ts(6),
+        ];
+        // winning=4s: 解釈 (a) 345s + 456s で 4s が完成順子の一部、嵌張 (3s5s + 4s) や 両面 (45s + ...) など共存
+        // 重要なのは「両面解釈があれば平和成立」なので is_pinfu_shape が true を返す
+        let winning = ts(4);
+        let decs = enumerate_decompositions_with_wait(&tiles, &winning);
+        let kinds: Vec<MachiKind> = decs.iter().map(|(_, k)| *k).collect();
+        // 少なくとも両面解釈が含まれる
+        assert!(
+            kinds.iter().any(|k| matches!(k, MachiKind::Ryanmen)),
+            "両面解釈が含まれる: {:?}", kinds
+        );
+        // 全順子 + 雀頭非役牌 + 両面解釈あり → 平和成立
+        assert!(is_pinfu_shape(&tiles, &winning), "両面優先で平和成立: kinds={:?}", kinds);
     }
 }

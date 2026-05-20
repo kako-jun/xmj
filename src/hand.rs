@@ -83,10 +83,8 @@ impl Hand {
             return Vec::new();
         }
         let mut waits: Vec<Tile> = Vec::new();
+        // all_34_tiles() は重複を含まないため contains チェックは不要。
         for candidate in Self::all_34_tiles() {
-            if waits.contains(&candidate) {
-                continue;
-            }
             if self.can_win(&candidate) {
                 waits.push(candidate);
             }
