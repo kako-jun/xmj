@@ -305,10 +305,10 @@ PR #21 時点では **API 提供レベル**まで。本番ゲームフローへ�
 
 | 機能         | 実装レベル                                                       | follow-up                              |
 | ------------ | ---------------------------------------------------------------- | -------------------------------------- |
-| 局ループ     | **WASM bridge 公開済** (Issue #27)。`resolveDraw` / `resolveWinTsumo` / `resolveWinRon` / `nextRound` / `getRound` / `getHonba` / `getDealer` / `getRiichiSticks` / `getLastOutcomeJson` を Web UI から駆動可能。山牌切れで自動 resolveDraw → 中間結果シーン → nextRound 復帰までの最小フローまで実装。 | 和了 UI ボタン (ツモ / ロン宣言)、テンパイ判定の本実装、役満ご祝儀配線 (#28)、東西戦 team_yaku (#29) |
+| 局ループ     | **WASM bridge 公開済** (Issue #27)。`resolveDraw` / `resolveWinTsumo` / `resolveWinRon` / `nextRound` / `getRound` / `getHonba` / `getDealer` / `getRiichiSticks` / `getLastOutcomeJson` を Web UI から駆動可能。山牌切れで自動 resolveDraw → 中間結果シーン → nextRound 復帰までの最小フローまで実装。 | 和了 UI ボタン (ツモ / ロン宣言)、副露和了 (#33)、待ち形精度 (#34) |
 | 場代         | API + `next_round` で各局自動再徴収 (Seikyo モード)              | UI 表示                                |
 | 二度ヅモ     | API + CLI 即捨て UX、`resolve_win` で `dealer_won_last` 自動更新 | （配線完了）                           |
-| 役満祝儀     | API（ゼロサム保証）                                              | 役満和了→放銃者特定→自動授受の配線     |
+| 役満祝儀     | **`resolve_win` 内で自動授受** (Issue #28)。`count_yakuman` で役満数を判定し、ロンは放銃者から / ツモは他家全員から `SEIKYO_YAKUMAN_TIP * yakuman_count` を `pay_yakuman_tip` 経由で移動 (ゼロサム保証)。 | （配線完了）                           |
 | pot 持ち越し | API + `next_round` で連荘・流局時に保持                          | （配線完了）                           |
 | 本場         | API (`Game.honba`、和了で `HONBA_BONUS * honba` 加算)            | UI 表示                                |
 | 供託リーチ棒 | API (`Game.riichi_sticks`)、和了者が取得・流局で持ち越し         | リーチ宣言 → `riichi_sticks++` の配線  |
@@ -487,7 +487,7 @@ cargo run -- --mode fivetile
 | 進捗 HashMap            | `Game.team_progress`                | -                                          |
 | 役登録 / クリア判定     | API（`record_team_yaku` 等）        | -                                          |
 | CLI 表示                | 各局のゲーム状態に進捗 1 行 + 勝敗  | Web UI は follow-up                        |
-| 役判定の自動配線        | 未実装（API 単体は動作）            | 和了 → 役検出 → `record_team_yaku` の本配線 |
+| 役判定の自動配線        | **`resolve_win` 内で自動記録** (Issue #29)。和了者の `ScoringResult.yaku` を全件チームに登録 | （配線完了） |
 
 #### API（`src/game.rs`）
 
@@ -530,9 +530,9 @@ cargo run -- --mode eastwest
 
 PR #19 時点では「Team / Yaku enum + API + CLI 表示 + テスト」までの最低限の動線。以下は follow-up:
 
-- **役判定の自動配線**: 実際に三色同順・一気通貫・対々和・全帯么・混老頭 の各役を和了から検出して
-  `record_team_yaku` を呼び出す配線は未実装。現状は API 単体で動作（テスト・外部呼び出し前提）。
-  通常モードの scoring 経路に EastWest 用フックを差し込む必要がある
+- **役判定の自動配線**: ~~未実装~~ → **Issue #29 で `resolve_win` 内に配線済**。和了確定時に
+  `ScoringResult.yaku` を `record_team_yaku` に流し、`east_west_winner()` が逐次更新される。
+  ただし `ScoringEngine::calculate_score` 自体が Honroutou を検出しない点 (#19 follow-up) は残っている
 - **チーム間の協力 UX**: 「自チームの未取得役を狙う」誘導表示や、味方が和了した直後に役一覧を見せる演出は未実装
 - **得点ルール**: 通常の点数計算（誰が何点取ったか）は EastWest でも動作するが、勝敗はクリア進捗のみで決まる。
   「点数で勝ったがクリアで負け」のような副次表示は CLI には現状無い
