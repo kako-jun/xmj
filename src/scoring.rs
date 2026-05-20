@@ -73,7 +73,15 @@ impl ScoringEngine {
         let is_menzen = hand.get_melds().is_empty();
 
         // 手牌情報の取得
+        // Issue #33: 副露がある場合、手牌 (`hand.get_tiles()`) は 11/8/5/2 枚しかない。
+        // 全 14 枚を見る役 (タンヤオ / 清一色 / 混一色 / 国士 / 字一色 / 緑一色 / 清老頭) では
+        // 副露の構成牌も含めて評価する必要があるため、ここで結合する。
         let mut all_tiles = hand.get_tiles().clone();
+        for meld in hand.get_melds() {
+            for t in &meld.tiles {
+                all_tiles.push(*t);
+            }
+        }
         all_tiles.push(*winning_tile);
 
         // 役満チェック
@@ -198,7 +206,7 @@ impl ScoringEngine {
         }
 
         // 対々和
-        if Self::check_toitoi(hand) {
+        if Self::check_toitoi(hand, winning_tile) {
             yaku.push(Yaku::Toitoi);
             han += 2;
         }
@@ -341,16 +349,49 @@ impl ScoringEngine {
     }
 
     // 対々和
-    fn check_toitoi(hand: &Hand) -> bool {
-        // 全ての面子が刻子
-        if hand.get_melds().len() + 4 != 4 {
+    fn check_toitoi(hand: &Hand, winning_tile: &Tile) -> bool {
+        // 全面子が刻子（または槓子）。副露があれば Chi が混じった瞬間に不成立。
+        // Issue #33: 旧実装は `melds.len() + 4 != 4`（実質 `melds.len() == 0`）で
+        // 副露ありトイトイを一律弾いていた。副露込みの 4 面子 1 雀頭で
+        // 全面子が刻子なら成立する。
+        if !hand.get_melds().iter().all(|meld| {
+            matches!(meld.meld_type, MeldType::Pon | MeldType::Kan)
+        }) {
             return false;
         }
+        // 残り手牌（雀頭 + 残りの刻子）を分解できるか確認
+        // 副露が N 個 → 残り手牌（+winning_tile を含めて） (4-N) 個の刻子 + 雀頭
+        Self::check_remaining_all_triplets(hand, winning_tile)
+    }
 
-        hand.get_melds().iter().all(|meld| match meld.meld_type {
-            MeldType::Pon | MeldType::Kan => true,
-            _ => false,
-        })
+    /// 副露を除く残り手牌に winning_tile を加えたものが、
+    /// `(4 - melds.len())` 個の刻子 + 雀頭 だけで構成できるかをチェックする。
+    fn check_remaining_all_triplets(hand: &Hand, winning_tile: &Tile) -> bool {
+        let mut tiles = hand.get_tiles().clone();
+        tiles.push(*winning_tile);
+        let melds_needed = 4 - hand.get_melds().len();
+        // 残り手牌（+ winning_tile）の枚数は (melds_needed * 3 + 2) であるはず
+        if tiles.len() != melds_needed * 3 + 2 {
+            return false;
+        }
+        let mut tile_map: HashMap<Tile, usize> = HashMap::new();
+        for t in &tiles {
+            *tile_map.entry(*t).or_insert(0) += 1;
+        }
+        // 雀頭候補を順に試す
+        let unique: Vec<Tile> = tile_map.keys().copied().collect();
+        for head in &unique {
+            if tile_map.get(head).copied().unwrap_or(0) < 2 {
+                continue;
+            }
+            let mut m = tile_map.clone();
+            *m.get_mut(head).unwrap() -= 2;
+            // 残りがすべて count == 3 / 0 ならトイトイ
+            if m.values().all(|&c| c == 0 || c == 3) {
+                return true;
+            }
+        }
+        false
     }
 
     // 三暗刻
