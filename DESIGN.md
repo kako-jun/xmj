@@ -303,12 +303,15 @@ Debug:        #1a1a1a             (terminal black)
 
 PR #21 時点では **API 提供レベル**まで。本番ゲームフローへの自動配線は follow-up Issue。
 
-| 機能       | 実装レベル                | follow-up                                  |
-| ---------- | ------------------------- | ------------------------------------------ |
-| 場代       | API + CLI 起動時 1 回供託 | 各局再徴収（局ループ未実装のため未対応）   |
-| 二度ヅモ   | API + CLI 即捨て UX       | 連荘フラグ `dealer_won_last` の自動更新    |
-| 役満祝儀   | API（ゼロサム保証）       | 役満和了→放銃者特定→自動授受の配線         |
-| pot 持ち越し | API（`winner_takes_pot` を呼ばなければ自然持ち越し） | 流局処理ロジック         |
+| 機能         | 実装レベル                                                       | follow-up                              |
+| ------------ | ---------------------------------------------------------------- | -------------------------------------- |
+| 局ループ     | **API 実装済** (`resolve_win` / `resolve_draw` / `next_round`)   | WASM bridge への公開と Web UI 連携     |
+| 場代         | API + `next_round` で各局自動再徴収 (Seikyo モード)              | UI 表示                                |
+| 二度ヅモ     | API + CLI 即捨て UX、`resolve_win` で `dealer_won_last` 自動更新 | （配線完了）                           |
+| 役満祝儀     | API（ゼロサム保証）                                              | 役満和了→放銃者特定→自動授受の配線     |
+| pot 持ち越し | API + `next_round` で連荘・流局時に保持                          | （配線完了）                           |
+| 本場         | API (`Game.honba`、和了で `HONBA_BONUS * honba` 加算)            | UI 表示                                |
+| 供託リーチ棒 | API (`Game.riichi_sticks`)、和了者が取得・流局で持ち越し         | リーチ宣言 → `riichi_sticks++` の配線  |
 
 #### API（`src/game.rs`）
 

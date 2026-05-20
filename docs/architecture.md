@@ -120,6 +120,12 @@ pub struct Game {
     pub round: u32,
     pub dealer: usize,
     pub last_discard: Option<Tile>,
+    pub length: Length,          // 東風戦 / 半荘戦
+    pub honba: u32,              // 本場
+    pub riichi_sticks: u32,      // 供託リーチ棒の本数
+    pub last_outcome: Option<RoundOutcome>,
+    pub game_over: bool,
+    // (mode / pot / dealer_won_last / team_progress / player_timers 等は省略)
 }
 ```
 
@@ -129,7 +135,8 @@ pub struct Game {
 - ツモ・打牌の管理
 - ターン制御
 - ロン判定
-- ゲーム終了判定
+- 局ループ (`resolve_win` / `resolve_draw` / `next_round`)
+- ゲーム終了判定 (`is_game_over`: 飛び / 規定局終了 / EastWest クリア)
 
 ### 5. Scoring Engine (`src/scoring.rs`)
 

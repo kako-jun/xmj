@@ -49,9 +49,7 @@ fn main() {
 
     let mut game = Game::new_with_mode(player_names, mode);
 
-    // 誠京麻雀: 局開始時に場代供託
-    // ※ 現状は局ループ未実装のためゲーム開始時に 1 回のみ。
-    //   局ごとの再徴収配線は follow-up Issue。
+    // 誠京麻雀: 局開始時に場代供託 (next_round 経由でも自動再徴収される)
     if game.mode == GameMode::Seikyo {
         game.collect_seat_fee(SEIKYO_SEAT_FEE);
         println!(
@@ -76,14 +74,29 @@ fn main() {
             break;
         }
 
+        // 山牌が尽きたら流局処理 → 次局へ。和了の認定 CLI 配線は未実装なので
+        // ここでは「全員ノーテン扱い」で流局し、ループを次の局に進める。
+        // 役の認定・ロン宣言の配線後にテンパイ判定を組み込む。
+        if game.wall.is_empty() {
+            println!("\n山牌切れ → 流局");
+            game.resolve_draw(Vec::new());
+            if !game.next_round() {
+                break;
+            }
+            println!(
+                "\n次局へ: {} 局 {} 本場 (dealer={})",
+                game.round, game.honba, game.dealer
+            );
+            println!("{}", game.get_game_state_string());
+            continue;
+        }
+
         let current_player = game.get_current_player();
         println!("\n{} のターン:", current_player.name);
 
         if current_player.id == 0 {
-            // プレイヤーのターン
             handle_player_turn(&mut game);
         } else {
-            // CPUのターン
             handle_cpu_turn(&mut game);
         }
 

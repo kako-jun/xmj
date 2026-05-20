@@ -74,6 +74,58 @@ pub fn east_west_target_yaku() -> [Yaku; 5] {
 pub const SEIKYO_SEAT_FEE: i32 = 1000;
 pub const SEIKYO_YAKUMAN_TIP: i32 = 8000;
 
+/// 本場あたりのボーナス点（和了者が受け取る／放銃者または全員が支払う）。
+///
+/// 分担:
+/// - **ロン**: 放銃者から `HONBA_BONUS * honba` を全額徴収
+/// - **ツモ**: 他家 3 人から `HONBA_BONUS * honba / 3` ずつ均等徴収
+///
+/// **ツモ時 3 等分で割り切れる前提のため、3 の倍数で固定**。
+/// 100 点単位への切り上げは `apply_payment` 内の `ceil_to_hundred` で吸収する
+/// （例: `300 / 3 = 100` のような端数の出ないケースに加え、和了点側の端数も含めて
+/// 各支払者の合計を 100 点単位に揃える）。
+pub const HONBA_BONUS: i32 = 300;
+
+/// 対局の長さ。東風戦 = 4 局、半荘戦 = 8 局。
+///
+/// `Default` は最も一般的な半荘戦 (`Hanchan`)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Length {
+    /// 東風戦（東 1 局〜東 4 局）
+    Tonpuusen,
+    /// 半荘戦（東 1 局〜南 4 局）
+    #[default]
+    Hanchan,
+}
+
+/// 和了の種類。
+#[derive(Debug, Clone, Copy)]
+pub enum WinKind {
+    /// 自摸和了
+    Tsumo,
+    /// ロン和了。`from` は放銃者の player_idx。
+    Ron { from: usize },
+}
+
+/// 1 局の結着結果。`Game::last_outcome` に保持し、UI 側はこれを読んで「和了画面」
+/// 「流局画面」を分岐する。`next_round` で None にクリアされる。
+#[derive(Debug, Clone)]
+pub enum RoundOutcome {
+    /// 和了で終了。
+    Win {
+        /// 和了者の座席 index
+        winner: usize,
+        /// ツモ or ロン
+        kind: WinKind,
+        /// `scoring::ScoringEngine::calculate_score` の結果
+        result: crate::scoring::ScoringResult,
+    },
+    /// 流局で終了。聴牌者の座席 index 一覧。
+    Draw {
+        tenpai_players: Vec<usize>,
+    },
+}
+
 /// 闇麻の固定額
 pub const YAMIMA_HIDDEN_COST: i32 = 1000;
 pub const YAMIMA_LIGHT_UP_COST: i32 = 500;
@@ -102,11 +154,21 @@ pub struct Game {
     pub pot: i32,
     /// 前局で親が和了したか（= 連荘フラグ。二度ヅモ判定に使う）。
     ///
-    /// **注意**: 現状の xmj には「局終了→次局」のループ実装が無いため、
-    /// このフラグを更新する本番コードはまだ存在しない。
-    /// 外部から win-resolve 時に手動で更新するフラグとして API のみ提供している。
-    /// 完全な連荘配線は follow-up Issue で対応予定。
+    /// `resolve_win` / `resolve_draw` で自動的に更新される（親和了・親テンパイで true、
+    /// それ以外で false）。`next_round` 内で連荘判定（dealer 据え置き + honba +1）に
+    /// 使われる。
     pub dealer_won_last: bool,
+    /// 対局の長さ（東風戦 / 半荘戦）。is_game_over の判定に使う。
+    pub length: Length,
+    /// 本場（連荘・流局でインクリメントされる）。和了者に `HONBA_BONUS * honba` が乗る。
+    pub honba: u32,
+    /// 供託リーチ棒の本数。`riichi_sticks * 1000` 点が次の和了者に渡る。
+    /// 流局では持ち越し。
+    pub riichi_sticks: u32,
+    /// 直前局の結果。UI 側で読み、`next_round` で None にクリアされる。
+    pub last_outcome: Option<RoundOutcome>,
+    /// 対局終了フラグ。`next_round` が false を返したときに true になる。
+    pub game_over: bool,
     /// 東西戦（クリア麻雀）のチーム別役クリア進捗。
     ///
     /// `GameMode::EastWest` のときのみ実質的に使用する。
@@ -127,8 +189,17 @@ impl Game {
         Self::new_with_mode(player_names, GameMode::Standard)
     }
 
-    /// モードを指定してゲームを構築
+    /// モードを指定してゲームを構築（長さは半荘デフォルト）
     pub fn new_with_mode(player_names: Vec<String>, mode: GameMode) -> Self {
+        Self::new_with_mode_and_length(player_names, mode, Length::Hanchan)
+    }
+
+    /// モードと長さを指定してゲームを構築
+    pub fn new_with_mode_and_length(
+        player_names: Vec<String>,
+        mode: GameMode,
+        length: Length,
+    ) -> Self {
         assert!(player_names.len() == 4, "Mahjong requires exactly 4 players");
 
         let players: Vec<Player> = player_names
@@ -163,6 +234,11 @@ impl Game {
             mode,
             pot: 0,
             dealer_won_last: false,
+            length,
+            honba: 0,
+            riichi_sticks: 0,
+            last_outcome: None,
+            game_over: false,
             team_progress,
             player_timers,
         };
@@ -180,9 +256,10 @@ impl Game {
     ///   テストや特殊バリアントで上書きできるよう引数化している。
     ///
     /// # 仕様メモ
-    /// 本来は「**各局開始時**」に呼ぶべきだが、現状の xmj には局ループが無く、
-    /// `main.rs` ではゲーム起動時に 1 回だけ呼ぶ simplified version になっている。
-    /// 局ごとの再徴収配線は follow-up。複数回呼べば素直に pot が累積する設計。
+    /// 「**各局開始時**」に呼ばれる想定。`Game::next_round` 内で Seikyo モードのときに
+    /// 自動的に呼ばれる（次局突入のたびに 4 人 × `SEIKYO_SEAT_FEE` が pot に積まれる）。
+    /// 初局ぶんはコンストラクタ後に呼び出し側が一度呼ぶこと。
+    /// 複数回呼べば素直に pot が累積する設計（流局持ち越しと同じ挙動）。
     pub fn collect_seat_fee(&mut self, amount: i32) {
         if self.mode != GameMode::Seikyo {
             return;
@@ -879,11 +956,276 @@ impl Game {
         realtime::resolve_calls(calls)
     }
 
+    /// 対局終了判定。
+    ///
+    /// 以下のいずれかで true:
+    /// - `game_over` フラグが立っている（`next_round` が終了したと判断したケース）
+    /// - 東西戦でいずれかチームが 5 役クリア
+    /// - 飛び: いずれかのプレイヤーのスコアが 0 未満
+    ///   （`Player::subtract_score` は 0 でクランプするが、`pay_yakuman_tip` /
+    ///   `pay_unclamped`（`resolve_win` / `resolve_draw` の徴収経路）はクランプを
+    ///   回避するため負値になりうる。ここはそれを検知する）
+    /// - Tonpuusen で round > 4 かつ親流れ
+    /// - Hanchan で round > 8 かつ親流れ
+    ///
+    /// 「親流れ」とは `dealer_won_last == false` のこと。連荘中（true）は最終局を
+    /// 超えても続行する（オーラス連荘）。
     pub fn is_game_over(&self) -> bool {
+        if self.game_over {
+            return true;
+        }
         if self.mode == GameMode::EastWest && self.east_west_winner().is_some() {
             return true;
         }
-        self.wall.is_empty() || self.players.iter().any(|p| p.score <= 0)
+        if self.players.iter().any(|p| p.score < 0) {
+            return true;
+        }
+        let last_round = match self.length {
+            Length::Tonpuusen => 4,
+            Length::Hanchan => 8,
+        };
+        if self.round > last_round && !self.dealer_won_last {
+            return true;
+        }
+        false
+    }
+
+    /// 和了の点数移動を実行する内部ヘルパー。
+    ///
+    /// `kind` / `is_dealer` から徴収先と分担額を決め、徴収マップを作って
+    /// 一括で `pay_unclamped` で引く。winner には徴収額の合計を `add_score` で渡す。
+    ///
+    /// 仕様:
+    /// - **ロン**: 放銃者から `total + honba_bonus` を一括徴収（本場全額放銃者持ち）
+    /// - **親ツモ**: 子全員から `total / 3` ずつ + 本場 `honba_bonus / 3` ずつ
+    /// - **子ツモ**: 親から `total / 2` + 他子 2 人から `total / 4` ずつ、本場は他家
+    ///   全員から `honba_bonus / 3` ずつ均等
+    ///
+    /// **本場の二重加算は起きない**: 徴収マップを集計して winner に一度だけ add する。
+    /// 戻り値は winner が受け取る合計点数（徴収マップの値の和）。
+    fn apply_payment(
+        &mut self,
+        winner: usize,
+        kind: WinKind,
+        total_points: i32,
+        honba_bonus: i32,
+        is_dealer: bool,
+    ) -> i32 {
+        // 100 点単位切り上げ（伝統的な麻雀の点数計算ルール）。
+        // 各支払者の負担額を 100 点単位に切り上げ、winner は実測合計を受領する
+        // （元の `total_points` ではなく切り上げ後の合計 = ゼロサム保持）。
+        fn ceil_to_hundred(n: i32) -> i32 {
+            if n <= 0 {
+                return n;
+            }
+            ((n + 99) / 100) * 100
+        }
+
+        // 徴収マップ: player_idx → 徴収額（正値、100 点単位切り上げ済み）
+        let mut payments: Vec<(usize, i32)> = Vec::new();
+
+        match kind {
+            WinKind::Ron { from } => {
+                if from < self.players.len() && from != winner {
+                    let raw = total_points + honba_bonus;
+                    payments.push((from, ceil_to_hundred(raw)));
+                }
+            }
+            WinKind::Tsumo => {
+                let honba_per_raw = if honba_bonus > 0 { honba_bonus / 3 } else { 0 };
+                if is_dealer {
+                    // 親ツモ: 子 3 人から total/3 ずつ（100 点単位切り上げ）
+                    let per_raw = total_points / 3;
+                    for i in 0..self.players.len() {
+                        if i != winner {
+                            payments.push((i, ceil_to_hundred(per_raw + honba_per_raw)));
+                        }
+                    }
+                } else {
+                    // 子ツモ: 親から total/2、他子 2 人から total/4 ずつ（各 100 点単位切り上げ）
+                    let dealer_pay_raw = total_points / 2;
+                    let ko_pay_raw = total_points / 4;
+                    for i in 0..self.players.len() {
+                        if i == winner {
+                            continue;
+                        }
+                        let base = if i == self.dealer { dealer_pay_raw } else { ko_pay_raw };
+                        payments.push((i, ceil_to_hundred(base + honba_per_raw)));
+                    }
+                }
+            }
+        }
+
+        // 徴収を実行
+        let mut total_received = 0i32;
+        for (idx, amount) in &payments {
+            self.players[*idx].pay_unclamped(*amount);
+            total_received += *amount;
+        }
+        // winner に合計を渡す（本場ボーナス含む。重複加算しない）
+        self.players[winner].add_score(total_received);
+        total_received
+    }
+
+    /// 1 局の和了を確定させ、点数を移動して連荘フラグを更新する。
+    ///
+    /// - `ScoringResult.total_points`（親なら満貫=12000、子なら満貫=8000 等の合計値）と
+    ///   本場ボーナス（`HONBA_BONUS * honba`）を `apply_payment` で適切に分担徴収する
+    /// - 供託リーチ棒（`1000 * riichi_sticks`）を winner に渡す
+    /// - 誠京 pot を winner に渡す（`winner_takes_pot`）
+    /// - 親和了なら `dealer_won_last = true`（連荘）、子和了なら false（親流れ）
+    /// - `last_outcome` に Win を記録、供託リーチ棒は 0 にリセット
+    ///
+    /// **役満ご祝儀は本関数では扱わない**（follow-up）。誠京モードの
+    /// `SEIKYO_YAKUMAN_TIP` 配線（`pay_yakuman_tip` / `receive_yakuman_tip`）は別タスク。
+    pub fn resolve_win(
+        &mut self,
+        winner: usize,
+        kind: WinKind,
+        result: crate::scoring::ScoringResult,
+    ) {
+        if winner >= self.players.len() {
+            return;
+        }
+
+        let total = result.total_points as i32;
+        let honba_bonus = HONBA_BONUS * self.honba as i32;
+        let riichi_bonus = 1000 * self.riichi_sticks as i32;
+        let is_dealer_win = winner == self.dealer;
+
+        // 点数移動（本場ボーナス込みで一括）
+        self.apply_payment(winner, kind, total, honba_bonus, is_dealer_win);
+
+        // 供託リーチ棒を winner に渡す
+        if riichi_bonus > 0 {
+            self.players[winner].add_score(riichi_bonus);
+            self.riichi_sticks = 0;
+        }
+
+        // 誠京モード: pot を winner に渡す
+        self.winner_takes_pot(winner);
+
+        // 連荘フラグ更新
+        self.dealer_won_last = is_dealer_win;
+
+        // 結果を保持
+        self.last_outcome = Some(RoundOutcome::Win {
+            winner,
+            kind,
+            result,
+        });
+    }
+
+    /// 流局（山牌 0 で誰も和了せず）を確定させ、聴牌料を計算する。
+    ///
+    /// 聴牌料テーブル（合計 ±3000 点の伝統ルール）:
+    /// - 0 / 4 テンパイ: 移動なし
+    /// - 1 テンパイ: テンパイ +3000、各ノーテン -1000
+    /// - 2 テンパイ: 各テンパイ +1500、各ノーテン -1500
+    /// - 3 テンパイ: 各テンパイ +1000、ノーテン -3000
+    ///
+    /// - 親テンパイ → `dealer_won_last = true`（連荘）
+    /// - 親ノーテン → `dealer_won_last = false`（親流れ）
+    /// - 供託リーチ棒は持ち越し（誰も取らない）
+    /// - `last_outcome` に Draw を記録
+    pub fn resolve_draw(&mut self, tenpai_players: Vec<usize>) {
+        let tenpai_count = tenpai_players.len();
+        let dealer_tenpai = tenpai_players.contains(&self.dealer);
+
+        let (per_tenpai, per_noten): (i32, i32) = match tenpai_count {
+            1 => (3000, -1000),
+            2 => (1500, -1500),
+            3 => (1000, -3000),
+            _ => (0, 0),
+        };
+
+        if per_tenpai != 0 {
+            for i in 0..self.players.len() {
+                if tenpai_players.contains(&i) {
+                    self.players[i].add_score(per_tenpai);
+                } else {
+                    // per_noten は負の値。pay_unclamped で 0 クランプせず徴収
+                    // （飛び検知のためゼロサム維持が必要）
+                    self.players[i].pay_unclamped(-per_noten);
+                }
+            }
+        }
+
+        // 連荘フラグ更新（親テンパイで連荘）
+        self.dealer_won_last = dealer_tenpai;
+
+        self.last_outcome = Some(RoundOutcome::Draw { tenpai_players });
+    }
+
+    /// 次の局へ進む。`resolve_win` / `resolve_draw` 直後に呼ぶ。
+    ///
+    /// - 連荘 (`dealer_won_last == true`): dealer・round 据え置き、honba += 1
+    /// - 親流れ: dealer = (dealer + 1) % 4、round += 1、honba = 0
+    /// - 山牌・手牌・河・ドラ表示牌をリセット（`initialize_wall` + `deal_initial_tiles` 再呼出）
+    /// - 局スコープ状態（リーチ・一発・ダブル立直）も `Player::reset_for_next_round` で初期化
+    /// - 誠京モードなら場代を再徴収（`collect_seat_fee(SEIKYO_SEAT_FEE)`）
+    /// - **ゲーム継続時のみ** `last_outcome` を None にクリアする。
+    ///   ゲーム終了時（`is_game_over() == true`）は UI が直前局の結果を読み続けられるよう
+    ///   `last_outcome` を保持したまま `game_over` フラグだけ立てて return する。
+    /// - 戻り値: true = 続行、false = 対局終了（`game_over` フラグも立てる）
+    pub fn next_round(&mut self) -> bool {
+        // 終了判定（is_game_over は self を変更しないので先に呼べる）
+        // ゲーム終了時は last_outcome を保持（UI が直前局の結果を読むため）
+        if self.is_game_over() {
+            self.game_over = true;
+            return false;
+        }
+
+        if self.dealer_won_last {
+            // 連荘: dealer 据え置き、honba +1
+            self.honba += 1;
+        } else {
+            // 親流れ
+            self.dealer = (self.dealer + 1) % 4;
+            self.round += 1;
+            self.honba = 0;
+            // is_dealer フラグを書き直す
+            for (i, p) in self.players.iter_mut().enumerate() {
+                p.is_dealer = i == self.dealer;
+            }
+        }
+
+        // 終了判定（round 進行後に再チェック）
+        // ここでも last_outcome は保持したまま return（オーラス確定で UI が結果画面表示中）
+        if self.is_game_over() {
+            self.game_over = true;
+            // 表示用に round を最終局にクランプ（UI は round をそのまま表示できる）
+            let max_round = match self.length {
+                Length::Tonpuusen => 4,
+                Length::Hanchan => 8,
+            };
+            if self.round > max_round {
+                self.round = max_round;
+            }
+            return false;
+        }
+
+        // 局スコープ状態を一括リセット（手牌・河・リーチ・一発等）
+        for p in self.players.iter_mut() {
+            p.reset_for_next_round();
+        }
+        self.dora_indicators.clear();
+        self.current_player = self.dealer;
+        self.last_discard = None;
+        self.last_discard_hidden = false;
+        // ゲーム継続が確定したのでここで初めて last_outcome をクリア
+        self.last_outcome = None;
+
+        // 山牌再構築 + 配牌
+        self.initialize_wall();
+        self.deal_initial_tiles();
+
+        // 誠京: 場代再徴収
+        if self.mode == GameMode::Seikyo {
+            self.collect_seat_fee(SEIKYO_SEAT_FEE);
+        }
+
+        true
     }
 
     pub fn get_wall_count(&self) -> usize {
@@ -1755,5 +2097,519 @@ mod tests {
             resolve_calls(&same),
         );
         assert_eq!(game.resolve_pending_calls(&same).unwrap().player_idx, 2);
+    }
+
+    // ========================================
+    // 局終了→次局ループ（round-loop）テスト
+    // ========================================
+
+    use crate::scoring::ScoringResult;
+
+    fn round_loop_names() -> Vec<String> {
+        vec![
+            "P1".to_string(),
+            "P2".to_string(),
+            "P3".to_string(),
+            "P4".to_string(),
+        ]
+    }
+
+    fn dummy_result(total: u32) -> ScoringResult {
+        ScoringResult {
+            han: 1,
+            fu: 30,
+            yaku: Vec::new(),
+            base_points: 0,
+            total_points: total,
+        }
+    }
+
+    /// 親和了 → 連荘: dealer 据え置き、round 据え置き、honba +1
+    #[test]
+    fn test_renchan_keeps_dealer_and_increments_honba() {
+        let mut game = Game::new(round_loop_names());
+        let dealer_before = game.dealer;
+        let round_before = game.round;
+        let honba_before = game.honba;
+
+        game.resolve_win(dealer_before, WinKind::Tsumo, dummy_result(8000));
+        assert!(game.dealer_won_last, "親和了で連荘フラグ true");
+
+        assert!(game.next_round(), "対局はまだ続く");
+        assert_eq!(game.dealer, dealer_before, "連荘で dealer 据え置き");
+        assert_eq!(game.round, round_before, "連荘で round 据え置き");
+        assert_eq!(game.honba, honba_before + 1, "連荘で honba +1");
+    }
+
+    /// 子和了 → 親流れ: dealer +1、round +1、honba = 0
+    #[test]
+    fn test_dealer_rotation_advances_round_and_resets_honba() {
+        let mut game = Game::new(round_loop_names());
+        let dealer_before = game.dealer;
+        let round_before = game.round;
+        game.honba = 3;
+
+        // 子（dealer ではない座席）が和了
+        let non_dealer = (dealer_before + 1) % 4;
+        game.resolve_win(non_dealer, WinKind::Tsumo, dummy_result(4000));
+        assert!(!game.dealer_won_last, "子和了で連荘フラグ false");
+
+        assert!(game.next_round());
+        assert_eq!(game.dealer, (dealer_before + 1) % 4, "dealer +1");
+        assert_eq!(game.round, round_before + 1, "round +1");
+        assert_eq!(game.honba, 0, "親流れで honba リセット");
+        // is_dealer フラグの整合性
+        for (i, p) in game.players.iter().enumerate() {
+            assert_eq!(p.is_dealer, i == game.dealer);
+        }
+    }
+
+    /// 流局かつ親テンパイ → 連荘
+    #[test]
+    fn test_draw_with_dealer_tenpai_is_renchan() {
+        let mut game = Game::new(round_loop_names());
+        let dealer_before = game.dealer;
+        let round_before = game.round;
+
+        // 親だけテンパイ
+        game.resolve_draw(vec![dealer_before]);
+        assert!(game.dealer_won_last);
+
+        assert!(game.next_round());
+        assert_eq!(game.dealer, dealer_before);
+        assert_eq!(game.round, round_before);
+        assert_eq!(game.honba, 1);
+    }
+
+    /// 流局かつ親ノーテン → 親流れ
+    #[test]
+    fn test_draw_with_dealer_noten_rotates_dealer() {
+        let mut game = Game::new(round_loop_names());
+        let dealer_before = game.dealer;
+        let round_before = game.round;
+
+        // 子だけテンパイ
+        game.resolve_draw(vec![(dealer_before + 1) % 4]);
+        assert!(!game.dealer_won_last);
+
+        assert!(game.next_round());
+        assert_eq!(game.dealer, (dealer_before + 1) % 4);
+        assert_eq!(game.round, round_before + 1);
+    }
+
+    /// 飛び（誰かのスコアが負）で対局終了
+    #[test]
+    fn test_tobi_triggers_game_over() {
+        let mut game = Game::new(round_loop_names());
+        // subtract_score は 0 でクランプするので直接代入で負値にする
+        game.players[2].score = -100;
+
+        assert!(game.is_game_over(), "負スコアで game over");
+        assert!(!game.next_round(), "next_round は false を返す");
+        assert!(game.game_over, "game_over フラグが立つ");
+    }
+
+    /// 東風戦: 東 4 局で親流れ → 対局終了
+    #[test]
+    fn test_tonpuusen_ends_at_east4_when_dealer_not_renchan() {
+        let mut game = Game::new_with_mode_and_length(
+            round_loop_names(),
+            GameMode::Standard,
+            Length::Tonpuusen,
+        );
+        // round=4 から始めて、子が和了 → 親流れ → round=5、終了
+        game.round = 4;
+        let dealer_before = game.dealer;
+        let non_dealer = (dealer_before + 1) % 4;
+        game.resolve_win(non_dealer, WinKind::Tsumo, dummy_result(4000));
+
+        assert!(!game.next_round(), "東 4 局親流れで終了");
+        assert!(game.game_over);
+    }
+
+    /// 半荘戦: 南 4 局（round=8）で親流れ → 対局終了
+    #[test]
+    fn test_hanchan_ends_at_south4_when_dealer_not_renchan() {
+        let mut game = Game::new_with_mode_and_length(
+            round_loop_names(),
+            GameMode::Standard,
+            Length::Hanchan,
+        );
+        game.round = 8;
+        let dealer_before = game.dealer;
+        let non_dealer = (dealer_before + 1) % 4;
+        game.resolve_win(non_dealer, WinKind::Tsumo, dummy_result(4000));
+
+        assert!(!game.next_round(), "南 4 局親流れで終了");
+        assert!(game.game_over);
+    }
+
+    /// 流局 2 テンパイ 2 ノーテン → 各 ±1500
+    #[test]
+    fn test_tenpai_payments_2_2() {
+        let mut game = Game::new(round_loop_names());
+        let scores_before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+
+        // 0, 1 がテンパイ、2, 3 がノーテン
+        game.resolve_draw(vec![0, 1]);
+
+        assert_eq!(game.players[0].score, scores_before[0] + 1500);
+        assert_eq!(game.players[1].score, scores_before[1] + 1500);
+        assert_eq!(game.players[2].score, scores_before[2] - 1500);
+        assert_eq!(game.players[3].score, scores_before[3] - 1500);
+    }
+
+    /// 1 本場で和了 → 和了者に +300 追加で乗る
+    #[test]
+    fn test_honba_bonus_added_to_win() {
+        let mut game = Game::new(round_loop_names());
+        game.honba = 1;
+        let winner = game.dealer;
+        let winner_before = game.players[winner].score;
+        // ロン: 放銃者を winner と別にする
+        let from = (winner + 1) % 4;
+
+        game.resolve_win(winner, WinKind::Ron { from }, dummy_result(8000));
+
+        // winner: total_points (8000) + honba_bonus (300) を受け取る
+        assert_eq!(
+            game.players[winner].score,
+            winner_before + 8000 + 300,
+            "和了点 8000 + 本場ボーナス 300 = +8300"
+        );
+    }
+
+    /// 供託リーチ棒は和了者に渡る
+    #[test]
+    fn test_riichi_sticks_go_to_winner() {
+        let mut game = Game::new(round_loop_names());
+        game.riichi_sticks = 2; // 2000 点ぶん
+        let winner = 1;
+        let winner_before = game.players[winner].score;
+        let from = (winner + 1) % 4;
+
+        game.resolve_win(winner, WinKind::Ron { from }, dummy_result(1000));
+
+        // winner: 1000 (total) + 2000 (riichi_sticks)
+        assert_eq!(game.players[winner].score, winner_before + 1000 + 2000);
+        assert_eq!(game.riichi_sticks, 0, "供託は和了者が回収してリセット");
+    }
+
+    // ========================================
+    // セルフレビュー指摘修正に伴う追加テスト (T1-T6)
+    // ========================================
+
+    /// ゼロサム保証ヘルパー: 局前後で
+    /// 全プレイヤースコア + riichi_sticks*1000 + pot が一致する
+    fn assert_score_conservation(before: &Game, after: &Game) {
+        let total_before: i64 = before.players.iter().map(|p| p.score as i64).sum::<i64>()
+            + (before.riichi_sticks as i64) * 1000
+            + before.pot as i64;
+        let total_after: i64 = after.players.iter().map(|p| p.score as i64).sum::<i64>()
+            + (after.riichi_sticks as i64) * 1000
+            + after.pot as i64;
+        assert_eq!(
+            total_before, total_after,
+            "ゼロサム違反: before={total_before}, after={total_after}"
+        );
+    }
+
+    /// T1. 親ツモ満貫: 子全員から 4000 ずつ徴収、親 +12000
+    #[test]
+    fn test_dealer_tsumo_splits_among_three_ko() {
+        let mut game = Game::new(round_loop_names());
+        let before = game.clone();
+        let dealer = game.dealer; // 0
+        let scores_before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+
+        // 親満貫ツモ total=12000
+        game.resolve_win(dealer, WinKind::Tsumo, dummy_result(12000));
+
+        // 親 +12000
+        assert_eq!(
+            game.players[dealer].score,
+            scores_before[dealer] + 12000,
+            "親は +12000 受領"
+        );
+        // 子 3 人は -4000
+        for i in 0..4 {
+            if i == dealer {
+                continue;
+            }
+            assert_eq!(
+                game.players[i].score,
+                scores_before[i] - 4000,
+                "子 {i} は -4000"
+            );
+        }
+        assert_score_conservation(&before, &game);
+    }
+
+    /// T2. 子ツモ満貫: 親から 4000、他子 2 人から 2000 ずつ
+    #[test]
+    fn test_ko_tsumo_splits_dealer_half_ko_quarter() {
+        let mut game = Game::new(round_loop_names());
+        let before = game.clone();
+        let dealer = game.dealer; // 0
+        let winner = 1; // 子
+        let scores_before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+
+        // 子満貫ツモ total=8000
+        game.resolve_win(winner, WinKind::Tsumo, dummy_result(8000));
+
+        // 子（winner）+8000
+        assert_eq!(
+            game.players[winner].score,
+            scores_before[winner] + 8000,
+            "子 winner は +8000 受領"
+        );
+        // 親 -4000
+        assert_eq!(
+            game.players[dealer].score,
+            scores_before[dealer] - 4000,
+            "親は -4000"
+        );
+        // 他の子 (idx=2,3) -2000
+        for i in [2, 3] {
+            assert_eq!(
+                game.players[i].score,
+                scores_before[i] - 2000,
+                "他子 {i} は -2000"
+            );
+        }
+        assert_score_conservation(&before, &game);
+    }
+
+    /// T3. 流局のゼロサム保証
+    #[test]
+    fn test_draw_payment_conserves_score() {
+        let mut game = Game::new(round_loop_names());
+        let before = game.clone();
+
+        game.resolve_draw(vec![0, 1]);
+        assert_score_conservation(&before, &game);
+    }
+
+    /// T3. ロン和了のゼロサム保証（本場・リーチ棒含む）
+    #[test]
+    fn test_ron_payment_conserves_score_with_honba_and_riichi() {
+        let mut game = Game::new(round_loop_names());
+        game.honba = 2;
+        game.riichi_sticks = 1;
+        let before = game.clone();
+
+        let winner = 0;
+        let from = 2;
+        game.resolve_win(winner, WinKind::Ron { from }, dummy_result(8000));
+        assert_score_conservation(&before, &game);
+    }
+
+    /// T4. 飛び発火（実フロー）: 100 点プレイヤーが満貫ロン放銃 → game over
+    #[test]
+    fn test_tobi_via_real_payment_flow() {
+        let mut game = Game::new(round_loop_names());
+        // 放銃者の点数を 100 に絞る（pay_unclamped 経由で負スコアになるはず）
+        game.players[2].score = 100;
+
+        let winner = 0;
+        let from = 2;
+        // 満貫ロン 8000 → 100 - 8000 = -7900
+        game.resolve_win(winner, WinKind::Ron { from }, dummy_result(8000));
+
+        assert!(
+            game.players[2].score < 0,
+            "pay_unclamped 経由なので負スコアになる: actual={}",
+            game.players[2].score
+        );
+        assert!(game.is_game_over(), "負スコア検知で game over");
+    }
+
+    /// T5. 本場 3 のロンで二重加算が起きない
+    #[test]
+    fn test_honba_no_double_count_on_ron() {
+        let mut game = Game::new(round_loop_names());
+        game.honba = 3; // 本場ボーナス = 300*3 = 900
+        let winner = 1;
+        let from = 2;
+        let winner_before = game.players[winner].score;
+        let from_before = game.players[from].score;
+
+        // total=8000, honba_bonus=900
+        game.resolve_win(winner, WinKind::Ron { from }, dummy_result(8000));
+
+        assert_eq!(
+            game.players[winner].score,
+            winner_before + 8000 + 900,
+            "winner +8900 (本場の二重加算なし)"
+        );
+        assert_eq!(
+            game.players[from].score,
+            from_before - 8000 - 900,
+            "放銃者 -8900 (一括徴収)"
+        );
+    }
+
+    /// T6. 局スコープ状態（リーチ・一発等）が next_round でリセットされる
+    #[test]
+    fn test_local_state_resets_on_next_round() {
+        let mut game = Game::new(round_loop_names());
+        // 局 1: player[0] にリーチ系フラグを立てる
+        game.players[0].is_riichi = true;
+        game.players[0].riichi_turn = Some(5);
+        game.players[0].ippatsu = true;
+        game.players[0].double_riichi = true;
+
+        // 流局 → 親流れ
+        let dealer = game.dealer;
+        let non_dealer = (dealer + 1) % 4;
+        game.resolve_draw(vec![non_dealer]);
+        assert!(game.next_round());
+
+        // 局 2: 全フラグがリセットされている
+        assert!(!game.players[0].is_riichi, "is_riichi リセット");
+        assert_eq!(game.players[0].riichi_turn, None, "riichi_turn リセット");
+        assert!(!game.players[0].ippatsu, "ippatsu リセット");
+        assert!(!game.players[0].double_riichi, "double_riichi リセット");
+    }
+
+    /// M4. ゲーム終了時に last_outcome が保持される
+    #[test]
+    fn test_last_outcome_preserved_on_game_over() {
+        let mut game = Game::new_with_mode_and_length(
+            round_loop_names(),
+            GameMode::Standard,
+            Length::Tonpuusen,
+        );
+        game.round = 4;
+        let dealer = game.dealer;
+        let non_dealer = (dealer + 1) % 4;
+        // 子和了 → 親流れ → 東4局終了
+        game.resolve_win(non_dealer, WinKind::Tsumo, dummy_result(4000));
+        assert!(game.last_outcome.is_some(), "resolve_win 直後は当然ある");
+
+        assert!(!game.next_round(), "東 4 局親流れで終了");
+        assert!(game.game_over);
+        assert!(
+            game.last_outcome.is_some(),
+            "ゲーム終了時は last_outcome が保持される（UI が結果画面を表示するため）"
+        );
+    }
+
+    /// Length::default は Hanchan
+    #[test]
+    fn test_length_default_is_hanchan() {
+        assert_eq!(Length::default(), Length::Hanchan);
+    }
+
+    /// S1. 100 点単位切り上げ
+    /// - 7700 点子ロン: 放銃者 -7700、winner +7700（100 単位なので変化なし）
+    /// - 7700 点親ツモ: 各子 7700/3 = 2566 → 切り上げ 2600 → winner +2600*3 = +7800
+    #[test]
+    fn test_apply_payment_ceils_to_hundred() {
+        // ケース 1: 7700 点子ロン
+        let mut game = Game::new(round_loop_names());
+        let winner = 1; // 子
+        let from = 2;
+        let winner_before = game.players[winner].score;
+        let from_before = game.players[from].score;
+        game.resolve_win(winner, WinKind::Ron { from }, dummy_result(7700));
+        assert_eq!(
+            game.players[from].score,
+            from_before - 7700,
+            "放銃者 -7700（既に 100 単位なので変化なし）"
+        );
+        assert_eq!(
+            game.players[winner].score,
+            winner_before + 7700,
+            "winner +7700"
+        );
+
+        // ケース 2: 7700 点親ツモ
+        let mut game = Game::new(round_loop_names());
+        let dealer = game.dealer;
+        let scores_before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+        game.resolve_win(dealer, WinKind::Tsumo, dummy_result(7700));
+        // 子 3 人それぞれ 2600 ずつ徴収（7700/3 = 2566 → 切り上げ 2600）
+        for i in 0..4 {
+            if i == dealer {
+                continue;
+            }
+            assert_eq!(
+                game.players[i].score,
+                scores_before[i] - 2600,
+                "子 {i} は 2600 徴収（切り上げ）"
+            );
+        }
+        // winner は 2600 × 3 = 7800 受領
+        assert_eq!(
+            game.players[dealer].score,
+            scores_before[dealer] + 7800,
+            "親は実測合計 +7800 受領"
+        );
+    }
+
+    /// S1. ゼロサム保持: 7700 親ツモ、5200 子ツモ、5200 子ロンの各 odd ケース
+    #[test]
+    fn test_score_conservation_on_odd_point_values() {
+        // 7700 親ツモ
+        let mut game = Game::new(round_loop_names());
+        let before = game.clone();
+        let dealer = game.dealer;
+        game.resolve_win(dealer, WinKind::Tsumo, dummy_result(7700));
+        assert_score_conservation(&before, &game);
+
+        // 5200 子ツモ（5200/2=2600, 5200/4=1300）
+        let mut game = Game::new(round_loop_names());
+        let before = game.clone();
+        game.resolve_win(1, WinKind::Tsumo, dummy_result(5200));
+        assert_score_conservation(&before, &game);
+
+        // 5200 子ロン
+        let mut game = Game::new(round_loop_names());
+        let before = game.clone();
+        game.resolve_win(1, WinKind::Ron { from: 2 }, dummy_result(5200));
+        assert_score_conservation(&before, &game);
+
+        // 本場 1 込みの 7700 親ツモ（本場 100/3 → 切り上げ 100）
+        let mut game = Game::new(round_loop_names());
+        game.honba = 1;
+        let before = game.clone();
+        let dealer = game.dealer;
+        game.resolve_win(dealer, WinKind::Tsumo, dummy_result(7700));
+        assert_score_conservation(&before, &game);
+    }
+
+    /// N2. ゲーム終了時に round が最終局を越えない（表示用クランプ）
+    #[test]
+    fn test_round_clamped_to_last_round_on_game_over_tonpuusen() {
+        let mut game = Game::new_with_mode_and_length(
+            round_loop_names(),
+            GameMode::Standard,
+            Length::Tonpuusen,
+        );
+        game.round = 4;
+        let dealer = game.dealer;
+        let non_dealer = (dealer + 1) % 4;
+        game.resolve_win(non_dealer, WinKind::Tsumo, dummy_result(4000));
+        assert!(!game.next_round(), "東 4 局親流れで終了");
+        assert!(game.game_over);
+        assert_eq!(game.round, 4, "round は最終局 4 にクランプされる（5 ではない）");
+    }
+
+    /// N2. 半荘戦でも同様にクランプされる
+    #[test]
+    fn test_round_clamped_to_last_round_on_game_over_hanchan() {
+        let mut game = Game::new_with_mode_and_length(
+            round_loop_names(),
+            GameMode::Standard,
+            Length::Hanchan,
+        );
+        game.round = 8;
+        let dealer = game.dealer;
+        let non_dealer = (dealer + 1) % 4;
+        game.resolve_win(non_dealer, WinKind::Tsumo, dummy_result(4000));
+        assert!(!game.next_round(), "南 4 局親流れで終了");
+        assert!(game.game_over);
+        assert_eq!(game.round, 8, "round は最終局 8 にクランプされる（9 ではない）");
     }
 }
