@@ -71,15 +71,37 @@
         overflow: hidden;
         position: relative;
       }
+      /*
+       * Pixi canvas を **常に正方形**に保つには width / height の片方だけ "auto" にし、
+       * 残りを 100% にして aspect-ratio で他方を導出させる必要がある (両方 100% だと
+       * aspect-ratio が無視されてしまう)。
+       *   - 横長 PC: height=100% でコンテナ高さ (例 720px) に揃え、width=auto + aspect で
+       *     720px に。max-width:100% で親より広くならない
+       *   - 縦長スマホ: width=100% でコンテナ幅 (例 400px) に揃え、height=auto + aspect で
+       *     400px に。max-height:100% で親より高くならない
+       *
+       * orientation メディアクエリで挙動を切り替えると、両軸を「より小さい方に合わせる」
+       * 効果が得られる。
+       */
       #game {
         aspect-ratio: 1 / 1;
-        width: 100%;
-        height: 100%;
         max-width: 100%;
         max-height: 100%;
         display: flex;
         align-items: center;
         justify-content: center;
+      }
+      @media (orientation: landscape), (min-aspect-ratio: 1 / 1) {
+        #game {
+          height: 100%;
+          width: auto;
+        }
+      }
+      @media (orientation: portrait), (max-aspect-ratio: 1 / 1) {
+        #game {
+          width: 100%;
+          height: auto;
+        }
       }
       #game canvas {
         display: block;
