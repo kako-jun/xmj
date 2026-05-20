@@ -70,6 +70,7 @@ impl ScoringEngine {
     pub fn calculate_score(hand: &Hand, winning_tile: &Tile, is_tsumo: bool, is_dealer: bool) -> Option<ScoringResult> {
         let mut yaku = Vec::new();
         let mut han = 0;
+        // TODO: 暗カン (Meld where !is_open) は門前扱いが正解。立直・平和・ツモ・一盃口・二盃口・九蓮宝燈の判定に影響。別 Issue 化
         let is_menzen = hand.get_melds().is_empty();
 
         // 手牌情報の取得
@@ -85,7 +86,7 @@ impl ScoringEngine {
         all_tiles.push(*winning_tile);
 
         // 役満チェック
-        if Self::check_kokushi(&all_tiles) {
+        if Self::check_kokushi(hand, &all_tiles) {
             yaku.push(Yaku::Kokushi);
             han += 13;
         }
@@ -272,6 +273,7 @@ impl ScoringEngine {
     fn check_pinfu(hand: &Hand, _winning_tile: &Tile) -> bool {
         // 副露なし、全て順子、雀頭が役牌でない、両面待ち
         // 簡易実装: 副露なしのみチェック
+        // TODO: check_pinfu は副露無し以外の条件 (両面待ち / 雀頭が役牌でない / 全順子) を判定していない。S3 の暗カン門前扱い修正と併せて別 Issue
         hand.get_melds().is_empty()
     }
 
@@ -384,9 +386,11 @@ impl ScoringEngine {
             if tile_map.get(head).copied().unwrap_or(0) < 2 {
                 continue;
             }
+            // 副露で暗カン化済みの前提。手牌内の 4 枚抱えは現実的に起こらない
             let mut m = tile_map.clone();
             *m.get_mut(head).unwrap() -= 2;
             // 残りがすべて count == 3 / 0 ならトイトイ
+            // (count==4 になるケースは前述の通り 4 枚抱えで暗カン化していない異常系のみ)
             if m.values().all(|&c| c == 0 || c == 3) {
                 return true;
             }
@@ -395,6 +399,9 @@ impl ScoringEngine {
     }
 
     // 三暗刻
+    // TODO: ロンで和了した刻子は明刻扱い (四暗刻単騎以外で 1 暗刻減算)。winning_tile 未使用は意図的 (本 Issue 範囲外、別 Issue で対応)
+    // TODO: is_tsumo 未使用も同じ理由 (現状は明暗判定なしの簡易実装)
+    #[allow(unused_variables)]
     fn check_sanankou(hand: &Hand, _winning_tile: &Tile, is_tsumo: bool) -> bool {
         // 暗刻が3組
         // 簡易実装: 副露がない刻子が3組
@@ -457,7 +464,11 @@ impl ScoringEngine {
     }
 
     // 国士無双
-    fn check_kokushi(tiles: &[Tile]) -> bool {
+    fn check_kokushi(hand: &Hand, tiles: &[Tile]) -> bool {
+        // 副露があれば国士無双は不成立 (check_chiitoitsu との対称性)
+        if !hand.get_melds().is_empty() {
+            return false;
+        }
         if tiles.len() != 14 {
             return false;
         }
@@ -502,6 +513,7 @@ impl ScoringEngine {
     }
 
     // 四暗刻
+    // TODO: ロンで和了した刻子は明刻扱い (四暗刻単騎以外で 1 暗刻減算)。winning_tile 未使用は意図的 (本 Issue 範囲外、別 Issue で対応)
     fn check_suuankou(hand: &Hand, _winning_tile: &Tile, is_tsumo: bool) -> bool {
         // 暗刻が4組（ツモの場合のみ）
         if !is_tsumo {
@@ -732,5 +744,199 @@ mod tests {
 
         // 基礎点 1000 のみ
         assert_eq!(score, 1000, "タンヤオなしは基礎点のみ");
+    }
+
+    // ==================== Issue #33: 副露あり scoring 回帰防止テスト ====================
+    // S2: all_tiles 結合バグ修正 + check_toitoi 修正の回帰防止
+    // Q10: 大三元の副露成立を確認
+
+    use crate::hand::Meld;
+
+    fn open_pon(tile: Tile) -> Meld {
+        Meld {
+            meld_type: MeldType::Pon,
+            tiles: vec![tile, tile, tile],
+            is_open: true,
+        }
+    }
+
+    fn open_chi(suit: Suit, start: u8) -> Meld {
+        Meld {
+            meld_type: MeldType::Chi,
+            tiles: vec![
+                Tile::new_number(suit, start, false),
+                Tile::new_number(suit, start + 1, false),
+                Tile::new_number(suit, start + 2, false),
+            ],
+            is_open: true,
+        }
+    }
+
+    /// 副露あり混一色:
+    /// 副露: ポン 2m2m2m (鳴き), 残り手牌: 3m 4m 5m 6m 7m 8m 9m9m + 東東 + 白, 和了: 白
+    /// 構成: [2m2m2m] + 3m4m5m + 6m7m8m + 9m9m9m? — 9m が 2 枚 → 雀頭。
+    /// 整理: [2m2m2m] + 3m4m5m + 6m7m8m + 東東東 (刻子) + 白白 (雀頭)
+    /// → 残り手牌 10 枚: 3m 4m 5m 6m 7m 8m 東 東 東 白, 和了: 白 (シャンポン待ち)
+    #[test]
+    fn test_honitsu_with_pon() {
+        let mut hand = Hand::new();
+        for t in [
+            Tile::new_number(Suit::Man, 3, false),
+            Tile::new_number(Suit::Man, 4, false),
+            Tile::new_number(Suit::Man, 5, false),
+            Tile::new_number(Suit::Man, 6, false),
+            Tile::new_number(Suit::Man, 7, false),
+            Tile::new_number(Suit::Man, 8, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Haku),
+        ] {
+            hand.add_tile(t);
+        }
+        // 副露 (add_meld は meld.tiles を hand.tiles から削除しようとするが、
+        // tiles に 2m を入れていないので no-op になる)
+        hand.add_meld(open_pon(Tile::new_number(Suit::Man, 2, false)));
+
+        let win = Tile::new_honor(Honor::Haku);
+        let result = ScoringEngine::calculate_score(&hand, &win, false, false);
+        assert!(result.is_some(), "副露あり混一色は scoring 成立");
+        let r = result.unwrap();
+        assert!(
+            r.yaku.contains(&Yaku::Honitsu),
+            "Honitsu が検出されるべき: {:?}",
+            r.yaku
+        );
+    }
+
+    /// 副露あり清一色:
+    /// ポン 2p2p2p + 残り手牌: 3p 4p 5p 6p 7p 8p 9p 9p 9p 5p, 和了: 5p (シャンポン)
+    /// 構成: [2p2p2p] + 3p4p5p + 5p5p? — 重複面倒。
+    /// 整理: ポン 1p1p1p + 残り: 2p3p4p 5p6p7p 8p8p8p 9p, 和了: 9p (単騎)
+    /// 構成: [1p1p1p] + 2p3p4p + 5p6p7p + 8p8p8p + 9p9p (雀頭)
+    #[test]
+    fn test_chinitsu_with_pon() {
+        let mut hand = Hand::new();
+        for t in [
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Pin, 5, false),
+            Tile::new_number(Suit::Pin, 6, false),
+            Tile::new_number(Suit::Pin, 7, false),
+            Tile::new_number(Suit::Pin, 8, false),
+            Tile::new_number(Suit::Pin, 8, false),
+            Tile::new_number(Suit::Pin, 8, false),
+            Tile::new_number(Suit::Pin, 9, false),
+        ] {
+            hand.add_tile(t);
+        }
+        hand.add_meld(open_pon(Tile::new_number(Suit::Pin, 1, false)));
+
+        let win = Tile::new_number(Suit::Pin, 9, false);
+        let result = ScoringEngine::calculate_score(&hand, &win, false, false);
+        assert!(result.is_some(), "副露あり清一色は scoring 成立");
+        let r = result.unwrap();
+        assert!(
+            r.yaku.contains(&Yaku::Chinitsu),
+            "Chinitsu が検出されるべき: {:?}",
+            r.yaku
+        );
+    }
+
+    /// 喰いタン:
+    /// チー 3m4m5m + 残り手牌: 2p 2p 3p 4p 5p 6p 7p 8p 7s 8s, 和了: 6s
+    /// 構成: [3m4m5m] + 2p2p + 3p4p5p + 6p7p8p + 6s7s8s
+    /// 全部 2-8 のみ → タンヤオ成立
+    #[test]
+    fn test_tanyao_with_chi() {
+        let mut hand = Hand::new();
+        for t in [
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Pin, 5, false),
+            Tile::new_number(Suit::Pin, 6, false),
+            Tile::new_number(Suit::Pin, 7, false),
+            Tile::new_number(Suit::Pin, 8, false),
+            Tile::new_number(Suit::Sou, 7, false),
+            Tile::new_number(Suit::Sou, 8, false),
+        ] {
+            hand.add_tile(t);
+        }
+        hand.add_meld(open_chi(Suit::Man, 3));
+
+        let win = Tile::new_number(Suit::Sou, 6, false);
+        let result = ScoringEngine::calculate_score(&hand, &win, false, false);
+        assert!(result.is_some(), "喰いタンは scoring 成立");
+        let r = result.unwrap();
+        assert!(
+            r.yaku.contains(&Yaku::Tanyao),
+            "Tanyao が検出されるべき: {:?}",
+            r.yaku
+        );
+    }
+
+    /// 副露ありトイトイ:
+    /// ポン 2m2m2m + ポン 5p5p5p + 残り手牌: 7s 7s 7s 東 東 東 西, 和了: 西 (単騎雀頭)
+    /// 構成: [2m2m2m] + [5p5p5p] + 7s7s7s + 東東東 + 西西 (雀頭)
+    /// 全面子刻子 → トイトイ
+    #[test]
+    fn test_toitoi_with_pon() {
+        let mut hand = Hand::new();
+        for t in [
+            Tile::new_number(Suit::Sou, 7, false),
+            Tile::new_number(Suit::Sou, 7, false),
+            Tile::new_number(Suit::Sou, 7, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Shaa),
+        ] {
+            hand.add_tile(t);
+        }
+        hand.add_meld(open_pon(Tile::new_number(Suit::Man, 2, false)));
+        hand.add_meld(open_pon(Tile::new_number(Suit::Pin, 5, false)));
+
+        let win = Tile::new_honor(Honor::Shaa);
+        let result = ScoringEngine::calculate_score(&hand, &win, false, false);
+        assert!(result.is_some(), "副露ありトイトイは scoring 成立");
+        let r = result.unwrap();
+        assert!(
+            r.yaku.contains(&Yaku::Toitoi),
+            "Toitoi が検出されるべき: {:?}",
+            r.yaku
+        );
+    }
+
+    /// Q10: 大三元の副露成立
+    /// ポン 白白白 + ポン 發發發 + ポン 中中中 + 残り手牌: 2m 3m 4m 5p 5p, 和了: 5p
+    /// 構成: [白白白] + [發發發] + [中中中] + 2m3m4m + 5p5p (雀頭)
+    #[test]
+    fn test_daisangen_with_pon() {
+        let mut hand = Hand::new();
+        for t in [
+            Tile::new_number(Suit::Man, 2, false),
+            Tile::new_number(Suit::Man, 3, false),
+            Tile::new_number(Suit::Man, 4, false),
+            Tile::new_number(Suit::Pin, 5, false),
+            Tile::new_number(Suit::Pin, 5, false),
+        ] {
+            hand.add_tile(t);
+        }
+        hand.add_meld(open_pon(Tile::new_honor(Honor::Haku)));
+        hand.add_meld(open_pon(Tile::new_honor(Honor::Hatsu)));
+        hand.add_meld(open_pon(Tile::new_honor(Honor::Chun)));
+
+        let win = Tile::new_number(Suit::Pin, 5, false);
+        let result = ScoringEngine::calculate_score(&hand, &win, false, false);
+        assert!(result.is_some(), "大三元 (副露) は scoring 成立");
+        let r = result.unwrap();
+        assert!(
+            r.yaku.contains(&Yaku::Daisangen),
+            "Daisangen が検出されるべき: {:?}",
+            r.yaku
+        );
     }
 }

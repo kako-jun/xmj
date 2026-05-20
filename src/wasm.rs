@@ -466,6 +466,7 @@ pub(crate) fn extract_agari(hand: &Hand) -> Option<(Hand, Tile)> {
         return None;
     }
     // ユニークな牌で 1 枚ずつ試す
+    // 副露牌は和了牌候補に成り得ない (既に確定面子の一部)。winning_tile は tiles から選ぶ
     let mut seen: Vec<Tile> = Vec::new();
     for tile in tiles.iter() {
         if seen.iter().any(|t| t == tile) {

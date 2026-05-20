@@ -878,14 +878,9 @@ mod tests {
 
     /// ポン 1 つ + 残り手牌 10 枚 + 和了牌 1 = 副露込みで 4 面子 1 雀頭
     /// 副露: 1m 1m 1m (ポン)
-    /// 残り手牌: 2p 3p 4p 5p 6p 7p 8p 9p 9p 9p (8p + 順子 + 刻子 + 雀頭にできる)
-    /// 和了牌: 7p
-    /// 構成: [1m1m1m] + 2p3p4p + 5p6p7p + 9p9p9p + (8p雀頭) → ペア足りない
-    /// → 構成: [1m1m1m] + 2p3p4p + 7p8p9p + 9p9p + (5p6p) NG。再設計。
-    /// 構成例: [1m1m1m] + 2p3p4p + 5p6p7p + 8p9p? + 雀頭 — シンプル化：
-    /// 副露: 1m1m1m, 残り手牌 2p3p4p 5p5p 7p8p9p 6s6s, 和了: 5p (シャンポン待ち)
-    /// 構成: [1m1m1m] + 2p3p4p + 5p5p5p (5p追加で刻子) + 7p8p9p + 6s6s 雀頭
-    /// → 残り 10 枚: 2p 3p 4p 5p 5p 7p 8p 9p 6s 6s + win=5p → 14
+    /// 残り手牌: 2p 3p 4p 5p 5p 7p 8p 9p 6s 6s (10 枚)
+    /// 和了牌: 5p (シャンポン待ち)
+    /// 構成: [1m1m1m] + 2p3p4p + 5p5p5p + 7p8p9p + 6s6s (雀頭)
     #[test]
     fn test_can_win_with_pon_meld() {
         let mut hand = Hand::new();
@@ -911,10 +906,9 @@ mod tests {
 
     /// チー 1 つ + 残り手牌 10 枚 + 和了牌 1
     /// チー: 4m5m6m
-    /// 残り手牌: 1m1m1m 2p3p4p 7s7s 8s9s (10枚)
-    /// 和了牌: 7s (シャンポン or 単騎 7s)
-    /// 構成: [4m5m6m] + 1m1m1m + 2p3p4p + 7s7s7s + 8s9s? NG
-    /// 再設計: 残り手牌 1m1m1m 2p3p4p 7s8s9s 5p 5p, win=5p (雀頭で和了)
+    /// 残り手牌: 1m1m1m 2p3p4p 7s8s9s 5p (10 枚)
+    /// 和了牌: 5p (単騎雀頭)
+    /// 構成: [4m5m6m] + 1m1m1m + 2p3p4p + 7s8s9s + 5p5p (雀頭)
     #[test]
     fn test_can_win_with_chi_meld() {
         let mut hand = Hand::new();
