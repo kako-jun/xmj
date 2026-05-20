@@ -11,7 +11,6 @@ import {
   PANEL_ACCENT_COLOR,
   PANEL_BG_COLOR,
   PANEL_BORDER_COLOR,
-  SHADOW_COLOR,
   STAGE_HEIGHT,
   STAGE_WIDTH,
   TABLE_BG_COLOR,
@@ -139,24 +138,27 @@ export const createRoundResultScene = (
   const root = new Container()
   root.label = 'round-result-scene'
 
+  const cx = STAGE_WIDTH / 2
+
   const bg = new Graphics()
   bg.rect(0, 0, STAGE_WIDTH, STAGE_HEIGHT).fill({ color: 0x050505 })
-  bg.circle(STAGE_WIDTH / 2, 160, 320).fill({ color: TABLE_GLOW_COLOR, alpha: 0.12 })
-  bg.circle(STAGE_WIDTH / 2, 220, 280).fill({ color: TABLE_BG_COLOR, alpha: 0.38 })
+  bg.circle(cx, STAGE_HEIGHT / 2 - 80, STAGE_WIDTH * 0.45).fill({ color: TABLE_GLOW_COLOR, alpha: 0.12 })
+  bg.circle(cx, STAGE_HEIGHT / 2, STAGE_WIDTH * 0.38).fill({ color: TABLE_BG_COLOR, alpha: 0.38 })
   root.addChild(bg)
 
+  const frameMargin = 32
   const frame = new Graphics()
   frame
-    .roundRect(186, 56, 908, 588, 34)
+    .roundRect(frameMargin, frameMargin, STAGE_WIDTH - frameMargin * 2, STAGE_HEIGHT - frameMargin * 2, 24)
     .fill({ color: PANEL_BG_COLOR, alpha: 0.92 })
     .stroke({ color: PANEL_BORDER_COLOR, width: 3 })
   root.addChild(frame)
 
   const titleText = options.outcome.kind === 'win' ? '和了' : '流局'
-  const title = makeText(titleText, 42, TEXT_PRIMARY_COLOR, 'center', 'bold')
+  const title = makeText(titleText, 36, TEXT_PRIMARY_COLOR, 'center', 'bold')
   title.anchor.set(0.5)
-  title.x = STAGE_WIDTH / 2
-  title.y = 124
+  title.x = cx
+  title.y = 100
   root.addChild(title)
 
   const lines =
@@ -166,40 +168,29 @@ export const createRoundResultScene = (
 
   lines.forEach((line, i) => {
     const color = i === 0 ? TEXT_DANGER_COLOR : TEXT_PRIMARY_COLOR
-    const fontSize = i === 0 ? 26 : 22
+    const fontSize = i === 0 ? 22 : 18
     const text = makeText(line, fontSize, color, 'center', i === 0 ? 'bold' : 'normal')
     text.anchor.set(0.5)
-    text.x = STAGE_WIDTH / 2
-    text.y = 220 + i * 52
+    text.x = cx
+    text.y = 180 + i * 44
     root.addChild(text)
   })
 
+  const buttonY = STAGE_HEIGHT - 130
+  root.addChild(createButton('次局へ', 'round-result-next-button', cx - 210, buttonY, options.onNext))
   root.addChild(
-    createButton('次局へ', 'round-result-next-button', 368, 508, options.onNext)
+    createButton('タイトルへ', 'round-result-title-button', cx + 10, buttonY, options.onBackToTitle)
   )
-  root.addChild(
-    createButton(
-      'タイトルへ',
-      'round-result-title-button',
-      692,
-      508,
-      options.onBackToTitle
-    )
-  )
-
-  const footer = new Graphics()
-  footer.rect(0, STAGE_HEIGHT - 72, STAGE_WIDTH, 72).fill({ color: SHADOW_COLOR, alpha: 0.34 })
-  root.addChild(footer)
 
   const footerText = makeText(
     '次局ボタンで継続。終局時は別画面に切り替わります。',
-    16,
+    13,
     TEXT_MUTED_COLOR,
     'center'
   )
   footerText.anchor.set(0.5)
-  footerText.x = STAGE_WIDTH / 2
-  footerText.y = STAGE_HEIGHT - 42
+  footerText.x = cx
+  footerText.y = STAGE_HEIGHT - 56
   root.addChild(footerText)
 
   return root

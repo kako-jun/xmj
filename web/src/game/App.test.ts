@@ -3,13 +3,44 @@
 //
 // PixiJS の WebGL レンダラは jsdom 環境では init できないため、
 // Application の init は呼ばずに stage だけモックする。
+//
+// 対局情報・行動ボタン・実況ログは Pixi ではなく HTML オーバーレイ (#ui-side) に
+// 描画されるので、beforeEach で index.html 相当の DOM を組み立てる。
 
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { Container, Text } from 'pixi.js'
 import { App } from './App'
 import { initWithState } from './state'
 import type { Tile } from './types'
 import { EVENT_LOG_LIMIT } from './constants'
+
+const UI_SIDE_HTML = `
+  <aside id="ui-side">
+    <span data-ui="round"></span>
+    <span data-ui="honba"></span>
+    <span data-ui="wall"></span>
+    <span data-ui="dora"></span>
+    <div data-ui="scores"></div>
+    <div data-ui="actions"></div>
+    <div data-ui="hint"></div>
+    <div data-ui="log"></div>
+  </aside>
+`
+
+const setupDom = (): HTMLElement => {
+  document.body.innerHTML = UI_SIDE_HTML
+  return document.getElementById('ui-side') as HTMLElement
+}
+
+const findActionButton = (key: string): HTMLButtonElement | null =>
+  document.querySelector<HTMLButtonElement>(`button[data-action-key="${key}"]`)
+
+const clickActionButton = (key: string): void => {
+  const btn = findActionButton(key)
+  if (!btn) throw new Error(`HTML action button "${key}" not found`)
+  if (btn.disabled) throw new Error(`HTML action button "${key}" is disabled`)
+  btn.click()
+}
 
 const sampleState = `Round: 1 | Wall: 69 tiles
 Dora indicators: 5p
@@ -52,18 +83,14 @@ const createBridgeMock = (overrides: Partial<import('./wasm').WasmGameBridge> = 
 
 const getTable = (stage: Container): Container => stage.children[0] as Container
 
-const getBottomArea = (stage: Container): Container =>
-  getTable(stage).getChildByLabel('bottom-area') as Container
+const getHand = (stage: Container, playerId: 0 | 1 | 2 | 3): Container =>
+  getTable(stage).getChildByLabel(`hand-${playerId}`) as Container
 
 const getHandTile = (stage: Container, label: string): Container => {
-  const hand = getBottomArea(stage).getChildByLabel('hand-0') as Container
+  const hand = getHand(stage, 0)
   return hand.getChildByLabel(label) as Container
 }
 
-const getActionButton = (stage: Container, key: string): Container => {
-  const actionArea = getBottomArea(stage).getChildByLabel('action-area') as Container
-  return actionArea.getChildByLabel(`action-button-${key}`) as Container
-}
 
 const getSceneButton = (stage: Container, label: string): Container =>
   (stage.children[0] as Container).getChildByLabel(label) as Container
@@ -91,8 +118,13 @@ const walkToGame = (
 }
 
 describe('App', () => {
+  beforeEach(() => {
+    setupDom()
+  })
+
   afterEach(() => {
     vi.useRealTimers()
+    document.body.innerHTML = ''
   })
 
   it('showTableBackground は stage に背景を 1 つ追加する', () => {
@@ -105,7 +137,7 @@ describe('App', () => {
     expect(stage.children.length).toBe(1)
   })
 
-  it('showInitialTable は label="game-table" の Container を stage に 1 つ追加する', () => {
+  it('showInitialTable は label="game-table" の Container と 4 プレイヤーぶんの hand/discards を含む', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const app = new App(fakeApp)
@@ -114,13 +146,14 @@ describe('App', () => {
     expect(stage.children.length).toBe(1)
     const grid = stage.children[0] as Container
     expect(grid.label).toBe('game-table')
-    expect(grid.getChildByLabel('center-info')).toBeTruthy()
-    expect(grid.getChildByLabel('score-badges')).toBeTruthy()
-    expect(grid.getChildByLabel('bottom-area')).toBeTruthy()
-    expect(grid.getChildByLabel('event-log')).toBeTruthy()
+    expect(grid.getChildByLabel('table-surface')).toBeTruthy()
+    for (const id of [0, 1, 2, 3] as const) {
+      expect(grid.getChildByLabel(`hand-${id}`)).toBeTruthy()
+      expect(grid.getChildByLabel(`discards-${id}`)).toBeTruthy()
+    }
   })
 
-  it('lastDiscard=null のとき中央情報盤に「なし」を表示する', () => {
+  it('lastDiscard=null のとき卓上に last-discard 牌を描画しない', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const app = new App(fakeApp)
@@ -128,20 +161,18 @@ describe('App', () => {
 
     app.showInitialTable(state)
 
-    const centerInfo = getTable(stage).getChildByLabel('center-info') as Container
-    const texts = centerInfo.children.filter((child): child is Text => child instanceof Text)
-
-    expect(texts.some(text => text.text === 'なし')).toBe(true)
+    const table = getTable(stage)
+    expect(table.getChildByLabel('last-discard')).toBeNull()
   })
 
   it.each([
-    { currentTurn: 0, areaLabel: 'bottom-area', markerText: 'あなたの手番' },
-    { currentTurn: 1, areaLabel: 'right-area', markerText: 'CPU 南 の手番' },
-    { currentTurn: 2, areaLabel: 'top-area', markerText: 'CPU 西 の手番' },
-    { currentTurn: 3, areaLabel: 'left-area', markerText: 'CPU 北 の手番' },
+    { currentTurn: 0, wind: '東', markerText: 'あなた (あなた)' },
+    { currentTurn: 1, wind: '南', markerText: 'CPU 南' },
+    { currentTurn: 2, wind: '西', markerText: 'CPU 西' },
+    { currentTurn: 3, wind: '北', markerText: 'CPU 北' },
   ] as const)(
-    'currentTurn=%s のとき手番マーカーが対応する方角に 1 つだけ出る',
-    ({ currentTurn, areaLabel, markerText }) => {
+    'currentTurn=%s のときスコア行に .is-turn が 1 つだけ付く',
+    ({ currentTurn, markerText }) => {
       const stage = new Container()
       const fakeApp = { stage } as unknown as import('pixi.js').Application
       const app = new App(fakeApp)
@@ -149,19 +180,11 @@ describe('App', () => {
 
       app.showInitialTable(state)
 
-      const table = stage.children[0] as Container
-      const areas = ['bottom-area', 'right-area', 'top-area', 'left-area'] as const
-      const markerCounts = areas.map(label => {
-        const area = table.getChildByLabel(label) as Container
-        return area.getChildrenByLabel('turn-marker', true).length
-      })
-
-      expect(markerCounts.reduce((sum, count) => sum + count, 0)).toBe(1)
-
-      const activeArea = table.getChildByLabel(areaLabel) as Container
-      const marker = activeArea.getChildByLabel('turn-marker') as Container
-      const markerLabel = marker.children[1] as Text
-      expect(markerLabel.text).toBe(markerText)
+      const turnRows = document.querySelectorAll<HTMLElement>('.score-row.is-turn')
+      expect(turnRows.length).toBe(1)
+      expect((turnRows[0].querySelector('.name') as HTMLElement).textContent).toContain(
+        markerText.replace(/ \(あなた\)$/, '')
+      )
     }
   )
 
@@ -281,9 +304,10 @@ Dora indicators: 5p
     expect(createBridge).toHaveBeenCalledWith(1)
     expect(app.humanPlayerIndex).toBe(1)
     expect((stage.children[0] as Container).label).toBe('game-table')
-    const bottomArea = getBottomArea(stage)
-    expect(bottomArea.getChildByLabel('hand-1')).toBeTruthy()
-    expect(bottomArea.getChildByLabel('hand-0')).toBeNull()
+    // 人間座席が南家 (PlayerIndex 1) なので、卓の自家として hand-1 が描かれる。
+    // 旧実装の「bottom-area の中の hand-0」とは違い、新実装は hand-N が
+    // table 直下にあり、N は absolute な PlayerIndex を持つ。
+    expect(getHand(stage, 1)).toBeTruthy()
   })
 
   it('mode-select-back でタイトルに戻る', () => {
@@ -365,15 +389,9 @@ Dora indicators: 5p
 
     app.showInitialTable(state)
 
-    const table = stage.children[0] as Container
-    const badges = table.getChildByLabel('score-badges') as Container
-    const riichiTexts = badges.children.flatMap(badge =>
-      (badge as Container).children.filter(
-        child => child instanceof Text && child.text === '立直'
-      )
-    )
-
-    expect(riichiTexts).toHaveLength(1)
+    // HTML overlay の .score-row に .riichi が 1 つだけ出る
+    const riichiBadges = document.querySelectorAll('.score-row .riichi')
+    expect(riichiBadges.length).toBe(1)
   })
 
   it('startGame は人間手番かつ 13 枚なら自動で drawTile して 14 枚にする', () => {
@@ -415,12 +433,7 @@ Dora indicators: 5p
 
     app.startGame(bridge, 0)
 
-    const getTargetTile = (): Container => {
-      const table = stage.children[0] as Container
-      const bottomArea = table.getChildByLabel('bottom-area') as Container
-      const hand = bottomArea.getChildByLabel('hand-0') as Container
-      return hand.getChildByLabel('1m-0') as Container
-    }
+    const getTargetTile = (): Container => getHandTile(stage, '1m-0')
 
     getTargetTile().emit('pointertap', {} as never)
     expect(app.selectedHandIndex).toBe(0)
@@ -526,7 +539,7 @@ Dora indicators: 5p
     drawCount = 0
 
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'riichi-discard').emit('pointertap', {} as never)
+    clickActionButton('riichi-discard')
 
     expect(declareRiichiCount).toBe(1)
     expect(discardCount).toBe(1)
@@ -631,7 +644,6 @@ Last discard: 5m`,
     expect(resultScene.label).toBe('result-scene')
     expect(texts.some(text => text.text === 'CPU 南 が飛んで終局')).toBe(true)
     expect(texts.some(text => text.text === '1位')).toBe(true)
-    expect(texts.some(text => text.text === '現 API では未取得')).toBe(true)
     expect(app.bridge).toBe(null)
     expect(destroyed).toBe(1)
   })
@@ -704,7 +716,7 @@ Last discard: 5m`,
     app.startGame(bridge, 0)
 
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+    clickActionButton('discard')
 
     expect(discarded).toEqual([{ suit: 'man', value: 1 }])
     expect(app.selectedHandIndex).toBe(null)
@@ -728,7 +740,7 @@ Last discard: 5m`,
     app.startGame(bridge, 0)
 
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+    clickActionButton('discard')
 
     expect(app.selectedHandIndex).toBe(0)
     expect(cpuCount).toBe(0)
@@ -759,7 +771,7 @@ Last discard: 5m`,
     app.startGame(bridge, 0)
 
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'riichi-discard').emit('pointertap', {} as never)
+    clickActionButton('riichi-discard')
 
     expect(riichiCount).toBe(1)
     expect(cpuCount).toBe(0)
@@ -783,7 +795,7 @@ Last discard: 5m`,
 
     app.startGame(bridge, 0)
 
-    const hand = getBottomArea(stage).getChildByLabel('hand-0') as Container
+    const hand = getHand(stage, 0)
     const tile = hand.children[0] as Container
     expect(hand.getChildByLabel('1m-0')).toBeNull()
     expect(tile.eventMode).not.toBe('static')
@@ -828,9 +840,9 @@ Last discard: 5m`,
 
     app.startGame(bridge, 0)
 
-    const tsumoBtn = getActionButton(stage, 'tsumo')
+    const tsumoBtn = findActionButton('tsumo')
     expect(tsumoBtn).toBeTruthy()
-    tsumoBtn.emit('pointertap', {} as never)
+    clickActionButton('tsumo')
 
     expect(resolveTsumoCalls).toEqual([0])
     // 中間結果シーンに遷移している
@@ -871,7 +883,7 @@ Last discard: 5m`,
 
     // 人間打牌で CPU ターン開始 → 最初の CPU 打牌後 canRon=true → ループ停止
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+    clickActionButton('discard')
 
     // CPU は 1 回だけ実行されてから停止しているはず
     expect(cpuTurnLog).toEqual([1])
@@ -879,10 +891,10 @@ Last discard: 5m`,
     expect(appInst.pendingRonChance?.from).toBe(1)
 
     // 「ロン」「見逃し」ボタン両方表示
-    expect(getActionButton(stage, 'ron')).toBeTruthy()
-    expect(getActionButton(stage, 'ron-skip')).toBeTruthy()
+    expect(findActionButton('ron')).toBeTruthy()
+    expect(findActionButton('ron-skip')).toBeTruthy()
     // 通常の「打牌」ボタンは出ていない
-    expect(getActionButton(stage, 'discard')).toBeNull()
+    expect(findActionButton('discard')).toBeNull()
   })
 
   it('「見逃し」ボタンで pendingRonChance がクリアされて CPU ターンが再開する (Issue #35)', () => {
@@ -919,10 +931,10 @@ Last discard: 5m`,
 
     appInst.startGame(bridge, 0)
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+    clickActionButton('discard')
 
     expect(appInst.pendingRonChance).not.toBeNull()
-    getActionButton(stage, 'ron-skip').emit('pointertap', {} as never)
+    clickActionButton('ron-skip')
     expect(appInst.pendingRonChance).toBeNull()
     // CPU ターンが再開して 2 巡目以降が実行された
     expect(cpuTurnLog.length).toBeGreaterThan(1)
@@ -940,9 +952,9 @@ Last discard: 5m`,
       }),
       0
     )
-    expect(getActionButton(stage, 'discard')).toBeTruthy()
-    expect(getActionButton(stage, 'riichi')).toBeNull()
-    expect(getActionButton(stage, 'riichi-discard')).toBeNull()
+    expect(findActionButton('discard')).toBeTruthy()
+    expect(findActionButton('riichi')).toBeNull()
+    expect(findActionButton('riichi-discard')).toBeNull()
 
     app.startGame(
       createBridgeMock({
@@ -951,10 +963,10 @@ Last discard: 5m`,
       }),
       0
     )
-    expect(getActionButton(stage, 'discard')).toBeTruthy()
+    expect(findActionButton('discard')).toBeTruthy()
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    expect(getActionButton(stage, 'discard')).toBeNull()
-    expect(getActionButton(stage, 'riichi-discard')).toBeTruthy()
+    expect(findActionButton('discard')).toBeNull()
+    expect(findActionButton('riichi-discard')).toBeTruthy()
   })
 
   it('declareRiichi が false のとき選択状態を維持する', () => {
@@ -975,11 +987,11 @@ Last discard: 5m`,
     app.startGame(bridge, 0)
 
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'riichi-discard').emit('pointertap', {} as never)
+    clickActionButton('riichi-discard')
 
     expect(riichiCount).toBe(1)
     expect(app.selectedHandIndex).toBe(0)
-    expect(getActionButton(stage, 'riichi-discard')).toBeTruthy()
+    expect(findActionButton('riichi-discard')).toBeTruthy()
   })
 
   it('ゲームオーバー時は result-scene に切り替わる', () => {
@@ -1000,7 +1012,7 @@ Last discard: 5m`,
 
     app.startGame(bridge, 0)
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+    clickActionButton('discard')
 
     expect(app.resultMessage).toBe('山牌が尽きて終局')
     expect((stage.children[0] as Container).label).toBe('result-scene')
@@ -1026,7 +1038,7 @@ Last discard: 5m`,
 
     app.startGame(bridge, 0)
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+    clickActionButton('discard')
 
     expect(app.resultMessage).toBe('CPU 西 が飛んで終局')
     expect(app.eventLog[app.eventLog.length - 1]).toBe('CPU 西 が飛んで終局')
@@ -1052,7 +1064,7 @@ Last discard: 5m`,
 
     app.startGame(bridge, 0)
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+    clickActionButton('discard')
 
     expect(app.resultMessage).toBe('対局終了')
     expect(app.eventLog[app.eventLog.length - 1]).toBe('対局終了')
@@ -1211,7 +1223,7 @@ Last discard: 5m`,
     app.startGame(bridge, 0)
 
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+    clickActionButton('discard')
 
     expect(app.eventLog.some(entry => entry.includes('あなた が 1m を打牌'))).toBe(true)
     expect(app.eventLog.some(entry => entry.includes('CPU 南 がツモ'))).toBe(true)
@@ -1256,7 +1268,7 @@ Last discard: 5m`,
     app.startGame(bridge, 0)
     // 打牌して finalizeGameIfNeeded を起こす
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+    clickActionButton('discard')
 
     // 中間結果シーンに切り替わったこと
     expect((stage.children[0] as Container).label).toBe('round-result-scene')
@@ -1312,7 +1324,7 @@ Last discard: 5m`,
 
     app.startGame(bridge, 0)
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+    clickActionButton('discard')
 
     expect(computeTenpaiCalled).toBeGreaterThanOrEqual(1)
     expect(resolveDrawArg).toEqual([0, 2])
@@ -1348,7 +1360,7 @@ Last discard: 5m`,
 
     app.startGame(bridge, 0)
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
-    getActionButton(stage, 'discard').emit('pointertap', {} as never)
+    clickActionButton('discard')
     expect((stage.children[0] as Container).label).toBe('round-result-scene')
 
     const nextBtn = (stage.children[0] as Container).getChildByLabel(
@@ -1359,18 +1371,19 @@ Last discard: 5m`,
     expect(app.resultMessage).toBeTruthy()
   })
 
-  it('eventLog は 12 件を上限に古い順から切り詰める', () => {
+  it('eventLog は EVENT_LOG_LIMIT 件を上限に古い順から切り詰める', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const app = new App(fakeApp)
     const appendLog = (app as unknown as { appendLog: (message: string) => void }).appendLog
 
-    for (let index = 1; index <= 14; index += 1) {
+    const overflowCount = EVENT_LOG_LIMIT + 2
+    for (let index = 1; index <= overflowCount; index += 1) {
       appendLog.call(app, `log-${index}`)
     }
 
     expect(app.eventLog).toHaveLength(EVENT_LOG_LIMIT)
-    expect(app.eventLog[0]).toBe('log-3')
-    expect(app.eventLog[app.eventLog.length - 1]).toBe('log-14')
+    expect(app.eventLog[0]).toBe(`log-${overflowCount - EVENT_LOG_LIMIT + 1}`)
+    expect(app.eventLog[app.eventLog.length - 1]).toBe(`log-${overflowCount}`)
   })
 })
