@@ -4,9 +4,11 @@ pub mod game;
 pub mod player;
 pub mod scoring;
 pub mod agari;
+pub mod agari_extract;
 pub mod ai;
 pub mod nostr;
 pub mod realtime;
+pub mod scenario;
 
 #[cfg(feature = "wasm")]
 pub mod wasm;
