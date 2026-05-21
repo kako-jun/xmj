@@ -279,7 +279,9 @@ impl ScenarioRunner {
         let hand_clone = self.game.players[winner].hand.clone();
         let (sub_hand, winning_tile) =
             extract_agari_with_context(&hand_clone, true, is_dealer)?;
-        let result = ScoringEngine::calculate_score(&sub_hand, &winning_tile, true, is_dealer)?;
+        let ctx = self.game.build_scoring_context(winner, true);
+        let result =
+            ScoringEngine::calculate_score_with_context(&sub_hand, &winning_tile, &ctx)?;
         self.push_log(format!(
             "p{} tsumo with {} (han={}, fu={})",
             winner,
@@ -302,13 +304,17 @@ impl ScenarioRunner {
         if self.game.last_discard_hidden {
             return None;
         }
-        let from = (self.game.current_player + 3) % 4;
-        let is_dealer = player == self.game.dealer;
+        let from = self
+            .game
+            .last_discarder
+            .unwrap_or((self.game.current_player + 3) % 4);
+        let ctx = self.game.build_scoring_context(player, false);
         let hand = &self.game.players[player].hand;
         if !hand.can_win(&winning_tile) {
             return None;
         }
-        let result = ScoringEngine::calculate_score(hand, &winning_tile, false, is_dealer)?;
+        let result =
+            ScoringEngine::calculate_score_with_context(hand, &winning_tile, &ctx)?;
         self.push_log(format!(
             "p{} ron on {} from p{} (han={}, fu={})",
             player,
@@ -325,7 +331,7 @@ impl ScenarioRunner {
     /// `current_player` のリーチ宣言。`Player::declare_riichi` 経由。
     pub fn declare_riichi(&mut self) -> bool {
         let idx = self.game.current_player;
-        let ok = self.game.players[idx].declare_riichi(self.game.round as usize);
+        let ok = self.game.declare_riichi(idx);
         if ok {
             self.push_log(format!("p{} declares riichi", idx));
         }

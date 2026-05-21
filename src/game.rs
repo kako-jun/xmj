@@ -206,6 +206,32 @@ pub struct Game {
     /// 全モードで `PlayerTimer::default_limit()` 初期化する。
     /// 進行は呼び出し側が `tick_timers(delta_ms)` を周期的に呼ぶ。
     pub player_timers: Vec<PlayerTimer>,
+
+    // ============================================================
+    // #50 状況役の状態追跡
+    // ============================================================
+    /// 直前の draw が wall 最終枚だったか (Haitei 候補)。
+    ///
+    /// `draw_tile` 内で `wall.is_empty()` (= 引いたら最後の 1 枚だった) を見て更新する。
+    /// 次の draw / 鳴き / 局頭で false に戻る。
+    pub is_last_draw: bool,
+    /// 直前打牌が wall 空時の打牌だったか (Houtei 候補)。
+    ///
+    /// `discard_tile` 系で wall が空のときに true、次の draw / 局頭で false に戻る。
+    pub is_last_discard: bool,
+    /// 直前の draw が do_kan / do_ankan による嶺上ツモだったか (Rinshan 候補)。
+    ///
+    /// `do_kan` / `do_ankan` 完了直後に true、その後の draw / discard / 局頭で false に戻る。
+    pub last_was_rinshan: bool,
+    /// 加槓宣言中の牌 (Chankan 候補)。
+    ///
+    /// 加槓自体は #46 で未実装。現状はフィールドだけ保持し、加槓実装と同時に発火させる。
+    pub pending_chankan: Option<Tile>,
+    /// 直前打牌者の座席 index。
+    ///
+    /// 立直成立後の自家ツモタイミングで一発フラグを下ろすため、`current_player + 3 % 4`
+    /// 依存を回避する。鳴きで `current_player` が任意席に飛ぶケースにも対応。
+    pub last_discarder: Option<usize>,
 }
 
 impl Game {
@@ -265,6 +291,11 @@ impl Game {
             game_over: false,
             team_progress,
             player_timers,
+            is_last_draw: false,
+            is_last_discard: false,
+            last_was_rinshan: false,
+            pending_chankan: None,
+            last_discarder: None,
         };
 
         game.initialize_wall();
@@ -455,7 +486,15 @@ impl Game {
     }
 
     pub fn draw_tile(&mut self) -> Option<Tile> {
-        self.wall.pop()
+        let tile = self.wall.pop();
+        if tile.is_some() {
+            // #50 海底候補: 引いた直後に wall が空なら is_last_draw=true
+            self.is_last_draw = self.wall.is_empty();
+            // 通常の draw が走ったので、嶺上 / 河底 / 加槓フラグは下ろす
+            self.last_was_rinshan = false;
+            self.is_last_discard = false;
+        }
+        tile
     }
 
     pub fn current_player_draw(&mut self) -> bool {
@@ -479,9 +518,20 @@ impl Game {
     /// 戻すこと。`Standard` 等のターン制モードではタイマーが実質未使用なので呼ばなく
     /// てもよい。
     pub fn discard_tile(&mut self, tile: Tile) -> bool {
-        if self.players[self.current_player].discard_tile(tile) {
+        let discarder = self.current_player;
+        if self.players[discarder].discard_tile(tile) {
             self.last_discard = Some(tile);
             self.last_discard_hidden = false;
+            self.last_discarder = Some(discarder);
+            // #50 河底候補: wall が空のときの打牌
+            self.is_last_discard = self.wall.is_empty();
+            // 嶺上開花フラグは打牌で確実に下ろす
+            self.last_was_rinshan = false;
+            // #49 一発: 打牌者自身の一発フラグは「打牌前のツモまで」が範囲。
+            // 既に declare_riichi 時の自家ツモ → 即打牌ならフラグは ippatsu=true のまま。
+            // ただし他家からの鳴きが入ると別経路 (do_chi/do_pon/do_kan) でクリアする。
+            // 自家打牌した時点で自身の一発は次のツモ機会まで残らないため、
+            // 次に自家ツモが回ってきた時点でクリアする運用とする (現状の declare 後 1 巡内ロン用)。
             self.next_player();
             true
         } else {
@@ -503,11 +553,15 @@ impl Game {
         if self.mode != GameMode::Yamima {
             return false;
         }
-        if !self.players[self.current_player].discard_hidden(tile) {
+        let discarder = self.current_player;
+        if !self.players[discarder].discard_hidden(tile) {
             return false;
         }
         self.last_discard = Some(tile);
         self.last_discard_hidden = true;
+        self.last_discarder = Some(discarder);
+        self.is_last_discard = self.wall.is_empty();
+        self.last_was_rinshan = false;
         self.next_player();
         true
     }
@@ -750,6 +804,8 @@ impl Game {
             player.hand.add_meld(meld);
             self.last_discard = None;
             self.current_player = player_idx;
+            // #49 鳴きで他家の一発を消す
+            self.clear_ippatsu_others(player_idx);
             true
         } else {
             false
@@ -779,6 +835,8 @@ impl Game {
         player.hand.add_meld(meld);
         self.last_discard = None;
         self.current_player = player_idx;
+        // #49 鳴きで他家の一発を消す
+        self.clear_ippatsu_others(player_idx);
         true
     }
 
@@ -817,6 +875,11 @@ impl Game {
             self.players[player_idx].draw_tile(rinshan_tile);
         }
 
+        // #50 嶺上開花候補
+        self.last_was_rinshan = true;
+        // 鳴きが入ったので他家の一発フラグを下ろす
+        self.clear_ippatsu_others(player_idx);
+
         self.current_player = player_idx;
         true
     }
@@ -850,7 +913,113 @@ impl Game {
             self.players[player_idx].draw_tile(rinshan_tile);
         }
 
+        // #50 嶺上開花候補 (暗槓も対象)
+        self.last_was_rinshan = true;
+        // 暗槓も鳴きの一種で、他家の一発を消す (リーチ後の暗槓は条件付きで許容されるが
+        // ここでは厳密ルールではなく「他家の一発はクリアする」シンプル運用)
+        self.clear_ippatsu_others(player_idx);
+
         true
+    }
+
+    /// 自家以外のプレイヤーの一発フラグを下ろす (#49)。
+    ///
+    /// 鳴き (チー / ポン / カン) が入ったとき、立直していた他家の一発が消える。
+    fn clear_ippatsu_others(&mut self, actor: usize) {
+        for (i, p) in self.players.iter_mut().enumerate() {
+            if i != actor {
+                p.clear_ippatsu();
+            }
+        }
+    }
+
+    /// 立直を宣言する (#49)。
+    ///
+    /// `Player::declare_riichi` を呼んだ上で、第一巡 (鳴きなし + 河 0 or 1) かつ
+    /// 全員の打牌が初手以下ならダブル立直として `double_riichi=true` をセットする。
+    ///
+    /// 第一巡判定の簡易ルール:
+    /// - 当該プレイヤーの discards が 0 (まだ捨ててない、ツモ直後の宣言)
+    /// - 他家からの鳴きが全く発生していない (`Hand::get_melds().is_empty()` を全員でチェック)
+    /// - 本局でまだ誰の打牌回数も 1 を超えていない
+    pub fn declare_riichi(&mut self, player_idx: usize) -> bool {
+        if player_idx >= self.players.len() {
+            return false;
+        }
+        // ダブル立直判定: 鳴き無し + 全員 1 巡目以内
+        let is_first_round = self
+            .players
+            .iter()
+            .all(|p| p.hand.get_melds().is_empty() && p.discards.len() == 0);
+        let turn = self.round as usize;
+        if !self.players[player_idx].declare_riichi(turn) {
+            return false;
+        }
+        if is_first_round {
+            self.players[player_idx].double_riichi = true;
+        }
+        // 立直棒を供託に積む
+        self.riichi_sticks += 1;
+        true
+    }
+
+    /// 場風 (#53)。
+    ///
+    /// round 1-4 → 東 (Ton)、round 5-8 → 南 (Nan)。半荘戦想定。
+    /// (西入・北入の対応は未実装。round 9+ は南扱いでクランプ)
+    pub fn round_wind(&self) -> Honor {
+        if self.round <= 4 { Honor::Ton } else { Honor::Nan }
+    }
+
+    /// 指定プレイヤーの自風 (#53)。
+    ///
+    /// dealer からの相対位置で割り当てる:
+    /// - dealer 本人 = 東 (Ton)
+    /// - dealer + 1 = 南 (Nan)
+    /// - dealer + 2 = 西 (Shaa)
+    /// - dealer + 3 = 北 (Pei)
+    pub fn seat_wind(&self, player_idx: usize) -> Honor {
+        let rel = (player_idx + 4 - self.dealer) % 4;
+        match rel {
+            0 => Honor::Ton,
+            1 => Honor::Nan,
+            2 => Honor::Shaa,
+            _ => Honor::Pei,
+        }
+    }
+
+    /// 指定プレイヤー視点の `ScoringContext` を構築する (#49 / #50 / #53 / #54)。
+    ///
+    /// 立直 / 一発 / ダブル立直は `Player` の各フラグから引く。
+    /// 状況役 (海底 / 河底 / 嶺上 / 槍槓) は `Game` の追跡フラグから組み立てる。
+    /// 場風 / 自風 / ドラ表示牌は `Game` の対局状態から取得する。
+    ///
+    /// `is_tsumo` フラグの解釈:
+    /// - true: ツモ和了経路 → 海底 (`is_last_draw`) / 嶺上 (`last_was_rinshan`) を有効化
+    /// - false: ロン和了経路 → 河底 (`is_last_discard`) / 槍槓 (`pending_chankan`) を有効化
+    pub fn build_scoring_context(&self, player_idx: usize, is_tsumo: bool) -> crate::scoring::ScoringContext {
+        use crate::scoring::ScoringContext;
+        if player_idx >= self.players.len() {
+            return ScoringContext::default();
+        }
+        let p = &self.players[player_idx];
+        let is_dealer = player_idx == self.dealer;
+        ScoringContext {
+            is_tsumo,
+            is_dealer,
+            is_riichi: p.is_riichi && !p.double_riichi,
+            is_double_riichi: p.double_riichi,
+            is_ippatsu: p.ippatsu,
+            is_haitei: is_tsumo && self.is_last_draw,
+            is_houtei: !is_tsumo && self.is_last_discard,
+            is_rinshan: is_tsumo && self.last_was_rinshan,
+            is_chankan: !is_tsumo && self.pending_chankan.is_some(),
+            round_wind: self.round_wind(),
+            seat_wind: self.seat_wind(player_idx),
+            dora_indicators: self.dora_indicators.clone(),
+            // 裏ドラは現状未実装 (#54 fast path)。立直成立時のみ集計対象なので空でも実害なし。
+            uradora_indicators: Vec::new(),
+        }
     }
 
     /// 東西戦: 和了者のチームに役を 1 件登録する。
@@ -949,6 +1118,9 @@ impl Game {
         }
         self.last_discard = Some(tile);
         self.last_discard_hidden = false;
+        self.last_discarder = Some(player_idx);
+        self.is_last_discard = self.wall.is_empty();
+        self.last_was_rinshan = false;
         self.player_timers[player_idx].reset();
         Some(tile)
     }
@@ -1305,6 +1477,12 @@ impl Game {
         self.current_player = self.dealer;
         self.last_discard = None;
         self.last_discard_hidden = false;
+        // #50 状況役の局スコープ状態をリセット
+        self.is_last_draw = false;
+        self.is_last_discard = false;
+        self.last_was_rinshan = false;
+        self.pending_chankan = None;
+        self.last_discarder = None;
         // ゲーム継続が確定したのでここで初めて last_outcome をクリア
         self.last_outcome = None;
 
@@ -2213,6 +2391,7 @@ mod tests {
             yaku: Vec::new(),
             base_points: 0,
             total_points: total,
+            ..Default::default()
         }
     }
 
@@ -2811,6 +2990,7 @@ mod tests {
             yaku: vec![yakuman],
             base_points: 0,
             total_points: total,
+            ..Default::default()
         }
     }
 

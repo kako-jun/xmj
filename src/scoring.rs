@@ -2,6 +2,80 @@ use crate::tile::{Tile, TileType, Honor, Suit};
 use crate::hand::{Hand, MeldType};
 use std::collections::{HashMap, HashSet};
 
+/// ドラ表示牌から実際のドラ牌を計算する。
+///
+/// - 数牌: 値 +1 (9 の次は 1 にループ)
+/// - 風牌: 東→南→西→北→東 ループ
+/// - 三元牌: 白→發→中→白 ループ
+pub fn dora_indicator_to_dora(indicator: &Tile) -> Tile {
+    match indicator.tile_type {
+        TileType::Number { suit, value } => {
+            let next = if value >= 9 { 1 } else { value + 1 };
+            Tile::new_number(suit, next, false)
+        }
+        TileType::Honor(h) => {
+            let next = match h {
+                Honor::Ton => Honor::Nan,
+                Honor::Nan => Honor::Shaa,
+                Honor::Shaa => Honor::Pei,
+                Honor::Pei => Honor::Ton,
+                Honor::Haku => Honor::Hatsu,
+                Honor::Hatsu => Honor::Chun,
+                Honor::Chun => Honor::Haku,
+            };
+            Tile::new_honor(next)
+        }
+    }
+}
+
+/// 役判定に必要な対局・プレイヤー状態。
+///
+/// 既存 `calculate_score(hand, tile, is_tsumo, is_dealer)` API は本構造を default で
+/// 組んで呼ぶラッパとして残し、状況役を扱う新規呼び出し元は
+/// `calculate_score_with_context` を経由する。
+#[derive(Debug, Clone)]
+pub struct ScoringContext {
+    pub is_tsumo: bool,
+    pub is_dealer: bool,
+    /// プレイヤー状態
+    pub is_riichi: bool,
+    pub is_double_riichi: bool,
+    pub is_ippatsu: bool,
+    /// 状況役
+    pub is_haitei: bool,
+    pub is_houtei: bool,
+    pub is_rinshan: bool,
+    pub is_chankan: bool,
+    /// 場風 (East/South/West/North のいずれか)
+    pub round_wind: Honor,
+    /// 自風 (East/South/West/North のいずれか)
+    pub seat_wind: Honor,
+    /// ドラ表示牌
+    pub dora_indicators: Vec<Tile>,
+    /// 裏ドラ表示牌 (立直成立時のみ集計対象)
+    pub uradora_indicators: Vec<Tile>,
+}
+
+impl Default for ScoringContext {
+    fn default() -> Self {
+        Self {
+            is_tsumo: false,
+            is_dealer: false,
+            is_riichi: false,
+            is_double_riichi: false,
+            is_ippatsu: false,
+            is_haitei: false,
+            is_houtei: false,
+            is_rinshan: false,
+            is_chankan: false,
+            round_wind: Honor::Ton,
+            seat_wind: Honor::Ton,
+            dora_indicators: Vec::new(),
+            uradora_indicators: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Yaku {
     // 一飜役
@@ -55,19 +129,54 @@ pub enum Yaku {
     Chiihou,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ScoringResult {
     pub han: u32,
     pub fu: u32,
     pub yaku: Vec<Yaku>,
     pub base_points: u32,
     pub total_points: u32,
+    /// ドラ枚数 (han に加算済み、UI 表示用に枚数保持)
+    pub dora: u32,
+    /// 裏ドラ枚数 (立直成立時のみカウント、han に加算済み)
+    pub uradora: u32,
+    /// 赤ドラ枚数 (han に加算済み)
+    pub akadora: u32,
+    /// 槓ドラ枚数 (dora と合算してフィールド分離保持。
+    /// 現状の Game 実装は明槓/暗槓時に `dora_indicators` に追加するため、
+    /// `dora` には槓ドラぶんも含まれている。本フィールドは表示用の補助で
+    /// 0 のままになるケースが多い)
+    pub kandora: u32,
 }
 
 pub struct ScoringEngine;
 
 impl ScoringEngine {
-    pub fn calculate_score(hand: &Hand, winning_tile: &Tile, is_tsumo: bool, is_dealer: bool) -> Option<ScoringResult> {
+    /// 旧 API。後方互換用。新規コードは `calculate_score_with_context` を使う。
+    pub fn calculate_score(
+        hand: &Hand,
+        winning_tile: &Tile,
+        is_tsumo: bool,
+        is_dealer: bool,
+    ) -> Option<ScoringResult> {
+        let ctx = ScoringContext {
+            is_tsumo,
+            is_dealer,
+            ..ScoringContext::default()
+        };
+        Self::calculate_score_with_context(hand, winning_tile, &ctx)
+    }
+
+    /// 役判定に必要な対局・プレイヤー状態をフルに受け取って点数計算する。
+    ///
+    /// 立直系 (#49) / 状況役 (#50) / 場風自風 (#53) / ドラ (#54) を含む。
+    pub fn calculate_score_with_context(
+        hand: &Hand,
+        winning_tile: &Tile,
+        ctx: &ScoringContext,
+    ) -> Option<ScoringResult> {
+        let is_tsumo = ctx.is_tsumo;
+        let is_dealer = ctx.is_dealer;
         let mut yaku = Vec::new();
         let mut han = 0;
         // TODO: 暗カン (Meld where !is_open) は門前扱いが正解。立直・平和・ツモ・一盃口・二盃口・九蓮宝燈の判定に影響。別 Issue 化
@@ -133,7 +242,45 @@ impl ScoringEngine {
                 yaku,
                 base_points,
                 total_points,
+                dora: 0,
+                uradora: 0,
+                akadora: 0,
+                kandora: 0,
             });
+        }
+
+        // #49: 立直系 (門前のみ)
+        if is_menzen {
+            if ctx.is_double_riichi {
+                yaku.push(Yaku::DoubleRiichi);
+                han += 2;
+            } else if ctx.is_riichi {
+                yaku.push(Yaku::Riichi);
+                han += 1;
+            }
+            // 一発は立直 (or ダブル立直) 成立時のみ意味を持つ
+            if ctx.is_ippatsu && (ctx.is_riichi || ctx.is_double_riichi) {
+                yaku.push(Yaku::Ippatsu);
+                han += 1;
+            }
+        }
+
+        // #50: 状況役
+        if ctx.is_haitei {
+            yaku.push(Yaku::Haitei);
+            han += 1;
+        }
+        if ctx.is_houtei {
+            yaku.push(Yaku::Houtei);
+            han += 1;
+        }
+        if ctx.is_rinshan {
+            yaku.push(Yaku::Rinshan);
+            han += 1;
+        }
+        if ctx.is_chankan {
+            yaku.push(Yaku::Chankan);
+            han += 1;
         }
 
         // 七対子チェック（特殊形）
@@ -172,9 +319,22 @@ impl ScoringEngine {
             }
         }
 
-        // 役牌チェック
-        for honor in [Honor::Haku, Honor::Hatsu, Honor::Chun] {
-            if Self::check_yakuhai(hand, honor) {
+        // 役牌チェック (#53)
+        // 三元牌 + 場風 + 自風 を対象に評価する。
+        // 場風 == 自風 (ダブル東等) は同じ Honor を 2 回 push して 2 han 計上する。
+        //
+        // 暗刻三元 (手牌内に同種 honor が 3 枚以上) も役牌扱いとして包括する。
+        // 厳密には agari パターン分解後の暗刻判定が必要だが、ここでは簡易判定とする。
+        // TODO(#53 follow-up): agari 完全分解版に置き換え
+        let honor_yakuhai_targets: Vec<Honor> = vec![
+            Honor::Haku,
+            Honor::Hatsu,
+            Honor::Chun,
+            ctx.round_wind,
+            ctx.seat_wind,
+        ];
+        for honor in honor_yakuhai_targets {
+            if Self::check_yakuhai_full(hand, winning_tile, honor) {
                 yaku.push(Yaku::Yakuhai(honor));
                 han += 1;
             }
@@ -245,8 +405,25 @@ impl ScoringEngine {
         }
 
         if han == 0 {
-            return None; // 役なし
+            // 役なし。ドラのみでは和了不可なので None を返す。
+            return None;
         }
+
+        // #54: ドラ / 裏ドラ / 赤ドラ / 槓ドラ を計算して han に加算する。
+        // ドラは「役ではない」ため Yaku enum には push しない。`ScoringResult` に
+        // 枚数を保持して UI 側で別表示できるようにする。
+        let dora = Self::count_dora(hand, winning_tile, &ctx.dora_indicators);
+        // 裏ドラは立直成立時のみ (`is_riichi` または `is_double_riichi`)
+        let uradora = if ctx.is_riichi || ctx.is_double_riichi {
+            Self::count_dora(hand, winning_tile, &ctx.uradora_indicators)
+        } else {
+            0
+        };
+        let akadora = Self::count_akadora(hand, winning_tile);
+        // 槓ドラは Game 側で `dora_indicators` に追加されている運用なので、
+        // 上記 `dora` カウントに既に含まれる。本フィールドは情報保持用に 0 で残す。
+        let kandora = 0;
+        han += dora + uradora + akadora;
 
         let fu = Self::calculate_fu(hand, winning_tile, is_tsumo);
         let base_points = Self::calculate_base_points(han, fu);
@@ -258,6 +435,10 @@ impl ScoringEngine {
             yaku,
             base_points,
             total_points,
+            dora,
+            uradora,
+            akadora,
+            kandora,
         })
     }
     
@@ -297,6 +478,87 @@ impl ScoringEngine {
             }
         }
         false
+    }
+
+    /// 副露 + 手牌内暗刻を含む役牌判定 (#53)。
+    ///
+    /// 簡易実装:
+    /// - 副露 (Pon/Kan) で対象 honor を抱えていれば成立
+    /// - 手牌 (winning_tile を含めた全字牌) に同種 honor が 3 枚以上あれば成立
+    ///   (雀頭 2 枚での成立は意図的に弾く)
+    ///
+    /// TODO(#53 follow-up): agari パターン完全分解版に置き換え、
+    /// 「雀頭が役牌」「暗刻として実際に組まれている」を厳密に判定する。
+    fn check_yakuhai_full(hand: &Hand, winning_tile: &Tile, honor: Honor) -> bool {
+        if Self::check_yakuhai(hand, honor) {
+            return true;
+        }
+        // 手牌内 (副露は除く) の同種 honor 数 + winning_tile が同種なら +1
+        let mut count = 0;
+        for t in hand.get_tiles() {
+            if let TileType::Honor(h) = t.tile_type {
+                if h == honor {
+                    count += 1;
+                }
+            }
+        }
+        if let TileType::Honor(h) = winning_tile.tile_type {
+            if h == honor {
+                count += 1;
+            }
+        }
+        count >= 3
+    }
+
+    /// ドラ枚数を数える (#54)。
+    ///
+    /// 各 dora_indicator を `dora_indicator_to_dora` で「実際のドラ牌」に変換し、
+    /// 手牌 (tiles + 副露 tiles + winning_tile) に何枚含まれるかを集計する。
+    /// 赤ドラは含まない (別カウント)。
+    fn count_dora(hand: &Hand, winning_tile: &Tile, indicators: &[Tile]) -> u32 {
+        if indicators.is_empty() {
+            return 0;
+        }
+        let mut all_tiles = hand.get_tiles().clone();
+        for meld in hand.get_melds() {
+            for t in &meld.tiles {
+                all_tiles.push(*t);
+            }
+        }
+        all_tiles.push(*winning_tile);
+        let mut count = 0u32;
+        for ind in indicators {
+            let dora = dora_indicator_to_dora(ind);
+            for t in &all_tiles {
+                // tile_type のみ一致で判定 (赤ドラは別カウント、is_red 違いは
+                // PartialEq で別牌扱いになるため tile_type だけ比較する)
+                if t.tile_type == dora.tile_type {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
+    /// 赤ドラ枚数を数える (#54)。
+    fn count_akadora(hand: &Hand, winning_tile: &Tile) -> u32 {
+        let mut count = 0u32;
+        for t in hand.get_tiles() {
+            if t.is_red {
+                count += 1;
+            }
+        }
+        for meld in hand.get_melds() {
+            for t in &meld.tiles {
+                if t.is_red {
+                    count += 1;
+                }
+            }
+        }
+        if winning_tile.is_red {
+            count += 1;
+        }
+        count
     }
 
     // 七対子
