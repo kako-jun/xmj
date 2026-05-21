@@ -357,11 +357,136 @@ export class WasmGameBridge {
     return this.game.doKan(playerIdx)
   }
 
+  // ---- 暗槓 / 加槓 (Issue #46) ----
+
+  /**
+   * 暗槓可能な牌の一覧。手牌に 4 枚揃いがある牌だけ返す。
+   * Rust 側は空白区切りの tile-string を返すので Tile[] に parse する。
+   * (空文字は空配列)
+   */
+  canAnkan(playerIdx: PlayerIndex): Tile[] {
+    const raw = this.game.canAnkan(playerIdx)
+    return parseTileList(raw)
+  }
+
+  /**
+   * 暗槓を実行する。指定牌が 4 枚揃ってない / プレイヤー idx 不正なら false。
+   * 成功すると嶺上ツモ + 槓ドラ追加 + last_was_rinshan=true (Rinshan 役発火)。
+   */
+  doAnkan(playerIdx: PlayerIndex, tile: Tile): boolean {
+    return this.game.doAnkan(playerIdx, tileToCuiCode(tile))
+  }
+
+  /**
+   * 加槓 (小明槓) 可能な牌の一覧。
+   * 既存の Pon 副露と同じ牌が手牌に 1 枚以上ある場合のみ候補に上がる。
+   */
+  canShouminkan(playerIdx: PlayerIndex): Tile[] {
+    const raw = this.game.canShouminkan(playerIdx)
+    return parseTileList(raw)
+  }
+
+  /**
+   * 加槓宣言を**開始**する (2 段階 API の前半)。
+   * 戻り値: `{ ok, candidates }`
+   * - ok=false: 宣言不可 (候補に含まれない / 既に pending 中等)
+   * - candidates: 当該 tile でロン (槍槓) できる他家の座席 index 一覧
+   *   - 空: 即 `completeShouminkan` で確定してよい
+   *   - 非空: UI 側で槍槓ロンの猶予を見せた後、誰も宣言しなければ
+   *     `completeShouminkan`、誰かが宣言したら `resolveWinChankan` + `cancelShouminkan`
+   */
+  startShouminkan(playerIdx: PlayerIndex, tile: Tile): {
+    ok: boolean
+    candidates: PlayerIndex[]
+  } {
+    const raw = this.game.startShouminkan(playerIdx, tileToCuiCode(tile))
+    if (!raw) return { ok: false, candidates: [] }
+    try {
+      const parsed = JSON.parse(raw) as { ok?: boolean; candidates?: number[] }
+      return {
+        ok: parsed.ok === true,
+        candidates: Array.isArray(parsed.candidates)
+          ? parsed.candidates.map(n => n as PlayerIndex)
+          : [],
+      }
+    } catch {
+      return { ok: false, candidates: [] }
+    }
+  }
+
+  /**
+   * 加槓を**完了**する (2 段階 API の後半、誰もロン宣言しなかった場合)。
+   * 内部で Pon meld → Kan meld 書き換え + 嶺上ツモ + 槓ドラ追加。
+   */
+  completeShouminkan(playerIdx: PlayerIndex, tile: Tile): boolean {
+    return this.game.completeShouminkan(playerIdx, tileToCuiCode(tile))
+  }
+
+  /**
+   * 加槓宣言をキャンセルする (誰かが槍槓ロンを宣言した場合に呼ぶ)。
+   * `pending_chankan` を None に戻すだけのべき等な API。
+   */
+  cancelShouminkan(): void {
+    this.game.cancelShouminkan()
+  }
+
+  /**
+   * 槍槓ロン (加槓宣言中の牌でのロン) を確定する。
+   * `pending_chankan` の tile を winning_tile として使う。
+   * 戻り値は通常ロンと同じ `RoundWinSummary | null`。
+   */
+  resolveWinChankan(
+    winnerIdx: PlayerIndex,
+    fromIdx: PlayerIndex
+  ): RoundWinSummary | null {
+    const json = this.game.resolveWinChankan(winnerIdx, fromIdx)
+    return parseSummaryAsWin(json, winnerIdx, 'ron', fromIdx)
+  }
+
   /**
    * wasm-bindgen が生成した free() を呼んでメモリを解放する。
    * ゲーム終了時 / リスタート時に必ず呼ぶこと。
    */
   destroy(): void {
     this.game.free()
+  }
+}
+
+/**
+ * 空白区切りの tile-string を Tile[] に分解する。
+ * 例: `"5m 8p"` → [{suit:'man',value:5}, {suit:'pin',value:8}]
+ * 空文字 / 不正 token は除外する。
+ */
+const parseTileList = (raw: string): Tile[] => {
+  if (!raw) return []
+  const out: Tile[] = []
+  for (const token of raw.split(/\s+/)) {
+    if (!token) continue
+    const tile = parseTileToken(token)
+    if (tile) out.push(tile)
+  }
+  return out
+}
+
+const parseTileToken = (code: string): Tile | null => {
+  // 数牌: "5m" / "5mr" 等
+  const numMatch = /^([1-9])([mps])(r?)$/.exec(code)
+  if (numMatch) {
+    const [, value, suitChar, red] = numMatch
+    const suit: Tile['suit'] =
+      suitChar === 'm' ? 'man' : suitChar === 'p' ? 'pin' : 'sou'
+    const tile: Tile = { suit, value: Number(value) }
+    if (red) tile.isRed = true
+    return tile
+  }
+  switch (code) {
+    case 'to': return { suit: 'wind', value: 1 }
+    case 'na': return { suit: 'wind', value: 2 }
+    case 'sa': return { suit: 'wind', value: 3 }
+    case 'pe': return { suit: 'wind', value: 4 }
+    case 'hk': return { suit: 'dragon', value: 1 }
+    case 'ht': return { suit: 'dragon', value: 2 }
+    case 'cn': return { suit: 'dragon', value: 3 }
+    default: return null
   }
 }

@@ -922,6 +922,140 @@ impl Game {
         true
     }
 
+    /// 加槓 (小明槓) 可能な牌の一覧を返す (#46)。
+    ///
+    /// 既に副露している Pon meld と同じ牌が手牌に 1 枚以上ある場合のみ候補。
+    /// 「同じ牌」は `Tile == Tile` で判定するため、5m と 5m(赤) は別扱い。
+    /// 既存仕様の `Player::hand.remove_tile` も `==` ベースなので整合する。
+    pub fn can_shouminkan(&self, player_idx: usize) -> Vec<Tile> {
+        if player_idx >= self.players.len() {
+            return Vec::new();
+        }
+        let hand = &self.players[player_idx].hand;
+        let tiles = hand.get_tiles();
+        let melds = hand.get_melds();
+        let mut candidates: Vec<Tile> = Vec::new();
+        for meld in melds {
+            if !matches!(meld.meld_type, crate::hand::MeldType::Pon) {
+                continue;
+            }
+            // Pon meld は同じ牌 3 枚で構成される。先頭で十分。
+            let Some(meld_tile) = meld.tiles.first() else {
+                continue;
+            };
+            // 手牌に 1 枚以上同じ牌が必要。等価判定は赤ドラ違いを別扱い。
+            if tiles.iter().any(|t| t == meld_tile) && !candidates.contains(meld_tile) {
+                candidates.push(*meld_tile);
+            }
+        }
+        candidates
+    }
+
+    /// 加槓を宣言する (#46 槍槓発火配線)。
+    ///
+    /// 仕様:
+    /// 1. `can_shouminkan(player_idx)` に `tile` が含まれていなければ false
+    /// 2. `pending_chankan = Some(tile)` をセット (他家のロン猶予期間に入る)
+    /// 3. **この時点では meld の書き換え・嶺上ツモ・dora 追加はまだしない**。
+    ///    他家がロンを宣言したらキャンセル、しなければ `complete_shouminkan` で
+    ///    完了する 2 段階 API。
+    /// 4. 手牌から `tile` は**抜かない**。槍槓ロン判定で `Player::can_win(tile)`
+    ///    が打牌相当に振る舞うため、wasm 側は `pending_chankan` をフラグとして
+    ///    `is_chankan=true` の ScoringContext を組み立てる
+    ///    (`build_scoring_context` で参照済み)。
+    pub fn start_shouminkan(&mut self, player_idx: usize, tile: Tile) -> bool {
+        if player_idx >= self.players.len() {
+            return false;
+        }
+        if self.pending_chankan.is_some() {
+            return false;
+        }
+        if !self.can_shouminkan(player_idx).contains(&tile) {
+            return false;
+        }
+        self.pending_chankan = Some(tile);
+        // 加槓宣言が出た時点では `last_discard` は変えない。槍槓ロンの牌は
+        // pending_chankan を直接見る前提。
+        true
+    }
+
+    /// 加槓を完了する (#46)。誰もロン宣言しなかった場合に呼ぶ。
+    ///
+    /// 1. 該当 Pon meld を探して Kan meld に書き換え (is_open=true 維持)
+    /// 2. 手牌から `tile` を 1 枚除去
+    /// 3. 嶺上ツモ + 槓ドラ追加 + `last_was_rinshan=true`
+    /// 4. `pending_chankan = None` にして槍槓窓口を閉じる
+    ///
+    /// 該当 Pon meld が見つからない / 手牌に tile が無い場合は false (state は変えない)。
+    pub fn complete_shouminkan(&mut self, player_idx: usize, tile: Tile) -> bool {
+        if player_idx >= self.players.len() {
+            return false;
+        }
+        // start で立てた pending_chankan と一致しない呼び出しは弾く
+        // (== なら同一 tile。違う場合は API 利用が不整合)
+        if self.pending_chankan != Some(tile) {
+            return false;
+        }
+
+        // Pon meld の index を探す
+        let pon_index = {
+            let melds = self.players[player_idx].hand.get_melds();
+            melds.iter().position(|m| {
+                matches!(m.meld_type, crate::hand::MeldType::Pon)
+                    && m.tiles.first().map_or(false, |t| *t == tile)
+            })
+        };
+        let Some(idx) = pon_index else {
+            return false;
+        };
+
+        // 手牌から該当牌を 1 枚除去
+        if !self.players[player_idx].hand.remove_tile(&tile) {
+            return false;
+        }
+
+        // Pon meld を Kan meld に書き換える。is_open は加槓なので true 維持。
+        // tiles ベクタを 4 枚に拡張する形で更新する。
+        {
+            let melds = self.players[player_idx].hand.get_melds_mut();
+            if let Some(meld) = melds.get_mut(idx) {
+                meld.meld_type = crate::hand::MeldType::Kan;
+                meld.tiles.push(tile);
+                meld.is_open = true;
+            } else {
+                // 直前に position で見つけているので通常到達不能
+                return false;
+            }
+        }
+
+        // 槓ドラ追加
+        if let Some(dora_indicator) = self.wall.pop() {
+            self.dora_indicators.push(dora_indicator);
+        }
+        // 嶺上ツモ
+        if let Some(rinshan_tile) = self.wall.pop() {
+            self.players[player_idx].draw_tile(rinshan_tile);
+        }
+        self.last_was_rinshan = true;
+        // 他家の一発を消す
+        self.clear_ippatsu_others(player_idx);
+        // 槍槓窓口を閉じる
+        self.pending_chankan = None;
+        self.current_player = player_idx;
+        true
+    }
+
+    /// 加槓をキャンセルする (#46)。誰かが槍槓ロンを宣言した場合に呼ぶ。
+    ///
+    /// `pending_chankan = None` にするだけのべき等な API。meld 書き換えも
+    /// 嶺上ツモもまだしていないので、手牌・副露は加槓宣言前の状態のまま。
+    /// 槍槓ロン側 (`resolve_win_ron`) は本関数が呼ばれる前に `pending_chankan`
+    /// を読んで `is_chankan=true` の ScoringContext を組むため、呼び順は
+    /// 「resolve_win_ron → cancel_shouminkan」が正しい。
+    pub fn cancel_shouminkan(&mut self) {
+        self.pending_chankan = None;
+    }
+
     /// 自家以外のプレイヤーの一発フラグを下ろす (#49)。
     ///
     /// 鳴き (チー / ポン / カン) が入ったとき、立直していた他家の一発が消える。

@@ -56,6 +56,21 @@ export type PendingDecision =
       canKan: boolean
       canChi: boolean
     }
+  | {
+      /**
+       * 自家ツモ後の暗槓 / 加槓 (小明槓) 宣言モーダル。
+       * Issue #46: 4 枚揃いまたは Pon 副露と一致する手牌があるとき、ユーザに
+       * 「カンする / しない」を尋ねる。複数候補がある場合は最初の候補を採用する
+       * 簡易実装 (UI で牌選択 picker を出すのは follow-up)。
+       *
+       * - `ankan`: 暗槓可能な牌一覧 (空でないなら少なくとも 1 つは選べる)
+       * - `shouminkan`: 加槓可能な牌一覧
+       * - 両方とも空配列で本 variant は立たないので、UI は少なくとも 1 種類のボタンを出す
+       */
+      kind: 'self-kan-prompt'
+      ankan: Tile[]
+      shouminkan: Tile[]
+    }
 
 const defaultRollDice = (): DiceRoll => ({
   d1: 1 + Math.floor(Math.random() * 6),
@@ -300,8 +315,10 @@ export class App {
       this.drawHumanTileAndRefresh()
     } else {
       // 既に 14 枚状態 (テストで事前に手牌をセットしている等) でも、
-      // 立直可能ならその場でモーダルを出す。
-      this.maybePromptRiichi()
+      // カン / 立直可能ならその場でモーダルを出す。
+      if (!this.maybePromptSelfKan()) {
+        this.maybePromptRiichi()
+      }
       this.renderTable()
     }
   }
@@ -396,7 +413,10 @@ export class App {
     this.justDrawnTile = diffNewlyAddedTile(beforeHand, afterHand)
     // 新しいツモを引いた時点で、このターンの「リーチしない」決定はリセット。
     this.riichiDeclinedThisTurn = false
-    this.maybePromptRiichi()
+    // Issue #46: 暗槓 / 加槓が可能ならカンモーダル、そうでなければリーチモーダルへ
+    if (!this.maybePromptSelfKan()) {
+      this.maybePromptRiichi()
+    }
     this.renderTable()
     return true
   }
@@ -416,6 +436,39 @@ export class App {
     if (!this.bridge.canRiichi()) return
     this.pendingDecision = { kind: 'riichi-prompt' }
     this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がリーチ可能`)
+  }
+
+  /**
+   * 自家ツモ直後で暗槓 / 加槓 (小明槓) が可能なら、ユーザに「カン / しない」を尋ねる。
+   * 戻り値: true ならモーダルを立てた (= カン候補があった)、false なら何もしない。
+   *
+   * Issue #46: 自家ツモ後カン UI。立直済みのプレイヤーが暗槓するルール (送り槓不可等)
+   * は厳密には条件付きだが、本実装では「立直中はカンを出さない」シンプル運用。
+   */
+  private maybePromptSelfKan(): boolean {
+    if (!this.bridge) return false
+    if (this.bridge.isGameOver()) return false
+    if (!this.bridge.isCurrentPlayerHuman()) return false
+    if (this.pendingDecision) return false
+    // 立直中は (簡易ルールで) 自家カンを出さない
+    if (this.bridge.isPlayerRiichi(this.humanPlayerIndex)) return false
+    // mock bridge 対応: canAnkan/canShouminkan が未実装でもクラッシュしない
+    const ankan =
+      typeof this.bridge.canAnkan === 'function'
+        ? this.bridge.canAnkan(this.humanPlayerIndex)
+        : []
+    const shouminkan =
+      typeof this.bridge.canShouminkan === 'function'
+        ? this.bridge.canShouminkan(this.humanPlayerIndex)
+        : []
+    if (ankan.length === 0 && shouminkan.length === 0) return false
+    this.pendingDecision = { kind: 'self-kan-prompt', ankan, shouminkan }
+    const parts: string[] = []
+    if (ankan.length > 0) parts.push(`暗槓 ${ankan.map(t => tileToCuiCode(t)).join(',')}`)
+    if (shouminkan.length > 0)
+      parts.push(`加槓 ${shouminkan.map(t => tileToCuiCode(t)).join(',')}`)
+    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がカン可能 (${parts.join(' / ')})`)
+    return true
   }
 
   private maybeFinalizeRoundFromDraw(): void {
@@ -640,6 +693,10 @@ export class App {
       return this.buildRiichiPromptButtons()
     }
 
+    if (this.pendingDecision?.kind === 'self-kan-prompt') {
+      return this.buildSelfKanPromptButtons(this.pendingDecision)
+    }
+
     const isHumanTurn = this.bridge.isCurrentPlayerHuman()
     if (!isHumanTurn) return []
 
@@ -726,6 +783,50 @@ export class App {
       hotkey: 'Esc',
       onActivate: () => {
         this.skipMeldCall()
+      },
+    })
+    return buttons
+  }
+
+  /**
+   * 自家ツモ後の暗槓 / 加槓モーダル用ボタン。
+   * 暗槓と加槓が両方候補にある場合、両ボタンを並べる。複数牌候補は最初のものを採用 (簡易)。
+   */
+  private buildSelfKanPromptButtons(
+    pending: Extract<PendingDecision, { kind: 'self-kan-prompt' }>
+  ): HtmlUiActionButton[] {
+    const buttons: HtmlUiActionButton[] = []
+    if (pending.ankan.length > 0) {
+      const tile = pending.ankan[0]
+      buttons.push({
+        key: 'self-ankan',
+        label: `暗槓 ${tileToCuiCode(tile)}`,
+        enabled: true,
+        hotkey: 'K',
+        onActivate: () => {
+          this.confirmAnkan(tile)
+        },
+      })
+    }
+    if (pending.shouminkan.length > 0) {
+      const tile = pending.shouminkan[0]
+      buttons.push({
+        key: 'self-shouminkan',
+        label: `加槓 ${tileToCuiCode(tile)}`,
+        enabled: true,
+        hotkey: pending.ankan.length > 0 ? 'M' : 'K',
+        onActivate: () => {
+          this.confirmShouminkan(tile)
+        },
+      })
+    }
+    buttons.push({
+      key: 'self-kan-skip',
+      label: 'カンしない',
+      enabled: true,
+      hotkey: 'Esc',
+      onActivate: () => {
+        this.skipSelfKan()
       },
     })
     return buttons
@@ -897,6 +998,107 @@ export class App {
   }
 
   /**
+   * 自家暗槓を確定する (#46)。
+   * Rust 側 `doAnkan` 内で 4 枚副露への移動 + 嶺上ツモ + 槓ドラ追加 + 嶺上開花フラグ。
+   * 嶺上ツモを `justDrawnTile` に反映して右端表示する。
+   * 暗槓後はそのまま手番に居続けるので advanceTurnLoop は呼ばない。
+   */
+  private confirmAnkan(tile: Tile): void {
+    if (!this.bridge) return
+    if (this.pendingDecision?.kind !== 'self-kan-prompt') return
+    if (typeof this.bridge.doAnkan !== 'function') {
+      this.skipSelfKan()
+      return
+    }
+    const beforeHand = this.gameState
+      ? this.gameState.players[this.humanPlayerIndex].hand.slice()
+      : []
+    const ok = this.bridge.doAnkan(this.humanPlayerIndex, tile)
+    this.pendingDecision = null
+    if (!ok) {
+      this.appendLog('暗槓宣言失敗')
+      return
+    }
+    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} が暗槓 ${tileToCuiCode(tile)}`)
+    this.selectedHandIndex = null
+    this.refreshFromBridge()
+    const afterHand = this.gameState
+      ? this.gameState.players[this.humanPlayerIndex].hand
+      : []
+    this.justDrawnTile = diffNewlyAddedTile(beforeHand, afterHand)
+    // 暗槓後も自家手番継続。ツモ済み (嶺上) 状態なので、続けて打牌待ち or
+    // 連続カン (4 枚目を新たに引いた場合) → 再度 maybePromptSelfKan を試す
+    if (!this.maybePromptSelfKan()) {
+      this.maybePromptRiichi()
+    }
+    this.renderTable()
+  }
+
+  /**
+   * 自家加槓を確定する (#46)。
+   * Rust 側 2 段階 API:
+   *  1. `startShouminkan` で pending_chankan を立て、槍槓ロン候補を取得
+   *  2. 候補がいる場合は本実装では「未対応」としてキャンセル + 通常打牌に戻す
+   *     (CPU の槍槓ロン宣言は follow-up Issue #50 fast path 範囲外)
+   *  3. 候補ゼロなら `completeShouminkan` で完了
+   */
+  private confirmShouminkan(tile: Tile): void {
+    if (!this.bridge) return
+    if (this.pendingDecision?.kind !== 'self-kan-prompt') return
+    if (typeof this.bridge.startShouminkan !== 'function') {
+      this.skipSelfKan()
+      return
+    }
+    const start = this.bridge.startShouminkan(this.humanPlayerIndex, tile)
+    this.pendingDecision = null
+    if (!start.ok) {
+      this.appendLog('加槓宣言失敗')
+      return
+    }
+    if (start.candidates.length > 0) {
+      // 槍槓宣言の余地あり。本 PR では CPU 自動ロン UI 未実装のため、
+      // ログだけ出して即 complete に進める (Chankan 役は AI ロン側で発火する余地として残す)。
+      this.appendLog(
+        `加槓 ${tileToCuiCode(tile)}: 槍槓候補 ${start.candidates.join(',')} (本実装では見逃し扱い)`
+      )
+    }
+    const beforeHand = this.gameState
+      ? this.gameState.players[this.humanPlayerIndex].hand.slice()
+      : []
+    const ok =
+      typeof this.bridge.completeShouminkan === 'function'
+        ? this.bridge.completeShouminkan(this.humanPlayerIndex, tile)
+        : false
+    if (!ok) {
+      // 完了失敗時は pending_chankan を確実にキャンセルしておく
+      if (typeof this.bridge.cancelShouminkan === 'function') {
+        this.bridge.cancelShouminkan()
+      }
+      this.appendLog('加槓完了失敗')
+      return
+    }
+    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} が加槓 ${tileToCuiCode(tile)}`)
+    this.selectedHandIndex = null
+    this.refreshFromBridge()
+    const afterHand = this.gameState
+      ? this.gameState.players[this.humanPlayerIndex].hand
+      : []
+    this.justDrawnTile = diffNewlyAddedTile(beforeHand, afterHand)
+    if (!this.maybePromptSelfKan()) {
+      this.maybePromptRiichi()
+    }
+    this.renderTable()
+  }
+
+  /** 自家ツモ後カンモーダルで「カンしない」を選んだ。リーチモーダルへ進める。 */
+  private skipSelfKan(): void {
+    if (this.pendingDecision?.kind !== 'self-kan-prompt') return
+    this.pendingDecision = null
+    this.maybePromptRiichi()
+    this.renderTable()
+  }
+
+  /**
    * 鳴き (ロン/ポン/カン/チー) のどれもしないで通常の turn loop に戻る。
    *
    * Issue #56: ロン可能だったのに見逃した場合は WASM 側にフリテン通知 (`skipRon`) を
@@ -1008,6 +1210,10 @@ export class App {
       this.declineRiichi()
       return
     }
+    if (this.pendingDecision?.kind === 'self-kan-prompt') {
+      this.skipSelfKan()
+      return
+    }
   }
 
   private handleHotkeyConfirm(): void {
@@ -1076,6 +1282,15 @@ export class App {
     }
     if (this.pendingDecision?.kind === 'riichi-prompt') {
       return 'リーチ[L] / リーチしない[Esc]'
+    }
+    if (this.pendingDecision?.kind === 'self-kan-prompt') {
+      const opts: string[] = []
+      if (this.pendingDecision.ankan.length > 0) opts.push('暗槓[K]')
+      if (this.pendingDecision.shouminkan.length > 0) {
+        opts.push(this.pendingDecision.ankan.length > 0 ? '加槓[M]' : '加槓[K]')
+      }
+      opts.push('カンしない[Esc]')
+      return opts.join(' / ')
     }
     if (this.activeScene !== 'table') {
       if (this.activeScene === 'title') return '対局開始でモード選択へ'
