@@ -29,6 +29,12 @@ pub struct Player {
     pub riichi_turn: Option<usize>, // リーチ宣言したターン
     pub ippatsu: bool,               // 一発フラグ
     pub double_riichi: bool,         // ダブル立直
+    /// 同巡フリテン: ロンを 1 度見逃した直後から、自分の次のツモまで真。
+    /// 自分の `draw_tile` で false に戻る (Issue #56)。
+    pub skipped_ron_this_turn: bool,
+    /// 立直後フリテン: 立直済みの状態でロンを見逃すと永続的にフリテン状態になる。
+    /// 局が終わるまで解除されない (`reset_for_next_round` で false に戻る) (Issue #56)。
+    pub permanent_furiten: bool,
 }
 
 impl Player {
@@ -44,11 +50,16 @@ impl Player {
             riichi_turn: None,
             ippatsu: false,
             double_riichi: false,
+            skipped_ron_this_turn: false,
+            permanent_furiten: false,
         }
     }
 
     pub fn draw_tile(&mut self, tile: Tile) {
         self.hand.add_tile(tile);
+        // 自分のツモで同巡フリテン解除 (Issue #56)
+        // 永続フリテン (立直後の見逃し由来) は局終了まで解けないのでここでは触らない。
+        self.skipped_ron_this_turn = false;
     }
 
     pub fn discard_tile(&mut self, tile: Tile) -> bool {
@@ -170,6 +181,9 @@ impl Player {
         self.riichi_turn = None;
         self.ippatsu = false;
         self.double_riichi = false;
+        // フリテン関係のフラグも局スコープなので忘れず戻す (Issue #56)
+        self.skipped_ron_this_turn = false;
+        self.permanent_furiten = false;
     }
 
     /// リーチ可能かチェック
@@ -226,6 +240,56 @@ impl Player {
     /// 誠京麻雀の役満祝儀を受け取る（和了者）
     pub fn receive_yakuman_tip(&mut self, amount: i32) {
         self.add_score(amount);
+    }
+
+    /// フリテン判定 (Issue #56)。
+    ///
+    /// 3 種類を統合して true/false を返す:
+    /// 1. **通常フリテン**: 自分の捨て牌に自分の待ち牌のいずれかが含まれていればフリテン
+    /// 2. **同巡フリテン**: ロンを 1 度見逃したら自分の次のツモまでフリテン
+    ///    (`skipped_ron_this_turn` で管理、`draw_tile` で解除)
+    /// 3. **立直後フリテン**: 立直後にロン見逃しが発生したら局終了まで永続フリテン
+    ///    (`permanent_furiten` で管理、`reset_for_next_round` で解除)
+    ///
+    /// フリテン中はロンが不可。ツモは可能なので呼び出し側 (`can_ron` 等) で消費する。
+    /// 待ち牌と捨て牌の比較は赤ドラ無視 (`tile_type` のみ比較) で行う。
+    pub fn is_furiten(&self) -> bool {
+        if self.permanent_furiten {
+            return true;
+        }
+        if self.skipped_ron_this_turn {
+            return true;
+        }
+        // 通常フリテン: 自分の捨て牌に自分の待ち牌のいずれかがあるか
+        let waits = self.hand.compute_machi_tiles();
+        if waits.is_empty() {
+            return false;
+        }
+        let discards = self.discards_tiles();
+        waits
+            .iter()
+            .any(|w| discards.iter().any(|d| Self::tile_eq_furiten(w, d)))
+    }
+
+    /// フリテン用の牌同等比較 (赤ドラを無視して `tile_type` のみで比較)。
+    /// 赤 5m と 5m は同じ待ち / 同じ捨て牌として扱う。
+    fn tile_eq_furiten(a: &Tile, b: &Tile) -> bool {
+        a.tile_type == b.tile_type
+    }
+
+    /// ロンを見逃したことを通知する (Issue #56)。
+    ///
+    /// 「他家の打牌に対して自分がロン可能だったが宣言せず通常進行に戻した」場合に呼ぶ。
+    /// - 同巡フリテン: `skipped_ron_this_turn = true`
+    /// - 立直済みなら永続フリテン: `permanent_furiten = true`
+    ///
+    /// 呼び出し側 (TS の skipMeldCall や Game 側) でロン可能状況の判定は済ませてから呼ぶ。
+    /// 本関数自体は無条件にフラグを立てるだけ (べき等)。
+    pub fn notify_ron_skipped(&mut self) {
+        self.skipped_ron_this_turn = true;
+        if self.is_riichi {
+            self.permanent_furiten = true;
+        }
     }
 
     /// リーチ後の打牌チェック（ツモ切りのみ）

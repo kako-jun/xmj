@@ -66,24 +66,25 @@ impl Hand {
         self.shanten() == 0
     }
 
-    /// 13 枚手 (副露なし) の待ち牌候補を列挙する。
+    /// 13 枚手の待ち牌候補を列挙する。副露ありにも対応 (Issue #43)。
     ///
     /// 34 種の各候補牌を順に試し、加えると `is_winning_hand` 成立するものを返す。
-    /// 副露があるとき・手牌が `13 - melds*3` 枚でないときは空 Vec を返す。
+    /// 手牌が `13 - melds*3` 枚でないときは空 Vec を返す。
     ///
-    /// Issue #34: 多面待ちの精度確認 / UI 表示拡張のためのユーティリティ。
+    /// 副露がある場合は `is_winning_hand` 内部で `check_normal_win` (副露込みで
+    /// 4 面子 1 雀頭を組む経路) が走るため、ここでは early-return せず 34 種を
+    /// 全列挙する。フリテン判定 (Issue #56) も本関数の結果を利用する。
+    ///
+    /// 元々 Issue #34: 多面待ちの精度確認 / UI 表示拡張のためのユーティリティ。
     pub fn compute_machi_tiles(&self) -> Vec<Tile> {
         let expected_tiles = 13usize.saturating_sub(self.melds.len() * 3);
         if self.tiles.len() != expected_tiles {
             return Vec::new();
         }
-        // 副露ありの待ち列挙は #34 スコープ外。`is_winning_hand` が melds を考慮するので
-        // 一応動作はするが、ここでは簡明性のため副露なしに限定する。
-        if !self.melds.is_empty() {
-            return Vec::new();
-        }
         let mut waits: Vec<Tile> = Vec::new();
         // all_34_tiles() は重複を含まないため contains チェックは不要。
+        // 副露ありの場合も `can_win` → `is_winning_hand` が `melds` を考慮するので
+        // そのまま 34 種に対して試行すれば正しい待ちが拾える。
         for candidate in Self::all_34_tiles() {
             if self.can_win(&candidate) {
                 waits.push(candidate);

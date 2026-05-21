@@ -298,7 +298,8 @@ impl WasmGame {
     /// 指定プレイヤーが直前の打牌に対してロン可能か。
     ///
     /// 条件: 直前打牌者ではなく、`last_discard` が存在し、闇牌で隠蔽されておらず、
-    /// `Player::can_win(last_discard)` が true。`Game::can_someone_win` の単一プレイヤー版。
+    /// フリテン状態でもなく、`Player::can_win(last_discard)` が true。
+    /// `Game::can_someone_win` の単一プレイヤー版 + フリテン消費 (Issue #56)。
     #[wasm_bindgen(js_name = canRon)]
     pub fn can_ron(&self, player_idx: usize) -> bool {
         if player_idx >= self.game.players.len() {
@@ -313,7 +314,27 @@ impl WasmGame {
         let Some(tile) = self.game.last_discard else {
             return false;
         };
+        // Issue #56: フリテン (通常 / 同巡 / 立直後永続) ならロン不可
+        if self.game.players[player_idx].is_furiten() {
+            return false;
+        }
         self.game.players[player_idx].can_win(&tile)
+    }
+
+    /// 直前打牌に対するロンを見逃したことを宣言する (Issue #56)。
+    ///
+    /// 呼び出し側 (TS の `skipMeldCall` 等) は「`can_ron(player_idx)` が true の状態で
+    /// ロンを選ばずに通常進行に戻した」場面でのみ本 API を呼ぶ。本関数自体は
+    /// `can_ron` の再判定はせず、`Player::notify_ron_skipped` を呼んでフラグを立てる
+    /// だけのべき等な API。
+    /// - 同巡フリテン: 当該プレイヤーの `skipped_ron_this_turn = true`
+    /// - 立直済みなら永続フリテン: `permanent_furiten = true`
+    #[wasm_bindgen(js_name = skipRon)]
+    pub fn skip_ron(&mut self, player_idx: usize) {
+        if player_idx >= self.game.players.len() {
+            return;
+        }
+        self.game.players[player_idx].notify_ron_skipped();
     }
 
     /// 直前打牌者の座席 index を返す。ロン宣言の `from_idx` 引数に渡すための補助。
