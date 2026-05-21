@@ -2958,4 +2958,85 @@ mod tests {
         assert!(from_diff >= 64000 + SEIKYO_YAKUMAN_TIP * 2, "ダブル役満で祝儀 2 倍: {}", from_diff);
         assert_score_conservation(&before, &game);
     }
+
+    /// Issue #48: `do_kan` (明槓) は嶺上ツモ 1 枚 + 槓ドラ 1 枚追加を実行する。
+    ///
+    /// - 鳴き対象の打牌 3 枚を手牌から削除し副露へ移すので、手牌枚数は -3 になる
+    /// - 嶺上から 1 枚ツモするので最終的に手牌枚数は -3 + 1 = -2
+    /// - dora_indicators が +1 (槓ドラ)
+    /// - current_player が宣言者に移る
+    #[test]
+    fn test_do_kan_draws_rinshan_tile_and_adds_kan_dora() {
+        let names = vec![
+            "P1".to_string(),
+            "P2".to_string(),
+            "P3".to_string(),
+            "P4".to_string(),
+        ];
+        let mut game = Game::new(names);
+
+        // 強制的に「player 0 が打牌、player 1 が同じ牌を 3 枚持っていて明槓可能」状態を作る。
+        let tile = Tile::new_number(Suit::Man, 5, false);
+        game.players[1].hand = crate::hand::Hand::new();
+        for _ in 0..3 {
+            game.players[1].hand.add_tile(tile);
+        }
+        // 副露区別がついて見えるよう、関係無い牌も 1 枚混ぜておく (kan 後に残るはず)
+        let other = Tile::new_number(Suit::Pin, 2, false);
+        game.players[1].hand.add_tile(other);
+
+        game.last_discard = Some(tile);
+        game.last_discard_hidden = false;
+        game.current_player = 0;
+
+        let raw_hand_len_before = game.players[1].hand.get_tiles().len();
+        let dora_count_before = game.dora_indicators.len();
+        let wall_count_before = game.get_wall_count();
+
+        assert!(game.can_kan(1), "前提: player 1 は明槓可能");
+        let ok = game.do_kan(1);
+        assert!(ok, "do_kan は成功する");
+
+        // 嶺上牌 1 枚 + 槓ドラ表示牌 1 枚で wall が 2 枚減る
+        assert_eq!(
+            game.get_wall_count(),
+            wall_count_before - 2,
+            "嶺上ツモ + 槓ドラ表示で山が 2 枚減る"
+        );
+
+        // 槓ドラが追加されている
+        assert_eq!(
+            game.dora_indicators.len(),
+            dora_count_before + 1,
+            "do_kan で dora_indicators が +1 される (槓ドラ)"
+        );
+
+        // 副露の中身: 5m 4 枚の明槓 1 個
+        let melds = game.players[1].hand.get_melds();
+        assert_eq!(melds.len(), 1, "明槓 1 個が副露に追加される");
+        assert!(matches!(melds[0].meld_type, crate::hand::MeldType::Kan));
+        assert!(melds[0].is_open, "他家打牌のカンは明槓 (is_open=true)");
+        assert_eq!(melds[0].tiles.len(), 4);
+        assert!(melds[0].tiles.iter().all(|&t| t == tile));
+
+        // 生 hand.tiles (副露を除く) は -3 (副露へ) + 1 (嶺上ツモ) = -2 枚になる
+        let remaining = game.players[1].hand.get_tiles();
+        assert_eq!(
+            remaining.len(),
+            raw_hand_len_before - 3 + 1,
+            "生の手牌 (副露除く) は -3 + 1 で正味 -2 枚"
+        );
+        // 副露へ移ったので手牌 (raw) に 5m は残っていない
+        assert!(
+            !remaining.iter().any(|&t| t == tile),
+            "手牌からは明槓した牌 (5m) が消えている"
+        );
+        // 関係無い牌は残っている
+        assert!(remaining.iter().any(|&t| t == other), "他の手牌 (2p) は残る");
+
+        // 手番は宣言者 (player 1) に移っている
+        assert_eq!(game.current_player, 1, "do_kan 後の手番は宣言者");
+        // last_discard はクリアされる
+        assert!(game.last_discard.is_none(), "明槓で last_discard はクリアされる");
+    }
 }

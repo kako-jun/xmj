@@ -966,6 +966,91 @@ Last discard: 5m`,
     expect(cpuTurnLog.length).toBeGreaterThan(1)
   })
 
+  it('明槓宣言後、嶺上ツモ牌が justDrawnTile に反映される (Issue #48)', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    // cpuTurnDelayMs=0 で CPU 打牌を同期的に進める
+    const appInst = new App(fakeApp, { cpuTurnDelayMs: 0 })
+
+    // CPU 1 が 5m を打牌した瞬間: 人間 (player 0) は 5m を 3 枚持っていて canKan=true。
+    // do_kan 後は 5m が 3 枚副露へ移り、嶺上から 中 (cn = dragon 3) を引いた状態にする。
+    const handBefore = '1m 5m 5m 5m 7p 8p 9p 2s 3s 4s 5s 6s to'
+    const handAfter = '1m 7p 8p 9p 2s 3s 4s 5s 6s to cn'
+    const stateBefore = `Round: 1 | Wall: 60 tiles
+Dora indicators: 5p
+ 親 あなた (25000点): ${handBefore}
+  河:
+> CPU 南 (25000点): 1p 1p 2p 2p 3p 3p 4s 5s 6s na na ht cn
+  河: 5m
+   CPU 西 (25000点): 4m 5m 6m 7m 8m 9m 3p 4p 5p 6p 7p 8p pe
+   CPU 北 (25000点): 1s 1s 2s 2s 3s 3s 4m 4m 5m 5m 6m 6m sa
+Last discard: 5m
+`
+    const stateAfter = `Round: 1 | Wall: 58 tiles
+Dora indicators: 5p 1p
+>親 あなた (25000点): ${handAfter}
+  河:
+   CPU 南 (25000点): 1p 1p 2p 2p 3p 3p 4s 5s 6s na na ht cn
+  河: 5m
+   CPU 西 (25000点): 4m 5m 6m 7m 8m 9m 3p 4p 5p 6p 7p 8p pe
+   CPU 北 (25000点): 1s 1s 2s 2s 3s 3s 4m 4m 5m 5m 6m 6m sa
+`
+
+    let currentPlayerId = 0
+    let kanCalled = false
+    const cpuTurnLog: number[] = []
+    let canKanState = false
+
+    const bridge = createBridgeMock({
+      getGameStateJson: () => (kanCalled ? stateAfter : stateBefore),
+      getCurrentHandString: () => (kanCalled ? handAfter : handBefore),
+      isCurrentPlayerHuman: () => currentPlayerId === 0,
+      isCurrentPlayerCpu: () => currentPlayerId !== 0,
+      getCurrentPlayerId: () => currentPlayerId,
+      drawTile: () => false,
+      discardTile: () => {
+        // 人間打牌成功 → 次プレイヤー (CPU 1) へ
+        currentPlayerId = 1
+        return true
+      },
+      executeCpuTurn: () => {
+        cpuTurnLog.push(currentPlayerId)
+        // CPU 1 が 5m を打って canKan=true → ループ停止
+        canKanState = true
+        currentPlayerId = (currentPlayerId + 1) % 4
+        return '5m'
+      },
+      canKan: () => canKanState,
+      doKan: () => {
+        kanCalled = true
+        canKanState = false
+        // do_kan 後は手番が宣言者 (人間) に戻る
+        currentPlayerId = 0
+        return true
+      },
+      getLastDiscarder: () => 1,
+    })
+
+    appInst.startGame(bridge, 0)
+
+    // 人間打牌で CPU ターン開始 → CPU 1 が 5m 打牌 → canKan=true でループ停止
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    clickActionButton('discard')
+
+    expect(appInst.pendingDecision?.kind).toBe('meld-call')
+    if (appInst.pendingDecision?.kind === 'meld-call') {
+      expect(appInst.pendingDecision.canKan).toBe(true)
+    }
+
+    // 「カン」ボタンで明槓を確定
+    clickActionButton('kan')
+
+    // do_kan 後、嶺上ツモ牌 (中 = dragon value 3) が justDrawnTile にセットされている
+    expect(appInst.pendingDecision).toBeNull()
+    expect(appInst.justDrawnTile).not.toBeNull()
+    expect(appInst.justDrawnTile).toEqual({ suit: 'dragon', value: 3 })
+  })
+
   it('canRiichi=false のときは「リーチ」モーダルが出ず通常の打牌 UI のまま', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application

@@ -830,8 +830,11 @@ export class App {
 
   /**
    * 明槓 (他家の打牌に対するカン) 宣言。
-   * Rust 側 do_kan は鳴き後の current_player を呼び出し者に移すが嶺上ツモはしない。
-   * (do_ankan のみ嶺上ツモ + ドラ追加する。) この差異は仕様バグの可能性あり。
+   * 明槓は嶺上ツモ 1 枚 + 槓ドラ 1 枚追加を Rust 側 (`game.rs::do_kan`) で実行する。
+   * ここでは do_kan 前後で自家の手牌を比較し、嶺上から増えた 1 枚を抽出して
+   * `justDrawnTile` に反映する。これによりカン直後も「ツモ牌右端分離」UX が維持される。
+   * (do_kan で同名牌 3 枚は副露へ移るため `hand` から消える。嶺上牌だけが after 側に
+   *  新規追加されるので diffNewlyAddedTile で取れる。)
    */
   private confirmKan(): void {
     if (!this.bridge) return
@@ -840,6 +843,9 @@ export class App {
       this.skipMeldCall()
       return
     }
+    const beforeHand = this.gameState
+      ? this.gameState.players[this.humanPlayerIndex].hand.slice()
+      : []
     const ok = this.bridge.doKan(this.humanPlayerIndex)
     this.pendingDecision = null
     if (!ok) {
@@ -848,10 +854,15 @@ export class App {
       return
     }
     this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がカン`)
-    this.justDrawnTile = null
     this.selectedHandIndex = null
     this.invalidateCpuTurnTask()
     this.refreshFromBridge()
+    const afterHand = this.gameState
+      ? this.gameState.players[this.humanPlayerIndex].hand
+      : []
+    // 嶺上ツモ牌を抽出 (見つからなければ null)。明槓は槓ドラも追加されるが、
+    // それは `getDoraIndicators()` 側で表示されるため UI 側で追加処理は不要。
+    this.justDrawnTile = diffNewlyAddedTile(beforeHand, afterHand)
   }
 
   /**
