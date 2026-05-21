@@ -159,6 +159,137 @@ impl WasmGame {
         self.game.do_kan(player_idx)
     }
 
+    /// 暗槓可能な牌一覧を返す (空白区切り tile-string)。
+    ///
+    /// 例: 手牌に 8m が 4 枚揃っていれば `"8m"`、複数候補がある場合は
+    /// 空白で連結 (`"8m 5p"`)。候補なしは空文字。
+    /// TS 側は `splitTiles` 系ヘルパで分解する想定。
+    #[wasm_bindgen(js_name = canAnkan)]
+    pub fn can_ankan(&self, player_idx: usize) -> String {
+        if player_idx >= self.game.players.len() {
+            return String::new();
+        }
+        self.game
+            .can_ankan(player_idx)
+            .iter()
+            .map(|t| t.to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// 暗槓を実行
+    #[wasm_bindgen(js_name = doAnkan)]
+    pub fn do_ankan(&mut self, player_idx: usize, tile_str: &str) -> bool {
+        let Some(tile) = Tile::from_string(tile_str) else {
+            return false;
+        };
+        self.game.do_ankan(player_idx, tile)
+    }
+
+    /// 加槓可能な牌一覧を返す (空白区切り tile-string)。
+    /// Pon 副露と同じ牌が手牌に 1 枚以上あれば候補。
+    #[wasm_bindgen(js_name = canShouminkan)]
+    pub fn can_shouminkan(&self, player_idx: usize) -> String {
+        if player_idx >= self.game.players.len() {
+            return String::new();
+        }
+        self.game
+            .can_shouminkan(player_idx)
+            .iter()
+            .map(|t| t.to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// 加槓宣言を開始する。pending_chankan を立てて槍槓ロン候補を返す。
+    ///
+    /// 戻り値 JSON: `{"ok": bool, "candidates": [player_idx, ...]}`
+    /// - ok=false: 宣言不可 (候補に含まれない / 既に pending 中等)
+    /// - candidates: 当該 tile でロンできる他家の座席 index 一覧
+    ///   (UI 側は空なら即 completeShouminkan を呼んでよい)
+    #[wasm_bindgen(js_name = startShouminkan)]
+    pub fn start_shouminkan(&mut self, player_idx: usize, tile_str: &str) -> String {
+        let Some(tile) = Tile::from_string(tile_str) else {
+            return r#"{"ok":false,"candidates":[]}"#.to_string();
+        };
+        if !self.game.start_shouminkan(player_idx, tile) {
+            return r#"{"ok":false,"candidates":[]}"#.to_string();
+        }
+        // 候補列挙: 当該 tile でロン可能な他家
+        // 槍槓は通常ロンと同じ Player::can_win 判定でよい (フリテン考慮)
+        let mut candidates: Vec<usize> = Vec::new();
+        for (i, p) in self.game.players.iter().enumerate() {
+            if i == player_idx {
+                continue;
+            }
+            // 国士無双以外は加槓に対する槍槓を許す。本実装では Player::can_win で
+            // 一律判定する (国士の暗槓不可ルールは別 Issue で扱う)。
+            if !p.is_furiten() && p.can_win(&tile) {
+                candidates.push(i);
+            }
+        }
+        let mut obj = serde_json::Map::new();
+        obj.insert("ok".into(), serde_json::Value::Bool(true));
+        obj.insert(
+            "candidates".into(),
+            serde_json::Value::Array(
+                candidates
+                    .iter()
+                    .map(|i| serde_json::Value::Number((*i).into()))
+                    .collect(),
+            ),
+        );
+        serde_json::Value::Object(obj).to_string()
+    }
+
+    /// 加槓を完了する (誰もロン宣言しなかった場合)。
+    /// 内部で Pon meld → Kan meld 書き換え + 嶺上ツモ + 槓ドラ追加。
+    #[wasm_bindgen(js_name = completeShouminkan)]
+    pub fn complete_shouminkan(&mut self, player_idx: usize, tile_str: &str) -> bool {
+        let Some(tile) = Tile::from_string(tile_str) else {
+            return false;
+        };
+        self.game.complete_shouminkan(player_idx, tile)
+    }
+
+    /// 加槓をキャンセルする (誰かが槍槓ロンを宣言した場合に呼ぶ)。
+    /// `pending_chankan` を None に戻すだけのべき等な API。
+    #[wasm_bindgen(js_name = cancelShouminkan)]
+    pub fn cancel_shouminkan(&mut self) {
+        self.game.cancel_shouminkan();
+    }
+
+    /// 加槓中の牌に対するロン (槍槓) を確定する。
+    ///
+    /// `pending_chankan` の tile を winning_tile として使い、
+    /// is_chankan=true の ScoringContext で点数を計算する。
+    /// 成功すると `pending_chankan` は自動的にクリアされる
+    /// (`build_scoring_context` で is_chankan を参照するため、
+    /// `resolve_win` 後に明示的にクリアする)。
+    #[wasm_bindgen(js_name = resolveWinChankan)]
+    pub fn resolve_win_chankan(&mut self, winner_idx: usize, from_idx: usize) -> String {
+        if winner_idx >= self.game.players.len() || from_idx >= self.game.players.len() {
+            return String::new();
+        }
+        let Some(winning_tile) = self.game.pending_chankan else {
+            return String::new();
+        };
+        let ctx = self.game.build_scoring_context(winner_idx, false);
+        let hand = &self.game.players[winner_idx].hand;
+        if !hand.can_win(&winning_tile) {
+            return String::new();
+        }
+        let Some(result) = ScoringEngine::calculate_score_with_context(hand, &winning_tile, &ctx) else {
+            return String::new();
+        };
+        let summary = scoring_summary_json(&result);
+        self.game
+            .resolve_win(winner_idx, WinKind::Ron { from: from_idx }, result);
+        // 槍槓ロン後は加槓宣言を取り消し扱いにする (加槓自体は無効になる)
+        self.game.pending_chankan = None;
+        summary
+    }
+
     /// CPU（AI）のターンを実行
     #[wasm_bindgen(js_name = executeCpuTurn)]
     pub fn execute_cpu_turn(&mut self) -> String {

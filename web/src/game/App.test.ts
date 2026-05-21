@@ -79,6 +79,14 @@ const createBridgeMock = (overrides: Partial<import('./wasm').WasmGameBridge> = 
     doPon: () => false,
     doKan: () => false,
     doChi: () => false,
+    // Issue #46: 暗槓 / 加槓 API。デフォルトは候補なし。
+    canAnkan: () => [] as Tile[],
+    canShouminkan: () => [] as Tile[],
+    doAnkan: () => false,
+    startShouminkan: () => ({ ok: false, candidates: [] }),
+    completeShouminkan: () => false,
+    cancelShouminkan: () => undefined,
+    resolveWinChankan: () => null,
     skipRon: () => undefined,
     getLastDiscarder: () => undefined,
     resolveWinTsumo: () => null,
@@ -1091,6 +1099,122 @@ Dora indicators: 5p 1p
     clickActionButton('riichi-skip')
     expect(app.pendingDecision).toBeNull()
     expect(app.riichiDeclinedThisTurn).toBe(true)
+    expect(findActionButton('discard')).toBeTruthy()
+  })
+
+  it('canAnkan が空でないツモ後、self-kan-prompt モーダルが出て暗槓ボタンを押すと doAnkan が呼ばれる (Issue #46)', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    const ankanTile: Tile = { suit: 'man', value: 5 }
+    let doAnkanCalled: { idx: number; tile: Tile } | null = null
+    let ankanDone = false
+
+    app.startGame(
+      createBridgeMock({
+        drawTile: () => false,
+        canRiichi: () => false,
+        canAnkan: () => (ankanDone ? [] : [ankanTile]),
+        canShouminkan: () => [],
+        doAnkan: (idx, tile) => {
+          doAnkanCalled = { idx, tile }
+          ankanDone = true
+          return true
+        },
+      }),
+      0
+    )
+    expect(app.pendingDecision?.kind).toBe('self-kan-prompt')
+    if (app.pendingDecision?.kind === 'self-kan-prompt') {
+      expect(app.pendingDecision.ankan).toEqual([ankanTile])
+      expect(app.pendingDecision.shouminkan).toEqual([])
+    }
+    // 暗槓ボタンが出ている
+    expect(findActionButton('self-ankan')).toBeTruthy()
+    expect(findActionButton('self-kan-skip')).toBeTruthy()
+    // 通常打牌は出ない
+    expect(findActionButton('discard')).toBeNull()
+
+    clickActionButton('self-ankan')
+    expect(doAnkanCalled).toEqual({ idx: 0, tile: ankanTile })
+    expect(app.pendingDecision).toBeNull()
+  })
+
+  it('canShouminkan が空でないツモ後、加槓ボタンで startShouminkan + completeShouminkan が呼ばれる (Issue #46)', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    const tile: Tile = { suit: 'pin', value: 7 }
+    const startCalls: Array<{ idx: number; tile: Tile }> = []
+    const completeCalls: Array<{ idx: number; tile: Tile }> = []
+    let shouminkanDone = false
+
+    app.startGame(
+      createBridgeMock({
+        drawTile: () => false,
+        canRiichi: () => false,
+        canAnkan: () => [],
+        canShouminkan: () => (shouminkanDone ? [] : [tile]),
+        startShouminkan: (idx, t) => {
+          startCalls.push({ idx, tile: t })
+          return { ok: true, candidates: [] }
+        },
+        completeShouminkan: (idx, t) => {
+          completeCalls.push({ idx, tile: t })
+          shouminkanDone = true
+          return true
+        },
+      }),
+      0
+    )
+    expect(app.pendingDecision?.kind).toBe('self-kan-prompt')
+    expect(findActionButton('self-shouminkan')).toBeTruthy()
+
+    clickActionButton('self-shouminkan')
+    expect(startCalls).toEqual([{ idx: 0, tile }])
+    expect(completeCalls).toEqual([{ idx: 0, tile }])
+    expect(app.pendingDecision).toBeNull()
+  })
+
+  it('self-kan-prompt で「カンしない」を押すと canRiichi=true なら riichi-prompt に進む (Issue #46)', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    const ankanTile: Tile = { suit: 'man', value: 5 }
+
+    app.startGame(
+      createBridgeMock({
+        drawTile: () => false,
+        canRiichi: () => true,
+        canAnkan: () => [ankanTile],
+        canShouminkan: () => [],
+      }),
+      0
+    )
+    expect(app.pendingDecision?.kind).toBe('self-kan-prompt')
+    clickActionButton('self-kan-skip')
+    // カンを断ったあと、立直可能なら今度は riichi-prompt
+    expect(app.pendingDecision?.kind).toBe('riichi-prompt')
+  })
+
+  it('canAnkan が空 / canShouminkan も空ならツモ後にカンモーダルは出ない (Issue #46)', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    app.startGame(
+      createBridgeMock({
+        drawTile: () => false,
+        canRiichi: () => false,
+        canAnkan: () => [],
+        canShouminkan: () => [],
+      }),
+      0
+    )
+    expect(app.pendingDecision).toBeNull()
     expect(findActionButton('discard')).toBeTruthy()
   })
 

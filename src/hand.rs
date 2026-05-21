@@ -51,6 +51,11 @@ impl Hand {
         &self.melds
     }
 
+    /// 副露を可変参照で取得する (#46 加槓で Pon → Kan に書き換えるため用意)。
+    pub fn get_melds_mut(&mut self) -> &mut Vec<Meld> {
+        &mut self.melds
+    }
+
     pub fn add_meld(&mut self, meld: Meld) {
         for tile in &meld.tiles {
             self.remove_tile(tile);
