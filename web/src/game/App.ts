@@ -896,9 +896,20 @@ export class App {
     this.refreshFromBridge()
   }
 
-  /** 鳴き (ロン/ポン/カン/チー) のどれもしないで通常の turn loop に戻る。 */
+  /**
+   * 鳴き (ロン/ポン/カン/チー) のどれもしないで通常の turn loop に戻る。
+   *
+   * Issue #56: ロン可能だったのに見逃した場合は WASM 側にフリテン通知 (`skipRon`) を
+   * 送り、同巡フリテン / 立直後永続フリテンを発動させる。`canRon=false` の鳴き見逃し
+   * (ポン/カン/チーだけだったケース) ではフリテン化しない。
+   */
   private skipMeldCall(): void {
+    const wasRonAvailable =
+      this.pendingDecision?.kind === 'meld-call' && this.pendingDecision.canRon
     this.pendingDecision = null
+    if (wasRonAvailable && this.bridge) {
+      this.bridge.skipRon(this.humanPlayerIndex)
+    }
     this.appendLog('見逃し')
     this.advanceTurnLoop()
   }

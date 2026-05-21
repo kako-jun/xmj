@@ -238,6 +238,21 @@ export class WasmGameBridge {
     return v === undefined || v === null ? undefined : (v as PlayerIndex)
   }
 
+  /**
+   * 直前打牌に対するロンを見逃したことを宣言する (Issue #56)。
+   *
+   * 呼び出し側 (App の `skipMeldCall` 等) は `canRon(playerIdx)` が true の状態で
+   * ロン宣言を選ばずに通常進行に戻した場面でのみ本 API を呼ぶ。WASM 側で:
+   *   - 同巡フリテン: `skipped_ron_this_turn = true`
+   *   - 立直済みなら永続フリテン: `permanent_furiten = true`
+   * のフラグを立て、以降の `canRon` を強制的に false に落とす。
+   *
+   * 関数自体はべき等で、`canRon` 再判定はしない。
+   */
+  skipRon(playerIdx: PlayerIndex): void {
+    this.game.skipRon(playerIdx)
+  }
+
   // ---- 局結着 / 次局 (Issue #27) ----
 
   /**

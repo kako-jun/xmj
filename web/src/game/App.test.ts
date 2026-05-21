@@ -79,6 +79,7 @@ const createBridgeMock = (overrides: Partial<import('./wasm').WasmGameBridge> = 
     doPon: () => false,
     doKan: () => false,
     doChi: () => false,
+    skipRon: () => undefined,
     getLastDiscarder: () => undefined,
     resolveWinTsumo: () => null,
     resolveWinRon: () => null,
