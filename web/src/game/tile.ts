@@ -1,121 +1,103 @@
-// 牌の PixiJS 表現 (Issue #4)
+// 牌の PixiJS 表現
 //
-// createTileGraphics(tile) は牌 1 枚を Container として返す。
-// 内部は Graphics (枠 + 面) + Text (記号) の入れ子。後の Issue で
-// 選択中 / ホバー / 打牌済み状態を切り替えやすいよう、Container.label に
-// CUI コードを設定する。
+// Unicode 麻雀牌 (U+1F000 〜 U+1F021) を 1 文字 Text として描画する。
+// 牌の絵柄は Unicode 文字自体に含まれるため、自前で枠 + 漢字 + 系統マークを
+// 組み立てる必要が無い。サイズ調整・色付け (赤ドラ) は TextStyle で行う。
+//
+// container.label には CUI コード (e.g. "5mr") をセットし、テストや
+// デバッグから参照できるようにする (htmlUi / table から DOM/Pixi 検索する際の鍵)。
 
 import { Container, Graphics, Text, TextStyle } from 'pixi.js'
 import { TILE } from './constants'
 import type { Tile, Suit } from './types'
 import { tileToCuiCode } from './types'
 
-// 牌記号テーブル。
-//
-// 数牌は数字 + 系統。簡素な視認性のため最初はテキスト表示にする (m/p/s)。
-// 字牌は漢字 1 文字。
-const WIND_KANJI = ['東', '南', '西', '北'] as const
-const DRAGON_KANJI = ['白', '發', '中'] as const
-
-const suitMark: Record<Suit, string> = {
-  man: '萬',
-  pin: '筒',
-  sou: '索',
-  wind: '',
-  dragon: '',
-}
-
-const suitTextColor = (suit: Suit, isRed?: boolean): number => {
-  if (isRed) return TILE.redTextColor
-  switch (suit) {
-    case 'sou':
-      return TILE.souColor
-    case 'pin':
-      return TILE.pinColor
-    default:
-      return TILE.textColor
-  }
-}
-
 /**
- * 牌 1 枚分の表示テキスト (上下 2 行のうち上段)。
- *   - 数牌: 数字
- *   - 風牌: 漢字 (東南西北)
- *   - 三元: 漢字 (白發中)
+ * 牌 1 枚に対応する Unicode 麻雀タイル文字を返す。
+ *
+ * Unicode ブロック "Mahjong Tiles" (U+1F000–U+1F02B):
+ *   - 風: 東南西北 → U+1F000, U+1F001, U+1F002, U+1F003
+ *   - 三元: 中發白 → U+1F004 (中), U+1F005 (發), U+1F006 (白)
+ *   - 萬子 1-9 → U+1F007 .. U+1F00F
+ *   - 索子 1-9 → U+1F010 .. U+1F018
+ *   - 筒子 1-9 → U+1F019 .. U+1F021
+ *   - 裏: 🀫 U+1F02B
+ *
+ * NOTE: 三元の Unicode 順は 中→發→白 で、内部 value (1=白, 2=發, 3=中) と逆。
  */
-const topGlyph = (tile: Tile): string => {
+const tileToUnicodeChar = (tile: Tile): string => {
+  const cp = (n: number): string => String.fromCodePoint(n)
   switch (tile.suit) {
     case 'man':
-    case 'pin':
+      return cp(0x1f007 + (tile.value - 1))
     case 'sou':
-      return String(tile.value)
+      return cp(0x1f010 + (tile.value - 1))
+    case 'pin':
+      return cp(0x1f019 + (tile.value - 1))
     case 'wind':
-      return WIND_KANJI[tile.value - 1] ?? '?'
-    case 'dragon':
-      return DRAGON_KANJI[tile.value - 1] ?? '?'
+      return cp(0x1f000 + (tile.value - 1))
+    case 'dragon': {
+      // value: 1=白(U+1F006), 2=發(U+1F005), 3=中(U+1F004)
+      const map = [0x1f006, 0x1f005, 0x1f004]
+      return cp(map[tile.value - 1] ?? 0x1f004)
+    }
   }
 }
 
 /**
- * 牌 1 枚を PIXI.Container で生成する。
+ * Unicode 麻雀牌を描画するための共通フォントファミリ。
  *
- * - 角丸長方形の白い面 (TILE.faceColor)
- * - 縁取り (TILE.edgeColor)
- * - 上段: 数字 or 漢字
- * - 下段: 系統マーク (萬/筒/索)、字牌は空
- * - 赤ドラ (isRed=true) は文字が赤
+ * - Apple Color Emoji / Segoe UI Emoji / Noto Color Emoji: カラー絵文字フォント
+ * - Noto Sans Symbols 2 / DejaVu Sans: モノクロのシンボルフォント (Linux fallback)
  *
- * container.label には CUI コード (e.g. "5mr") をセットし、テストや
- * デバッグから参照できるようにする。
+ * Pixi の Text は Canvas でレンダリングするので、システムに該当フォントがあれば
+ * fallback チェーンで自動的に拾われる。
+ */
+const TILE_FONT_FAMILY =
+  '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Noto Sans Symbols2", "DejaVu Sans", sans-serif'
+
+/**
+ * 牌 1 枚 (表向き) を PIXI.Container で生成する。
+ *
+ * - 背景は薄い角丸面 (TILE.faceColor)。Unicode 文字単独だと選択ハロー描画時に
+ *   座標基準が掴みづらいので、bounding box として残す。
+ * - 中央に Unicode 麻雀タイル文字を 1 つ描く。
+ * - 赤ドラ (isRed=true) は文字色を赤にして区別する (カラー絵文字フォントだと
+ *   色が効かない場合あり — その場合は系統色で代替する将来 issue でフォロー)。
  */
 export const createTileGraphics = (tile: Tile): Container => {
   const container = new Container()
   container.label = tileToCuiCode(tile)
 
-  // 面
+  // 牌の底面 (選択 glow の座標基準 + Unicode 文字の透明領域を埋めるため)
   const face = new Graphics()
   face
     .roundRect(0, 0, TILE.width, TILE.height, TILE.cornerRadius)
     .fill({ color: TILE.faceColor })
-    .stroke({ color: TILE.edgeColor, width: 2 })
+    .stroke({ color: TILE.edgeColor, width: 1 })
   container.addChild(face)
 
-  const textColor = suitTextColor(tile.suit, tile.isRed)
-
-  // 上段グリフ (大きめ)
-  const topStyle = new TextStyle({
-    fontFamily: 'sans-serif',
-    fontSize: tile.suit === 'wind' || tile.suit === 'dragon' ? 28 : 32,
-    fontWeight: 'bold',
-    fill: textColor,
+  // Unicode 麻雀タイル文字 1 つ
+  const style = new TextStyle({
+    fontFamily: TILE_FONT_FAMILY,
+    fontSize: 52, // TILE.height (56) より少し小さめ。文字には内側余白が含まれる
+    fill: tile.isRed ? TILE.redTextColor : TILE.textColor,
   })
-  const top = new Text({ text: topGlyph(tile), style: topStyle })
-  top.anchor.set(0.5)
-  top.x = TILE.width / 2
-  top.y = TILE.height * 0.36
-  container.addChild(top)
-
-  // 下段マーク (萬/筒/索)。字牌では非表示。
-  const mark = suitMark[tile.suit]
-  if (mark) {
-    const bottomStyle = new TextStyle({
-      fontFamily: 'sans-serif',
-      fontSize: 18,
-      fill: textColor,
-    })
-    const bottom = new Text({ text: mark, style: bottomStyle })
-    bottom.anchor.set(0.5)
-    bottom.x = TILE.width / 2
-    bottom.y = TILE.height * 0.72
-    container.addChild(bottom)
-  }
+  const glyph = new Text({ text: tileToUnicodeChar(tile), style })
+  glyph.anchor.set(0.5)
+  glyph.x = TILE.width / 2
+  glyph.y = TILE.height / 2
+  container.addChild(glyph)
 
   return container
 }
 
 /**
  * 裏向き (伏せ牌) の表示。河で他家から見える形と、開始前の山の表示に使う。
- * 青系の単色 + 細い縁取り。
+ *
+ * Unicode 🀫 (U+1F02B) "Mahjong Tile Back" を 1 文字描く。背景は青系で
+ * 「裏向き」を強調 (絵文字フォントによっては U+1F02B が描けないシステム
+ * もあるため、青背景があれば最悪 "裏" と分かる)。
  */
 export const createTileBackGraphics = (): Container => {
   const container = new Container()
@@ -125,22 +107,19 @@ export const createTileBackGraphics = (): Container => {
   back
     .roundRect(0, 0, TILE.width, TILE.height, TILE.cornerRadius)
     .fill({ color: TILE.backColor })
-    .stroke({ color: 0x0a1e3a, width: 2 })
+    .stroke({ color: 0x0a1e3a, width: 1 })
   container.addChild(back)
 
-  // 中央に小さい菱形 (背中の意匠)
-  const ornament = new Graphics()
-  const cx = TILE.width / 2
-  const cy = TILE.height / 2
-  const r = 8
-  ornament
-    .moveTo(cx, cy - r)
-    .lineTo(cx + r, cy)
-    .lineTo(cx, cy + r)
-    .lineTo(cx - r, cy)
-    .closePath()
-    .fill({ color: 0xfaf3e0, alpha: 0.6 })
-  container.addChild(ornament)
+  const style = new TextStyle({
+    fontFamily: TILE_FONT_FAMILY,
+    fontSize: 52,
+    fill: 0xfaf3e0,
+  })
+  const glyph = new Text({ text: '\u{1F02B}', style })
+  glyph.anchor.set(0.5)
+  glyph.x = TILE.width / 2
+  glyph.y = TILE.height / 2
+  container.addChild(glyph)
 
   return container
 }

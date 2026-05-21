@@ -42,68 +42,63 @@ describe('createTileGraphics', () => {
     expect(createTileGraphics({ suit: 'dragon', value: 3 }).label).toBe('cn')
   })
 
-  it('全 34 種類が例外なく生成できる', () => {
+  it('全 34 種類が例外なく生成できる (面 + Unicode 文字 = 2 子)', () => {
     for (const tile of enumerateAllTiles()) {
       const c = createTileGraphics(tile)
       expect(c).toBeInstanceOf(Container)
-      // 数牌は面 + 上段 + 下段 = 3 子、字牌は下段なしで 2 子
-      const expectedChildren =
-        tile.suit === 'wind' || tile.suit === 'dragon' ? 2 : 3
-      expect(c.children).toHaveLength(expectedChildren)
+      // 新実装: 全牌が「角丸面 + Unicode 麻雀タイル文字 1 つ」の 2 子構成
+      expect(c.children).toHaveLength(2)
     }
   })
 
-  it('数牌は上段に数字、下段にスート漢字', () => {
-    const c = createTileGraphics({ suit: 'man', value: 7 })
-    const texts = c.children.filter((ch): ch is Text => ch instanceof Text)
-    expect(texts).toHaveLength(2)
-    expect(texts[0].text).toBe('7')
-    expect(texts[1].text).toBe('萬')
+  it('数牌は Unicode 麻雀タイル文字で描画される (1m=🀇, 5p=🀝, 9s=🀘)', () => {
+    expect(
+      (createTileGraphics({ suit: 'man', value: 1 }).children.find(
+        (ch): ch is Text => ch instanceof Text
+      ) as Text).text
+    ).toBe('\u{1F007}') // 🀇
+    expect(
+      (createTileGraphics({ suit: 'pin', value: 5 }).children.find(
+        (ch): ch is Text => ch instanceof Text
+      ) as Text).text
+    ).toBe('\u{1F01D}') // 🀝
+    expect(
+      (createTileGraphics({ suit: 'sou', value: 9 }).children.find(
+        (ch): ch is Text => ch instanceof Text
+      ) as Text).text
+    ).toBe('\u{1F018}') // 🀘
   })
 
-  it('風牌は東南西北の漢字', () => {
-    const winds = [1, 2, 3, 4] as const
-    const expected = ['東', '南', '西', '北']
-    winds.forEach((v, i) => {
-      const c = createTileGraphics({ suit: 'wind', value: v })
+  it('風牌は U+1F000..U+1F003 (東南西北)', () => {
+    const expected = ['\u{1F000}', '\u{1F001}', '\u{1F002}', '\u{1F003}']
+    expected.forEach((glyph, i) => {
+      const c = createTileGraphics({ suit: 'wind', value: i + 1 })
       const text = c.children.find((ch): ch is Text => ch instanceof Text)
-      expect(text?.text).toBe(expected[i])
+      expect(text?.text).toBe(glyph)
     })
   })
 
-  it('三元牌は白發中', () => {
-    const expected = ['白', '發', '中']
-    expected.forEach((kanji, i) => {
+  it('三元牌は白(🀆)發(🀅)中(🀄) (内部 value=1,2,3)', () => {
+    const expected = ['\u{1F006}', '\u{1F005}', '\u{1F004}']
+    expected.forEach((glyph, i) => {
       const c = createTileGraphics({ suit: 'dragon', value: i + 1 })
       const text = c.children.find((ch): ch is Text => ch instanceof Text)
-      expect(text?.text).toBe(kanji)
+      expect(text?.text).toBe(glyph)
     })
   })
 
-  it('赤ドラは文字が赤 (TILE.redTextColor)', () => {
+  it('赤ドラは文字色が TILE.redTextColor', () => {
     const red: Tile = { suit: 'man', value: 5, isRed: true }
     const c = createTileGraphics(red)
     expect(c.label).toBe('5mr')
     const text = c.children.find((ch): ch is Text => ch instanceof Text)
-    // PIXI v8 の TextStyle.fill は number / string / FillStyle を取りうるが、
-    // 単色 number を渡しているので number で返る。
     expect(text?.style.fill).toBe(TILE.redTextColor)
   })
 
-  it('赤ドラでない 5m は通常色 (黒系)', () => {
-    const c = createTileGraphics({ suit: 'man', value: 5 })
+  it('赤ドラでない通常牌は文字色が TILE.textColor (スート差し色は Unicode 絵柄に委譲)', () => {
+    const c = createTileGraphics({ suit: 'sou', value: 3 })
     const text = c.children.find((ch): ch is Text => ch instanceof Text)
     expect(text?.style.fill).toBe(TILE.textColor)
-  })
-
-  it('索子は緑、筒子は青の文字色', () => {
-    const sou = createTileGraphics({ suit: 'sou', value: 3 })
-    const souText = sou.children.find((ch): ch is Text => ch instanceof Text)
-    expect(souText?.style.fill).toBe(TILE.souColor)
-
-    const pin = createTileGraphics({ suit: 'pin', value: 3 })
-    const pinText = pin.children.find((ch): ch is Text => ch instanceof Text)
-    expect(pinText?.style.fill).toBe(TILE.pinColor)
   })
 })
 
@@ -112,8 +107,10 @@ describe('createTileBackGraphics', () => {
     expect(createTileBackGraphics().label).toBe('back')
   })
 
-  it('面 + 装飾 = 2 子', () => {
+  it('面 + Unicode 裏牌文字 (🀫) = 2 子', () => {
     const c = createTileBackGraphics()
     expect(c.children).toHaveLength(2)
+    const text = c.children.find((ch): ch is Text => ch instanceof Text)
+    expect(text?.text).toBe('\u{1F02B}')
   })
 })

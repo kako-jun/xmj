@@ -31,12 +31,23 @@ import {
   TURN_GLOW_COLOR,
 } from './constants'
 import { createTileBackGraphics, createTileGraphics } from './tile'
-import type { GameState, PlayerIndex, PlayerState } from './types'
+import type { GameState, PlayerIndex, PlayerState, Tile } from './types'
+import { tileToCuiCode } from './types'
 
 export interface TableSceneOptions {
   humanPlayerIndex?: PlayerIndex
   selectedHandIndex?: number | null
   interactiveHandPlayerId?: PlayerIndex | null
+  /**
+   * 自家が直近で引いた牌。指定があると、自家の手牌のうちこの牌1枚を右端に
+   * 小さく分離して描画する (ツモ牌の視認性を上げる)。
+   */
+  justDrawnTile?: Tile | null
+  /**
+   * 卓中央に lastDiscard を表示するかどうか。鳴き判定モーダル中だけ true にして
+   * 「この牌に対して鳴くかどうか」の視覚アンカーにする。それ以外は卓中央を空ける。
+   */
+  showCenterTile?: boolean
   onHandTileTap?: (index: number) => void
 }
 
@@ -136,27 +147,67 @@ const createDiscardBlock = (player: PlayerState): Container => {
   return discards
 }
 
+/**
+ * 自家の手牌から「直近ツモ牌」のインデックスを 1 つ特定する。
+ * Rust 側 sort 後にどの位置に来たかを toCuiCode の一致で探す。
+ * 一致候補が複数 (=同じ牌が手中に複数) ある場合は右端寄りを採用する。
+ * justDrawnTile が null なら -1。
+ */
+const findJustDrawnIndex = (hand: Tile[], justDrawnTile: Tile | null | undefined): number => {
+  if (!justDrawnTile) return -1
+  const key = tileToCuiCode(justDrawnTile)
+  for (let i = hand.length - 1; i >= 0; i--) {
+    if (tileToCuiCode(hand[i]) === key) return i
+  }
+  return -1
+}
+
 const createHandRow = (player: PlayerState, options: TableSceneOptions = {}): Container => {
   // ローカル座標: (0,0) を手牌の中心とし、左右に等間隔で並べる。
   // 自家は表向き、CPU は裏向き。
+  // 自家かつ justDrawnTile 指定があれば、その 1 枚を抜いて末尾に再配置し、
+  // 本体と少し離して描く (麻雀 UI 慣習: ツモ牌は右端に分離)。
   const hand = new Container()
   hand.label = `hand-${player.id}`
 
   const isCpu = player.isCPU
   const tileScale = isCpu ? TILE.cpuHandScale : 1
   const spacing = isCpu ? TILE.cpuHandSpacing : TILE.handSpacing
-  const total = player.hand.length
 
-  player.hand.forEach((tile, index) => {
+  // ツモ牌分離の対象は「自家・表向き・justDrawnTile 指定あり」のときだけ。
+  const drawnIdx = isCpu ? -1 : findJustDrawnIndex(player.hand, options.justDrawnTile)
+  const reordered: Tile[] = player.hand.slice()
+  let tsumoTile: Tile | null = null
+  if (drawnIdx >= 0) {
+    tsumoTile = reordered.splice(drawnIdx, 1)[0]
+  }
+
+  const total = reordered.length + (tsumoTile ? 1 : 0)
+  const tsumoGap = tsumoTile ? spacing * 0.45 : 0 // 本体と分離する間隔
+  // 仮想 total スロット幅で中心揃え (tsumoTile はオフセット tsumoGap だけ右にずらす)
+  const totalWidth = (total - 1) * spacing + tsumoGap
+  const leftEdgeX = -totalWidth / 2
+
+  const placeTile = (tile: Tile, slotIndex: number, isTsumoTile: boolean): void => {
     const sprite = isCpu ? createTileBackGraphics() : createTileGraphics(tile)
     sprite.scale.set(tileScale)
-    // 中心揃え: 各タイルの left = (index - (total-1)/2) * spacing - tileWidth/2
-    sprite.x = (index - (total - 1) / 2) * spacing - (TILE.width * tileScale) / 2
+    const extraGap = isTsumoTile ? tsumoGap : 0
+    sprite.x = leftEdgeX + slotIndex * spacing + extraGap - (TILE.width * tileScale) / 2
     sprite.y = -(TILE.height * tileScale) / 2
+
+    // 元 hand 配列での index (タップハンドラに渡す)。Rust 側 hand と一致させる。
+    const originalIndex = isTsumoTile
+      ? drawnIdx
+      : (() => {
+          // reordered[slotIndex] が player.hand のどの位置か。drawnIdx を抜いた配列なので、
+          // slotIndex < drawnIdx ならそのまま、>= drawnIdx なら +1。
+          if (drawnIdx < 0) return slotIndex
+          return slotIndex < drawnIdx ? slotIndex : slotIndex + 1
+        })()
 
     const isInteractive =
       options.interactiveHandPlayerId === player.id && typeof options.onHandTileTap === 'function'
-    const isSelected = options.selectedHandIndex === index && isInteractive
+    const isSelected = options.selectedHandIndex === originalIndex && isInteractive
     if (isSelected) {
       const glow = new Graphics()
       glow
@@ -169,16 +220,21 @@ const createHandRow = (player: PlayerState, options: TableSceneOptions = {}): Co
     }
 
     if (isInteractive) {
-      sprite.label = `${sprite.label ?? 'tile'}-${index}`
+      sprite.label = `${sprite.label ?? 'tile'}-${originalIndex}`
       sprite.eventMode = 'static'
       sprite.cursor = 'pointer'
       sprite.on('pointertap', () => {
-        options.onHandTileTap?.(index)
+        options.onHandTileTap?.(originalIndex)
       })
     }
 
     hand.addChild(sprite)
-  })
+  }
+
+  reordered.forEach((tile, slotIndex) => placeTile(tile, slotIndex, false))
+  if (tsumoTile) {
+    placeTile(tsumoTile, reordered.length, true)
+  }
 
   return hand
 }
@@ -251,17 +307,27 @@ const addSeatLayout = (
 }
 
 /**
- * 卓中央に「直前打牌」を 1 枚だけ表示する。情報的には HTML 側にも出すが、
- * 卓上に視覚的なアンカーが欲しいので最小限のグラフィックだけ残す。
+ * 卓中央に「直前打牌」を 1 枚だけ表示する。鳴き判定モーダル中だけ表示し、
+ * 「この牌に対して鳴くかどうか」のアンカーにする。それ以外のタイミングでは
+ * 中央が常に 1 枚出ていると「ツモ牌？打牌？」と混乱するので非表示にする。
  */
 const addLastDiscardMark = (root: Container, state: GameState): void => {
   if (!state.lastDiscard) return
   const sprite = createTileGraphics(state.lastDiscard)
-  const scale = 0.7
+  const scale = 0.9
   sprite.scale.set(scale)
   sprite.x = TABLE_CENTER_X - (TILE.width * scale) / 2
   sprite.y = TABLE_CENTER_Y - (TILE.height * scale) / 2
-  sprite.label = 'last-discard'
+  sprite.label = 'meld-target-tile'
+
+  // 「鳴く対象」を強調する黄色いハロー
+  const halo = new Graphics()
+  halo
+    .roundRect(-6, -6, TILE.width + 12, TILE.height + 12, TILE.cornerRadius + 4)
+    .fill({ color: TURN_GLOW_COLOR, alpha: 0.18 })
+    .stroke({ color: TURN_GLOW_COLOR, width: 2, alpha: 0.95 })
+  sprite.addChildAt(halo, 0)
+
   root.addChild(sprite)
 }
 
@@ -285,7 +351,9 @@ export const createTableScene = (
     addSeatLayout(root, state, humanPlayerIndex, offset, options)
   }
 
-  addLastDiscardMark(root, state)
+  if (options.showCenterTile) {
+    addLastDiscardMark(root, state)
+  }
 
   return root
 }

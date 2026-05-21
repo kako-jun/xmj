@@ -169,12 +169,14 @@
       #ui-status .dora-tile {
         background: #f3ead2;
         color: #1a1a1a;
-        font-size: 12px;
-        font-weight: 700;
-        padding: 2px 6px;
+        font-size: 22px;
+        line-height: 1;
+        padding: 2px 4px;
         border-radius: 4px;
         border: 1px solid #4a4a4a;
-        font-family: "Yu Mincho", "Hiragino Mincho", serif;
+        /* Unicode 麻雀牌 (U+1F000 群) を綺麗に出すため emoji フォントを優先 */
+        font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji",
+          "Noto Sans Symbols2", "DejaVu Sans", "Yu Mincho", "Hiragino Mincho", serif;
       }
       #ui-scores {
         display: grid;

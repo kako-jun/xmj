@@ -34,10 +34,52 @@ interface AppOptions {
   htmlUiRoot?: HTMLElement | null
 }
 
+/**
+ * 「ユーザーがタッチで答えるべき確認モーダル」の状態。
+ * - 'riichi-prompt': 自家ツモ後、立直宣言可能なので「リーチ / リーチしない」を尋ねている
+ * - 'meld-call': 他家打牌後、ロン/ポン/カン/チーのいずれかが可能なので尋ねている
+ *   能なものだけボタンに出す。優先順位: ロン > ポン/カン > チー (麻雀標準)
+ */
+export type PendingDecision =
+  | { kind: 'riichi-prompt' }
+  | {
+      kind: 'meld-call'
+      from: PlayerIndex
+      /**
+       * 鳴き対象の牌 (= 直前打牌)。基本的には `gameState.lastDiscard` と同じ。
+       * テスト用 mock 等で lastDiscard が parse 不可な場合は null になり得るが、
+       * pendingDecision を立てる判定自体は canRon/canPon/canKan/canChi だけで行う。
+       */
+      tile: Tile | null
+      canRon: boolean
+      canPon: boolean
+      canKan: boolean
+      canChi: boolean
+    }
+
 const defaultRollDice = (): DiceRoll => ({
   d1: 1 + Math.floor(Math.random() * 6),
   d2: 1 + Math.floor(Math.random() * 6),
 })
+
+/**
+ * `after` のマルチセットから `before` のマルチセットを引いて、新しく増えた牌を 1 枚返す。
+ * 1 枚多くなっているはずだが、差分が無いなら null。複数あれば先頭を返す (普通発生しない)。
+ */
+const diffNewlyAddedTile = (before: Tile[], after: Tile[]): Tile | null => {
+  const counts = new Map<string, number>()
+  for (const t of before) {
+    const k = tileToCuiCode(t)
+    counts.set(k, (counts.get(k) ?? 0) + 1)
+  }
+  for (const t of after) {
+    const k = tileToCuiCode(t)
+    const left = counts.get(k) ?? 0
+    if (left <= 0) return t
+    counts.set(k, left - 1)
+  }
+  return null
+}
 
 /** 現在表示しているシーン種別。HTML overlay の表示内容を切り替えるのに使う。 */
 type ActiveScene = 'title' | 'mode-select' | 'dice-roll' | 'table' | 'round-result' | 'result'
@@ -53,7 +95,29 @@ export class App {
   titleNotice: string | null = null
   /** 中間結果シーン表示中の局結果。null なら表示していない (= 対局中)。 */
   pendingRoundOutcome: RoundOutcome | null = null
-  pendingRonChance: { from: PlayerIndex } | null = null
+  /**
+   * 現在ユーザーがタッチで答えるべき確認モーダル状態。
+   * 'meld-call' (旧 pendingRonChance を吸収) と 'riichi-prompt' を統合した。
+   * null = モーダル無し = 通常プレイ。
+   */
+  pendingDecision: PendingDecision | null = null
+  /**
+   * ユーザーが「リーチ」モーダルで「リーチ」を選んだ後、打牌待ちの状態。
+   * true なら次の打牌は `declareRiichi() + discardTile()` として扱われる。
+   * 打牌成立 / 次局移行でリセット。
+   */
+  riichiArmed = false
+  /**
+   * このターンで一度リーチを「しない」と答えたか。同じターンで再度問わない用。
+   * 次のターン (= 自家ツモが新しく入る) でリセットされる。
+   */
+  riichiDeclinedThisTurn = false
+  /**
+   * 自家が直近のツモで引いた牌。手牌の右端に分離表示するため。
+   * 打牌で null に戻す。Rust 側 `hand.rs` が push 直後に sort() するため、
+   * TS 側で `drawTile()` 前後の手牌差分から特定する。
+   */
+  justDrawnTile: Tile | null = null
   selectedGameMode: GameMode = 'tonpuusen'
   selectedHumanSeat: PlayerIndex | null = null
   private cpuTurnDelayMs: number
@@ -112,7 +176,10 @@ export class App {
     this.resultMessage = null
     this.titleNotice = null
     this.pendingRoundOutcome = null
-    this.pendingRonChance = null
+    this.pendingDecision = null
+    this.riichiArmed = false
+    this.riichiDeclinedThisTurn = false
+    this.justDrawnTile = null
     this.activeScene = 'table'
     this.renderTable()
   }
@@ -126,7 +193,10 @@ export class App {
     this.resultMessage = null
     this.titleNotice = notice
     this.pendingRoundOutcome = null
-    this.pendingRonChance = null
+    this.pendingDecision = null
+    this.riichiArmed = false
+    this.riichiDeclinedThisTurn = false
+    this.justDrawnTile = null
     this.activeScene = 'title'
     this.replaceStageRoot(
       createTitleScene({
@@ -219,12 +289,20 @@ export class App {
     this.resultMessage = null
     this.titleNotice = null
     this.pendingRoundOutcome = null
-    this.pendingRonChance = null
+    this.pendingDecision = null
+    this.riichiArmed = false
+    this.riichiDeclinedThisTurn = false
+    this.justDrawnTile = null
     this.activeScene = 'table'
     this.refreshFromBridge()
 
     if (this.shouldDrawHumanTile()) {
       this.drawHumanTileAndRefresh()
+    } else {
+      // 既に 14 枚状態 (テストで事前に手牌をセットしている等) でも、
+      // 立直可能ならその場でモーダルを出す。
+      this.maybePromptRiichi()
+      this.renderTable()
     }
   }
 
@@ -284,7 +362,10 @@ export class App {
   private releaseCurrentBridge(): void {
     this.destroyBridgeOnce(this.bridge)
     this.bridge = null
-    this.pendingRonChance = null
+    this.pendingDecision = null
+    this.riichiArmed = false
+    this.riichiDeclinedThisTurn = false
+    this.justDrawnTile = null
   }
 
   private isCpuTurnGenerationCurrent(generation: number): boolean {
@@ -293,14 +374,48 @@ export class App {
 
   private drawHumanTileAndRefresh(): boolean {
     if (!this.bridge) return false
+    // Rust 側 `hand.rs:33-34` は push 直後に sort() するため「どれが今ツモった牌か」
+    // の情報が落ちる。ツモ前後の手牌をマルチセット差分でとって右端表示用に保存する。
+    const beforeHand = this.gameState
+      ? this.gameState.players[this.humanPlayerIndex].hand.slice()
+      : []
     const drew = this.bridge.drawTile()
     if (!drew) {
+      // 引けなかった (山牌切れ等) ので、前ターンの「ツモ牌右端表示」が残ったままに
+      // ならないよう明示的にクリア。confirmSelectedTile 経由でクリアされる線も
+      // あるが、ガードを早期 return より前に置いておくのが安全。
+      this.justDrawnTile = null
       this.maybeFinalizeRoundFromDraw()
       return false
     }
     this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がツモ ${this.wallSummary()}`)
     this.refreshFromBridge()
+    const afterHand = this.gameState
+      ? this.gameState.players[this.humanPlayerIndex].hand
+      : []
+    this.justDrawnTile = diffNewlyAddedTile(beforeHand, afterHand)
+    // 新しいツモを引いた時点で、このターンの「リーチしない」決定はリセット。
+    this.riichiDeclinedThisTurn = false
+    this.maybePromptRiichi()
+    this.renderTable()
     return true
+  }
+
+  /**
+   * 自家ツモ直後で立直可能なら、ユーザーに「リーチ / リーチしない」を尋ねる。
+   * 既に立直済み・宣言不可・このターンで既に断った場合は何もしない。
+   */
+  private maybePromptRiichi(): void {
+    if (!this.bridge) return
+    if (this.bridge.isGameOver()) return
+    if (!this.bridge.isCurrentPlayerHuman()) return
+    if (this.riichiArmed) return
+    if (this.riichiDeclinedThisTurn) return
+    if (this.pendingDecision) return
+    if (this.bridge.isPlayerRiichi(this.humanPlayerIndex)) return
+    if (!this.bridge.canRiichi()) return
+    this.pendingDecision = { kind: 'riichi-prompt' }
+    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がリーチ可能`)
   }
 
   private maybeFinalizeRoundFromDraw(): void {
@@ -322,17 +437,22 @@ export class App {
     this.showRoundResultIfPending()
   }
 
-  private confirmSelectedTile(options: { riichi: boolean } = { riichi: false }): boolean {
+  private confirmSelectedTile(options: { riichi?: boolean } = {}): boolean {
     if (!this.bridge || !this.gameState || this.selectedHandIndex === null) return false
     if (!this.bridge.isCurrentPlayerHuman()) return false
+    if (this.pendingDecision) return false
 
     const tile = this.gameState.players[this.humanPlayerIndex].hand[this.selectedHandIndex]
     if (!tile) return false
 
-    if (options.riichi && !this.bridge.declareRiichi()) {
+    // explicit riichi 指定が無くても、riichiArmed 状態 (= モーダルで「リーチ」と
+    // 答えた後の打牌) ならリーチ宣言として処理する。
+    const riichi = options.riichi ?? this.riichiArmed
+
+    if (riichi && !this.bridge.declareRiichi()) {
       return false
     }
-    if (options.riichi) {
+    if (riichi) {
       this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} が立直`)
     }
 
@@ -343,6 +463,10 @@ export class App {
       `${this.getPlayerName(this.humanPlayerIndex)} が ${this.formatTile(tile)} を打牌 ${this.wallSummary()}`
     )
     this.selectedHandIndex = null
+    this.justDrawnTile = null
+    // 打牌で turn が完了したのでリーチ系状態をリセット (riichiArmed は使い切り)
+    this.riichiArmed = false
+    this.riichiDeclinedThisTurn = false
     this.advanceTurnLoop()
     return true
   }
@@ -374,7 +498,7 @@ export class App {
       this.appendLog(`${playerName} がツモ ${this.wallSummary()}`)
       this.appendLog(`${playerName} が ${discardedTile} を打牌 ${this.wallSummary()}`)
       this.finalizeGameIfNeeded()
-      if (this.checkRonChanceAfterDiscard(currentPlayer)) {
+      if (this.checkMeldChancesAfterDiscard(currentPlayer)) {
         return
       }
     }
@@ -408,7 +532,7 @@ export class App {
       this.appendLog(`${playerName} がツモ ${this.wallSummary()}`)
       this.appendLog(`${playerName} が ${discardedTile} を打牌 ${this.wallSummary()}`)
       this.finalizeGameIfNeeded()
-      if (this.checkRonChanceAfterDiscard(currentPlayer)) {
+      if (this.checkMeldChancesAfterDiscard(currentPlayer)) {
         return
       }
 
@@ -431,16 +555,50 @@ export class App {
     }
   }
 
-  private checkRonChanceAfterDiscard(discarder: PlayerIndex): boolean {
-    if (!this.bridge) return false
+  /**
+   * CPU 等が打牌した直後に、自家がロン/ポン/カン/チー宣言できるか調べ、
+   * 該当があれば pendingDecision を立てて選択を促す。戻り値 true なら turn loop を中断。
+   *
+   * 立直中はチー/ポン/カンを (自動的に) 行わないが、ロンだけは宣言できるべき。
+   * 立直中は can_pon/can_kan/can_chi が false でも安全側に弾いておく。
+   */
+  private checkMeldChancesAfterDiscard(discarder: PlayerIndex): boolean {
+    if (!this.bridge || !this.gameState) return false
     if (this.pendingRoundOutcome) return false
-    if (this.pendingRonChance) return false
+    if (this.pendingDecision) return false
     if (discarder === this.humanPlayerIndex) return false
     if (this.bridge.isGameOver()) return false
-    if (!this.bridge.canRon(this.humanPlayerIndex)) return false
-    this.pendingRonChance = { from: discarder }
+
+    const isHumanRiichi = this.bridge.isPlayerRiichi(this.humanPlayerIndex)
+    const canRon = this.bridge.canRon(this.humanPlayerIndex)
+    // 立直中は鳴き禁止 (ロンは別)
+    const canPon = !isHumanRiichi && this.bridge.canPon(this.humanPlayerIndex)
+    const canKan = !isHumanRiichi && this.bridge.canKan(this.humanPlayerIndex)
+    const canChi = !isHumanRiichi && this.bridge.canChi(this.humanPlayerIndex)
+
+    if (!canRon && !canPon && !canKan && !canChi) return false
+
+    this.pendingDecision = {
+      kind: 'meld-call',
+      from: discarder,
+      tile: this.gameState.lastDiscard,
+      canRon,
+      canPon,
+      canKan,
+      canChi,
+    }
     this.invalidateCpuTurnTask()
-    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} にロン可能`)
+    const options: string[] = []
+    if (canRon) options.push('ロン')
+    if (canPon) options.push('ポン')
+    if (canKan) options.push('カン')
+    if (canChi) options.push('チー')
+    const tile = this.gameState.lastDiscard
+    this.appendLog(
+      tile
+        ? `${this.getPlayerName(this.humanPlayerIndex)} に ${options.join('/')} 可能 (打牌: ${this.formatTile(tile)})`
+        : `${this.getPlayerName(this.humanPlayerIndex)} に ${options.join('/')} 可能`
+    )
     this.renderTable()
     return true
   }
@@ -459,56 +617,37 @@ export class App {
   }
 
   /**
-   * 「打牌」「ツモ」「ロン」「立直して打牌」「見逃し」など、現在の状況で有効な
+   * 「打牌」「ツモ」「ロン」「ポン」「カン」「チー」「リーチ」「見逃し」など、現在の状況で有効な
    * 行動ボタンを構築する。HTML overlay と内部のキーボードハンドラの両方で使う。
+   *
+   * 状態遷移:
+   * - `pendingDecision.kind === 'meld-call'`: 他家打牌後の宣言モーダル。
+   *   有効な宣言ボタン (ロン/ポン/カン/チー) + 「見逃し」のみ。
+   * - `pendingDecision.kind === 'riichi-prompt'`: 自家ツモ後のリーチ確認モーダル。
+   *   「リーチ」「リーチしない」+ ツモ可能なら「ツモ」を出す。
+   * - それ以外: 通常の自家ターン操作 (打牌・ツモ)。
+   *   `riichiArmed` が true なら打牌ボタンが「立直して打牌」になる。
    */
   private buildActionButtons(): HtmlUiActionButton[] {
     if (!this.bridge || !this.gameState) return []
     if (this.bridge.isGameOver()) return []
 
-    if (this.pendingRonChance) {
-      const { from } = this.pendingRonChance
-      return [
-        {
-          key: 'ron',
-          label: 'ロン',
-          enabled: true,
-          hotkey: 'R',
-          onActivate: () => {
-            this.confirmRon(from)
-          },
-        },
-        {
-          key: 'ron-skip',
-          label: '見逃し',
-          enabled: true,
-          hotkey: 'Esc',
-          onActivate: () => {
-            this.skipRon()
-          },
-        },
-      ]
+    if (this.pendingDecision?.kind === 'meld-call') {
+      return this.buildMeldCallButtons(this.pendingDecision)
+    }
+
+    if (this.pendingDecision?.kind === 'riichi-prompt') {
+      return this.buildRiichiPromptButtons()
     }
 
     const isHumanTurn = this.bridge.isCurrentPlayerHuman()
-    const canTsumo = isHumanTurn && this.bridge.canTsumo(this.humanPlayerIndex)
-    const shouldUseRiichiConfirm =
-      isHumanTurn && this.selectedHandIndex !== null && this.bridge.canRiichi()
+    if (!isHumanTurn) return []
 
-    const buttons: HtmlUiActionButton[] = [
-      {
-        key: shouldUseRiichiConfirm ? 'riichi-discard' : 'discard',
-        label: shouldUseRiichiConfirm ? '立直して打牌' : '打牌',
-        enabled: isHumanTurn && this.selectedHandIndex !== null,
-        hotkey: shouldUseRiichiConfirm ? 'L' : 'D',
-        onActivate: () => {
-          this.confirmSelectedTile({ riichi: shouldUseRiichiConfirm })
-        },
-      },
-    ]
+    const canTsumo = this.bridge.canTsumo(this.humanPlayerIndex)
+    const buttons: HtmlUiActionButton[] = []
 
     if (canTsumo) {
-      buttons.unshift({
+      buttons.push({
         key: 'tsumo',
         label: 'ツモ',
         enabled: true,
@@ -519,6 +658,110 @@ export class App {
       })
     }
 
+    buttons.push({
+      key: this.riichiArmed ? 'riichi-discard' : 'discard',
+      label: this.riichiArmed ? '立直して打牌' : '打牌',
+      enabled: this.selectedHandIndex !== null,
+      hotkey: this.riichiArmed ? 'L' : 'D',
+      onActivate: () => {
+        this.confirmSelectedTile()
+      },
+    })
+
+    return buttons
+  }
+
+  private buildMeldCallButtons(
+    pending: Extract<PendingDecision, { kind: 'meld-call' }>
+  ): HtmlUiActionButton[] {
+    const buttons: HtmlUiActionButton[] = []
+    if (pending.canRon) {
+      buttons.push({
+        key: 'ron',
+        label: 'ロン',
+        enabled: true,
+        hotkey: 'R',
+        onActivate: () => {
+          this.confirmRon(pending.from)
+        },
+      })
+    }
+    if (pending.canPon) {
+      buttons.push({
+        key: 'pon',
+        label: 'ポン',
+        enabled: true,
+        hotkey: 'P',
+        onActivate: () => {
+          this.confirmPon()
+        },
+      })
+    }
+    if (pending.canKan) {
+      buttons.push({
+        key: 'kan',
+        label: 'カン',
+        enabled: true,
+        hotkey: 'K',
+        onActivate: () => {
+          this.confirmKan()
+        },
+      })
+    }
+    if (pending.canChi) {
+      buttons.push({
+        key: 'chi',
+        label: 'チー',
+        enabled: true,
+        hotkey: 'C',
+        onActivate: () => {
+          this.confirmChi()
+        },
+      })
+    }
+    buttons.push({
+      key: 'meld-skip',
+      label: '見逃し',
+      enabled: true,
+      hotkey: 'Esc',
+      onActivate: () => {
+        this.skipMeldCall()
+      },
+    })
+    return buttons
+  }
+
+  private buildRiichiPromptButtons(): HtmlUiActionButton[] {
+    const buttons: HtmlUiActionButton[] = []
+    if (this.bridge?.canTsumo(this.humanPlayerIndex)) {
+      buttons.push({
+        key: 'tsumo',
+        label: 'ツモ',
+        enabled: true,
+        hotkey: 'T',
+        onActivate: () => {
+          this.confirmTsumo()
+        },
+      })
+    }
+    buttons.push({
+      key: 'riichi',
+      label: 'リーチ',
+      enabled: true,
+      hotkey: 'L',
+      onActivate: () => {
+        this.armRiichi()
+      },
+    })
+    buttons.push({
+      key: 'riichi-skip',
+      label: 'リーチしない',
+      enabled: true,
+      hotkey: 'Esc',
+      onActivate: () => {
+        this.declineRiichi()
+      },
+    })
     return buttons
   }
 
@@ -532,19 +775,23 @@ export class App {
       return
     }
     this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がツモ和了`)
+    this.pendingDecision = null
+    this.riichiArmed = false
+    this.riichiDeclinedThisTurn = false
+    this.justDrawnTile = null
     this.showRoundResultIfPending()
   }
 
   private confirmRon(fromIdx: PlayerIndex): void {
     if (!this.bridge) return
-    if (!this.pendingRonChance) return
+    if (this.pendingDecision?.kind !== 'meld-call') return
     if (!this.bridge.canRon(this.humanPlayerIndex)) {
-      this.pendingRonChance = null
+      this.pendingDecision = null
       this.advanceTurnLoop()
       return
     }
     const summary = this.bridge.resolveWinRon(this.humanPlayerIndex, fromIdx)
-    this.pendingRonChance = null
+    this.pendingDecision = null
     if (!summary) {
       this.appendLog('ロン宣言失敗（和了形不成立）')
       this.advanceTurnLoop()
@@ -553,10 +800,116 @@ export class App {
     this.showRoundResultIfPending()
   }
 
-  private skipRon(): void {
-    this.pendingRonChance = null
-    this.appendLog('ロン見逃し')
+  /**
+   * ポン宣言。成功なら手番は自家に移り、即座に打牌待ち状態にする (justDrawnTile は無し)。
+   */
+  private confirmPon(): void {
+    if (!this.bridge) return
+    if (this.pendingDecision?.kind !== 'meld-call') return
+    if (!this.bridge.canPon(this.humanPlayerIndex)) {
+      this.skipMeldCall()
+      return
+    }
+    const ok = this.bridge.doPon(this.humanPlayerIndex)
+    this.pendingDecision = null
+    if (!ok) {
+      this.appendLog('ポン宣言失敗')
+      this.advanceTurnLoop()
+      return
+    }
+    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がポン`)
+    this.justDrawnTile = null
+    this.selectedHandIndex = null
+    // 鳴き成功で手番が自家に移ったので、CPU 連鎖の旧世代が打牌しないよう
+    // 世代カウンタを bump (cpuTurnDelayMs>0 で task が走っているケースの保険)。
+    this.invalidateCpuTurnTask()
+    this.refreshFromBridge()
+    // do_pon 後、Rust 側で current_player が humanPlayerIndex に移っている。
+    // 手番が自家なので普通に「打牌」UI が出る。advanceTurnLoop を呼ばない (まだ打牌前)。
+  }
+
+  /**
+   * 明槓 (他家の打牌に対するカン) 宣言。
+   * Rust 側 do_kan は鳴き後の current_player を呼び出し者に移すが嶺上ツモはしない。
+   * (do_ankan のみ嶺上ツモ + ドラ追加する。) この差異は仕様バグの可能性あり。
+   */
+  private confirmKan(): void {
+    if (!this.bridge) return
+    if (this.pendingDecision?.kind !== 'meld-call') return
+    if (!this.bridge.canKan(this.humanPlayerIndex)) {
+      this.skipMeldCall()
+      return
+    }
+    const ok = this.bridge.doKan(this.humanPlayerIndex)
+    this.pendingDecision = null
+    if (!ok) {
+      this.appendLog('カン宣言失敗')
+      this.advanceTurnLoop()
+      return
+    }
+    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がカン`)
+    this.justDrawnTile = null
+    this.selectedHandIndex = null
+    this.invalidateCpuTurnTask()
+    this.refreshFromBridge()
+  }
+
+  /**
+   * チー宣言。pattern (0/1/2) は最初に成立するものを採用 (UI は今回未実装)。
+   * 適切なパターン選択 UI は follow-up で対応。
+   */
+  private confirmChi(): void {
+    if (!this.bridge) return
+    if (this.pendingDecision?.kind !== 'meld-call') return
+    if (!this.bridge.canChi(this.humanPlayerIndex)) {
+      this.skipMeldCall()
+      return
+    }
+    let success = false
+    for (const pattern of [0, 1, 2]) {
+      if (this.bridge.doChi(this.humanPlayerIndex, pattern)) {
+        success = true
+        break
+      }
+    }
+    this.pendingDecision = null
+    if (!success) {
+      this.appendLog('チー宣言失敗')
+      this.advanceTurnLoop()
+      return
+    }
+    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がチー`)
+    this.justDrawnTile = null
+    this.selectedHandIndex = null
+    this.invalidateCpuTurnTask()
+    this.refreshFromBridge()
+  }
+
+  /** 鳴き (ロン/ポン/カン/チー) のどれもしないで通常の turn loop に戻る。 */
+  private skipMeldCall(): void {
+    this.pendingDecision = null
+    this.appendLog('見逃し')
     this.advanceTurnLoop()
+  }
+
+  /**
+   * 「リーチ」確認モーダルで「リーチ」を選んだ。次の打牌は立直として処理される。
+   * モーダル自体は閉じ、ユーザーは普通に牌選択して打牌する。
+   */
+  private armRiichi(): void {
+    if (this.pendingDecision?.kind !== 'riichi-prompt') return
+    this.pendingDecision = null
+    this.riichiArmed = true
+    this.appendLog('リーチを選択。捨てる牌を選んでください')
+    this.renderTable()
+  }
+
+  /** 「リーチしない」を選んだ。このターンは再プロンプトしない。 */
+  private declineRiichi(): void {
+    if (this.pendingDecision?.kind !== 'riichi-prompt') return
+    this.pendingDecision = null
+    this.riichiDeclinedThisTurn = true
+    this.renderTable()
   }
 
   // ============================================================================
@@ -568,7 +921,7 @@ export class App {
       this.bridge !== null &&
       this.bridge.isCurrentPlayerHuman() &&
       !this.bridge.isGameOver() &&
-      !this.pendingRonChance &&
+      this.pendingDecision === null &&
       this.activeScene === 'table'
     )
   }
@@ -603,19 +956,35 @@ export class App {
   }
 
   private handleHotkeyRon(): void {
-    if (!this.pendingRonChance) return
-    this.confirmRon(this.pendingRonChance.from)
+    if (this.pendingDecision?.kind !== 'meld-call') return
+    if (!this.pendingDecision.canRon) return
+    this.confirmRon(this.pendingDecision.from)
   }
 
+  /**
+   * L キー: 状況によって意味が変わる。
+   * - リーチ確認モーダル中: 「リーチ」を選ぶ
+   * - 通常 + riichiArmed: 「立直して打牌」(selectedHandIndex 必要)
+   * - 通常 + canRiichi だがまだ確認中でない: 何もしない (モーダルが出ているはず)
+   */
   private handleHotkeyRiichiDiscard(): void {
+    if (this.pendingDecision?.kind === 'riichi-prompt') {
+      this.armRiichi()
+      return
+    }
     if (!this.isHumanTurnInteractive() || this.selectedHandIndex === null) return
-    if (!this.bridge?.canRiichi()) return
-    this.confirmSelectedTile({ riichi: true })
+    if (!this.riichiArmed) return
+    this.confirmSelectedTile()
   }
 
   private handleHotkeyCancel(): void {
-    if (this.pendingRonChance) {
-      this.skipRon()
+    if (this.pendingDecision?.kind === 'meld-call') {
+      this.skipMeldCall()
+      return
+    }
+    if (this.pendingDecision?.kind === 'riichi-prompt') {
+      this.declineRiichi()
+      return
     }
   }
 
@@ -638,12 +1007,14 @@ export class App {
       this.bridge.isCurrentPlayerHuman() &&
       !this.bridge.isGameOver() &&
       this.gameState.currentTurn === this.humanPlayerIndex &&
-      !this.pendingRonChance
+      this.pendingDecision === null
 
     const table = createTableScene(this.gameState, {
       humanPlayerIndex: this.humanPlayerIndex,
       selectedHandIndex: this.selectedHandIndex,
       interactiveHandPlayerId: isInteractive ? this.humanPlayerIndex : null,
+      justDrawnTile: this.justDrawnTile,
+      showCenterTile: this.pendingDecision?.kind === 'meld-call',
       onHandTileTap: index => {
         this.handleHandTileTap(index)
       },
@@ -672,8 +1043,17 @@ export class App {
   }
 
   private computeHint(): string {
-    if (this.pendingRonChance) {
-      return 'ロン: R / 見逃し: Esc'
+    if (this.pendingDecision?.kind === 'meld-call') {
+      const opts: string[] = []
+      if (this.pendingDecision.canRon) opts.push('ロン[R]')
+      if (this.pendingDecision.canPon) opts.push('ポン[P]')
+      if (this.pendingDecision.canKan) opts.push('カン[K]')
+      if (this.pendingDecision.canChi) opts.push('チー[C]')
+      opts.push('見逃し[Esc]')
+      return opts.join(' / ')
+    }
+    if (this.pendingDecision?.kind === 'riichi-prompt') {
+      return 'リーチ[L] / リーチしない[Esc]'
     }
     if (this.activeScene !== 'table') {
       if (this.activeScene === 'title') return '対局開始でモード選択へ'
@@ -685,10 +1065,13 @@ export class App {
     }
     if (!this.bridge) return ''
     if (this.bridge.isCurrentPlayerHuman()) {
+      if (this.riichiArmed) {
+        return '立直確定。捨てる牌を選んで「立直して打牌」'
+      }
       if (this.selectedHandIndex === null) {
         return '手牌の数字キー (1-9) か牌をタップで選択。 ←/→ で移動'
       }
-      return '同じ牌タップ・D・Enter で打牌。T ツモ / L 立直して打牌'
+      return '同じ牌タップ・D・Enter で打牌。T ツモ'
     }
     return 'CPU の手番'
   }
@@ -827,7 +1210,10 @@ export class App {
   private advanceToNextRound(bridge: WasmGameBridge): void {
     if (this.bridge !== bridge) return
     this.pendingRoundOutcome = null
-    this.pendingRonChance = null
+    this.pendingDecision = null
+    this.riichiArmed = false
+    this.riichiDeclinedThisTurn = false
+    this.justDrawnTile = null
     const cont = bridge.nextRound()
     if (!cont) {
       this.refreshFromBridge()
