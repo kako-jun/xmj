@@ -240,7 +240,7 @@ impl WasmGame {
     #[wasm_bindgen(js_name = declareRiichi)]
     pub fn declare_riichi(&mut self) -> bool {
         let current_idx = self.game.current_player;
-        self.game.players[current_idx].declare_riichi(self.game.round as usize)
+        self.game.declare_riichi(current_idx)
     }
 
     /// プレイヤーがリーチしているかチェック
@@ -353,7 +353,9 @@ impl WasmGame {
         let Some((sub_hand, winning_tile)) = extract_agari_with_context(&hand_clone, true, is_dealer) else {
             return String::new();
         };
-        let Some(result) = ScoringEngine::calculate_score(&sub_hand, &winning_tile, true, is_dealer) else {
+        // #49/#50/#53/#54: 立直系・状況役・場風自風・ドラを反映した ScoringContext を組む
+        let ctx = self.game.build_scoring_context(winner_idx, true);
+        let Some(result) = ScoringEngine::calculate_score_with_context(&sub_hand, &winning_tile, &ctx) else {
             return String::new();
         };
         let summary = scoring_summary_json(&result);
@@ -372,12 +374,13 @@ impl WasmGame {
         let Some(winning_tile) = self.game.last_discard else {
             return String::new();
         };
-        let is_dealer = winner_idx == self.game.dealer;
+        let _is_dealer = winner_idx == self.game.dealer;
+        let ctx = self.game.build_scoring_context(winner_idx, false);
         let hand = &self.game.players[winner_idx].hand;
         if !hand.can_win(&winning_tile) {
             return String::new();
         }
-        let Some(result) = ScoringEngine::calculate_score(hand, &winning_tile, false, is_dealer) else {
+        let Some(result) = ScoringEngine::calculate_score_with_context(hand, &winning_tile, &ctx) else {
             return String::new();
         };
         let summary = scoring_summary_json(&result);
