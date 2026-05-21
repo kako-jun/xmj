@@ -73,6 +73,12 @@ const createBridgeMock = (overrides: Partial<import('./wasm').WasmGameBridge> = 
     declareRiichi: () => false,
     canTsumo: () => false,
     canRon: () => false,
+    canPon: () => false,
+    canKan: () => false,
+    canChi: () => false,
+    doPon: () => false,
+    doKan: () => false,
+    doChi: () => false,
     getLastDiscarder: () => undefined,
     resolveWinTsumo: () => null,
     resolveWinRon: () => null,
@@ -153,19 +159,7 @@ describe('App', () => {
     }
   })
 
-  it('lastDiscard=null のとき卓上に last-discard 牌を描画しない', () => {
-    const stage = new Container()
-    const fakeApp = { stage } as unknown as import('pixi.js').Application
-    const app = new App(fakeApp)
-    const state = initWithState({ phase: 'game', lastDiscard: null })
-
-    app.showInitialTable(state)
-
-    const table = getTable(stage)
-    expect(table.getChildByLabel('last-discard')).toBeNull()
-  })
-
-  it('lastDiscard が指定されているとき卓中央に last-discard を描画する', () => {
+  it('通常時は lastDiscard が指定されていても卓中央には描画しない (showCenterTile=false)', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const app = new App(fakeApp)
@@ -177,7 +171,10 @@ describe('App', () => {
     app.showInitialTable(state)
 
     const table = getTable(stage)
-    expect(table.getChildByLabel('last-discard')).toBeTruthy()
+    // 鳴き判定モーダル中以外は卓中央を空ける (ユーザーが「何の牌？」と混乱しないため)
+    expect(table.getChildByLabel('meld-target-tile')).toBeNull()
+    // 旧ラベルは存在しない
+    expect(table.getChildByLabel('last-discard')).toBeNull()
   })
 
   it.each([
@@ -553,6 +550,12 @@ Dora indicators: 5p
     app.startGame(bridge, 0)
     drawCount = 0
 
+    // 新しい UX: ツモ後 canRiichi=true → リーチ確認モーダルが出る
+    expect(app.pendingDecision?.kind).toBe('riichi-prompt')
+    clickActionButton('riichi') // モーダルで「リーチ」を選択
+    expect(app.riichiArmed).toBe(true)
+    expect(app.pendingDecision).toBeNull()
+
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
     clickActionButton('riichi-discard')
 
@@ -784,6 +787,8 @@ Last discard: 5m`,
     })
 
     app.startGame(bridge, 0)
+    expect(app.pendingDecision?.kind).toBe('riichi-prompt')
+    clickActionButton('riichi')
 
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
     clickActionButton('riichi-discard')
@@ -794,6 +799,8 @@ Last discard: 5m`,
     expect(app.gameState?.currentTurn).toBe(0)
     expect(app.gameState?.players[0].hand).toHaveLength(14)
     expect(app.gameState?.players[0].discards).toHaveLength(0)
+    // 打牌失敗時は riichiArmed のままで再試行できる
+    expect(app.riichiArmed).toBe(true)
   })
 
   it('CPU 手番では手牌をタップしても選択できない', () => {
@@ -902,12 +909,16 @@ Last discard: 5m`,
 
     // CPU は 1 回だけ実行されてから停止しているはず
     expect(cpuTurnLog).toEqual([1])
-    expect(appInst.pendingRonChance).not.toBeNull()
-    expect(appInst.pendingRonChance?.from).toBe(1)
+    expect(appInst.pendingDecision).not.toBeNull()
+    expect(appInst.pendingDecision?.kind).toBe('meld-call')
+    if (appInst.pendingDecision?.kind === 'meld-call') {
+      expect(appInst.pendingDecision.from).toBe(1)
+      expect(appInst.pendingDecision.canRon).toBe(true)
+    }
 
     // 「ロン」「見逃し」ボタン両方表示
     expect(findActionButton('ron')).toBeTruthy()
-    expect(findActionButton('ron-skip')).toBeTruthy()
+    expect(findActionButton('meld-skip')).toBeTruthy()
     // 通常の「打牌」ボタンは出ていない
     expect(findActionButton('discard')).toBeNull()
   })
@@ -948,14 +959,14 @@ Last discard: 5m`,
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
     clickActionButton('discard')
 
-    expect(appInst.pendingRonChance).not.toBeNull()
-    clickActionButton('ron-skip')
-    expect(appInst.pendingRonChance).toBeNull()
+    expect(appInst.pendingDecision).not.toBeNull()
+    clickActionButton('meld-skip')
+    expect(appInst.pendingDecision).toBeNull()
     // CPU ターンが再開して 2 巡目以降が実行された
     expect(cpuTurnLog.length).toBeGreaterThan(1)
   })
 
-  it('canRiichi=true かつ牌選択中のときだけ確定ボタンが立直表示になる', () => {
+  it('canRiichi=false のときは「リーチ」モーダルが出ず通常の打牌 UI のまま', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const app = new App(fakeApp)
@@ -970,6 +981,13 @@ Last discard: 5m`,
     expect(findActionButton('discard')).toBeTruthy()
     expect(findActionButton('riichi')).toBeNull()
     expect(findActionButton('riichi-discard')).toBeNull()
+    expect(app.pendingDecision).toBeNull()
+  })
+
+  it('canRiichi=true ならツモ直後に「リーチ / リーチしない」モーダルが出る', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
 
     app.startGame(
       createBridgeMock({
@@ -978,13 +996,19 @@ Last discard: 5m`,
       }),
       0
     )
-    expect(findActionButton('discard')).toBeTruthy()
-    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    expect(app.pendingDecision?.kind).toBe('riichi-prompt')
+    expect(findActionButton('riichi')).toBeTruthy()
+    expect(findActionButton('riichi-skip')).toBeTruthy()
+    // モーダル中は通常の打牌ボタンは出ない
     expect(findActionButton('discard')).toBeNull()
-    expect(findActionButton('riichi-discard')).toBeTruthy()
+    // 「リーチしない」を押せばモーダルが消えて通常 UI に戻る
+    clickActionButton('riichi-skip')
+    expect(app.pendingDecision).toBeNull()
+    expect(app.riichiDeclinedThisTurn).toBe(true)
+    expect(findActionButton('discard')).toBeTruthy()
   })
 
-  it('declareRiichi が false のとき選択状態を維持する', () => {
+  it('リーチを armed 状態でも declareRiichi が false なら状態を維持して再試行できる', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const app = new App(fakeApp)
@@ -1000,12 +1024,16 @@ Last discard: 5m`,
     })
 
     app.startGame(bridge, 0)
+    expect(app.pendingDecision?.kind).toBe('riichi-prompt')
+    clickActionButton('riichi')
+    expect(app.riichiArmed).toBe(true)
 
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
     clickActionButton('riichi-discard')
 
     expect(riichiCount).toBe(1)
     expect(app.selectedHandIndex).toBe(0)
+    expect(app.riichiArmed).toBe(true)
     expect(findActionButton('riichi-discard')).toBeTruthy()
   })
 

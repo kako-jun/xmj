@@ -307,6 +307,41 @@ export class WasmGameBridge {
     return this.game.getLastOutcomeJson()
   }
 
+  // ---- 鳴き系 (Issue #5/#6) ----
+
+  /** 指定プレイヤーが (他家の打牌に対して) チー可能か。下家のみ true になる。 */
+  canChi(playerIdx: PlayerIndex): boolean {
+    return this.game.canChi(playerIdx)
+  }
+
+  /** 指定プレイヤーが (他家の打牌に対して) ポン可能か。 */
+  canPon(playerIdx: PlayerIndex): boolean {
+    return this.game.canPon(playerIdx)
+  }
+
+  /** 指定プレイヤーが (他家の打牌に対して) 明槓可能か。 */
+  canKan(playerIdx: PlayerIndex): boolean {
+    return this.game.canKan(playerIdx)
+  }
+
+  /**
+   * チーを実行。pattern は 0=(n-2,n-1,n) / 1=(n-1,n,n+1) / 2=(n,n+1,n+2)。
+   * 成功すれば true。失敗 (パターン不成立等) は false。
+   */
+  doChi(playerIdx: PlayerIndex, pattern: number): boolean {
+    return this.game.doChi(playerIdx, pattern)
+  }
+
+  /** ポンを実行。成功 true / 失敗 false。 */
+  doPon(playerIdx: PlayerIndex): boolean {
+    return this.game.doPon(playerIdx)
+  }
+
+  /** 明槓を実行。成功 true / 失敗 false。 */
+  doKan(playerIdx: PlayerIndex): boolean {
+    return this.game.doKan(playerIdx)
+  }
+
   /**
    * wasm-bindgen が生成した free() を呼んでメモリを解放する。
    * ゲーム終了時 / リスタート時に必ず呼ぶこと。
@@ -314,8 +349,4 @@ export class WasmGameBridge {
   destroy(): void {
     this.game.free()
   }
-
-  // TODO(Issue #5/#6): 鳴き系 API (canChi / canPon / canKan / doChi / doPon / doKan)
-  // は Rust 側 (src/wasm.rs) では実装済みだが、GameScene 実装と入力ハンドラが
-  // 揃ってからラップする。現状の Bridge はターン進行・状態取得・リーチに絞っている。
 }
