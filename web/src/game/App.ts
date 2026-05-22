@@ -9,7 +9,7 @@ import {
 import { createTableScene } from './table'
 import type { DiceRoll, GameMode, GameModeOption, GameState, PlayerIndex, Tile } from './types'
 import { createGameStateFromBridge } from './bridgeState'
-import { diceRollToHumanSeat, tileToCuiCode } from './types'
+import { diceRollToHumanSeat, tileFromCuiCode, tileToCuiCode, tileToGlyph } from './types'
 import { WasmGameBridge } from './wasm'
 import { createTitleScene } from './titleScene'
 import { createModeSelectScene } from './modeSelectScene'
@@ -357,10 +357,28 @@ export class App {
     return this.bridge?.getPlayerName(playerIndex) ?? `P${playerIndex + 1}`
   }
 
+  /**
+   * 実況ログ・ボタンラベル等の人間可読 UI 文字列。Unicode 麻雀牌 1 文字を返す。
+   * 内部キーは {@link tileToCuiCode} を使う (5m と 5mr 等の差別化が必要なため別関数)。
+   */
   private formatTile(tile: Tile): string {
-    return tileToCuiCode(tile)
+    return tileToGlyph(tile)
   }
 
+  /**
+   * `executeCpuTurn` 等が返す CUI コード文字列を人間可読な牌 glyph に整形する。
+   * パース失敗 (= "山牌がありません" 等のエラーメッセージ) はそのまま透過。
+   */
+  private formatDiscardedTile(cui: string): string {
+    const tile = tileFromCuiCode(cui)
+    return tile ? tileToGlyph(tile) : cui
+  }
+
+  /**
+   * ツモ通知用。残り山牌数を出すのは「ツモ」「カン (嶺上)」等のドロー系イベントだけ。
+   * 打牌ログには使わない (山番号は他家から見て手中の何枚目だったかを示唆してしまい、
+   * 開示すべき情報ではない)。
+   */
   private wallSummary(): string {
     const wallCount = this.bridge?.getWallCount() ?? this.gameState?.wall.length ?? 0
     return `(山${wallCount})`
@@ -485,9 +503,9 @@ export class App {
     if (ankan.length === 0 && shouminkan.length === 0) return false
     this.pendingDecision = { kind: 'self-kan-prompt', ankan, shouminkan }
     const parts: string[] = []
-    if (ankan.length > 0) parts.push(`暗槓 ${ankan.map(t => tileToCuiCode(t)).join(',')}`)
+    if (ankan.length > 0) parts.push(`暗槓 ${ankan.map(t => tileToGlyph(t)).join(' ')}`)
     if (shouminkan.length > 0)
-      parts.push(`加槓 ${shouminkan.map(t => tileToCuiCode(t)).join(',')}`)
+      parts.push(`加槓 ${shouminkan.map(t => tileToGlyph(t)).join(' ')}`)
     this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がカン可能 (${parts.join(' / ')})`)
     return true
   }
@@ -534,7 +552,7 @@ export class App {
     if (!discarded) return false
 
     this.appendLog(
-      `${this.getPlayerName(this.humanPlayerIndex)} が ${this.formatTile(tile)} を打牌 ${this.wallSummary()}`
+      `${this.getPlayerName(this.humanPlayerIndex)} が ${this.formatTile(tile)} を打牌`
     )
     this.selectedHandIndex = null
     this.justDrawnTile = null
@@ -570,7 +588,7 @@ export class App {
       const discardedTile = this.bridge.executeCpuTurn()
       this.refreshFromBridge()
       this.appendLog(`${playerName} がツモ ${this.wallSummary()}`)
-      this.appendLog(`${playerName} が ${discardedTile} を打牌 ${this.wallSummary()}`)
+      this.appendLog(`${playerName} が ${this.formatDiscardedTile(discardedTile)} を打牌`)
       this.finalizeGameIfNeeded()
       if (this.checkMeldChancesAfterDiscard(currentPlayer)) {
         return
@@ -604,7 +622,7 @@ export class App {
       this.refreshFromBridge()
       if (!this.isCpuTurnGenerationCurrent(generation) || !this.bridge) return
       this.appendLog(`${playerName} がツモ ${this.wallSummary()}`)
-      this.appendLog(`${playerName} が ${discardedTile} を打牌 ${this.wallSummary()}`)
+      this.appendLog(`${playerName} が ${this.formatDiscardedTile(discardedTile)} を打牌`)
       this.finalizeGameIfNeeded()
       if (this.checkMeldChancesAfterDiscard(currentPlayer)) {
         return
@@ -858,7 +876,7 @@ export class App {
       const tile = pending.ankan[0]
       buttons.push({
         key: 'self-ankan',
-        label: `暗槓 ${tileToCuiCode(tile)}`,
+        label: `暗槓 ${tileToGlyph(tile)}`,
         enabled: true,
         hotkey: 'K',
         onActivate: () => {
@@ -870,7 +888,7 @@ export class App {
       const tile = pending.shouminkan[0]
       buttons.push({
         key: 'self-shouminkan',
-        label: `加槓 ${tileToCuiCode(tile)}`,
+        label: `加槓 ${tileToGlyph(tile)}`,
         enabled: true,
         hotkey: pending.ankan.length > 0 ? 'M' : 'K',
         onActivate: () => {
@@ -1077,7 +1095,7 @@ export class App {
       this.appendLog('暗槓宣言失敗')
       return
     }
-    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} が暗槓 ${tileToCuiCode(tile)}`)
+    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} が暗槓 ${tileToGlyph(tile)}`)
     this.selectedHandIndex = null
     this.refreshFromBridge()
     const afterHand = this.gameState
@@ -1117,7 +1135,7 @@ export class App {
       // 槍槓宣言の余地あり。本 PR では CPU 自動ロン UI 未実装のため、
       // ログだけ出して即 complete に進める (Chankan 役は AI ロン側で発火する余地として残す)。
       this.appendLog(
-        `加槓 ${tileToCuiCode(tile)}: 槍槓候補 ${start.candidates.join(',')} (本実装では見逃し扱い)`
+        `加槓 ${tileToGlyph(tile)}: 槍槓候補 ${start.candidates.join(',')} (本実装では見逃し扱い)`
       )
     }
     const beforeHand = this.gameState
@@ -1135,7 +1153,7 @@ export class App {
       this.appendLog('加槓完了失敗')
       return
     }
-    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} が加槓 ${tileToCuiCode(tile)}`)
+    this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} が加槓 ${tileToGlyph(tile)}`)
     this.selectedHandIndex = null
     this.refreshFromBridge()
     const afterHand = this.gameState

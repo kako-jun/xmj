@@ -1494,9 +1494,10 @@ Dora indicators: 5p 1p
     getHandTile(stage, '1m-0').emit('pointertap', {} as never)
     clickActionButton('discard')
 
-    expect(app.eventLog.some(entry => entry.includes('あなた が 1m を打牌'))).toBe(true)
+    // #94: 打牌ログは Unicode 牌 glyph (U+1F007 = 🀇 = 1m) で出る。山番号は付かない。
+    expect(app.eventLog.some(entry => entry.includes('あなた が 🀇 を打牌'))).toBe(true)
     expect(app.eventLog.some(entry => entry.includes('CPU 南 がツモ'))).toBe(true)
-    expect(app.eventLog.some(entry => entry.includes('CPU 南 が 5m を打牌'))).toBe(true)
+    expect(app.eventLog.some(entry => entry.includes('CPU 南 が 🀋 を打牌'))).toBe(true)
     expect(app.eventLog.some(entry => entry.includes('あなた がツモ'))).toBe(true)
     expect(app.eventLog.some(entry => entry.includes('思考中'))).toBe(false)
   })

@@ -1,7 +1,13 @@
 // 牌文字列変換のラウンドトリップ確認 (Issue #3)
 
 import { describe, it, expect } from 'vitest'
-import { tileToCuiCode, tileFromCuiCode, parseRoundOutcome, type Tile } from './types'
+import {
+  tileToCuiCode,
+  tileFromCuiCode,
+  tileToGlyph,
+  parseRoundOutcome,
+  type Tile,
+} from './types'
 
 describe('tileToCuiCode / tileFromCuiCode', () => {
   it('数牌 1-9 のラウンドトリップ (萬・筒・索)', () => {
@@ -50,6 +56,49 @@ describe('tileToCuiCode / tileFromCuiCode', () => {
     expect(tileToCuiCode({ suit: 'dragon', value: 4 })).toBe('?')
     // '?' を再パースしても null
     expect(tileFromCuiCode('?')).toBeNull()
+  })
+})
+
+describe('tileToGlyph (Issue #94)', () => {
+  it('全 34 種が U+1F000-1F02B 範囲のユニークな codepoint に写る', () => {
+    const all: Tile[] = []
+    for (const suit of ['man', 'pin', 'sou'] as const) {
+      for (let v = 1; v <= 9; v++) all.push({ suit, value: v })
+    }
+    for (let v = 1; v <= 4; v++) all.push({ suit: 'wind', value: v })
+    for (let v = 1; v <= 3; v++) all.push({ suit: 'dragon', value: v })
+    expect(all.length).toBe(34)
+
+    const codepoints = new Set<number>()
+    for (const t of all) {
+      const g = tileToGlyph(t)
+      const cp = g.codePointAt(0)!
+      expect(cp).toBeGreaterThanOrEqual(0x1f000)
+      expect(cp).toBeLessThanOrEqual(0x1f02b)
+      codepoints.add(cp)
+    }
+    expect(codepoints.size).toBe(34)
+  })
+
+  it('境界値の codepoint がドキュメント通り (1m=🀇/9p=🀡/9s=🀘/東=🀀/北=🀃/白=🀆/中=🀄)', () => {
+    expect(tileToGlyph({ suit: 'man', value: 1 }).codePointAt(0)).toBe(0x1f007)
+    expect(tileToGlyph({ suit: 'man', value: 9 }).codePointAt(0)).toBe(0x1f00f)
+    expect(tileToGlyph({ suit: 'pin', value: 1 }).codePointAt(0)).toBe(0x1f019)
+    expect(tileToGlyph({ suit: 'pin', value: 9 }).codePointAt(0)).toBe(0x1f021)
+    expect(tileToGlyph({ suit: 'sou', value: 1 }).codePointAt(0)).toBe(0x1f010)
+    expect(tileToGlyph({ suit: 'sou', value: 9 }).codePointAt(0)).toBe(0x1f018)
+    expect(tileToGlyph({ suit: 'wind', value: 1 }).codePointAt(0)).toBe(0x1f000)
+    expect(tileToGlyph({ suit: 'wind', value: 4 }).codePointAt(0)).toBe(0x1f003)
+    // 三元: 白=1→U+1F006, 發=2→U+1F005, 中=3→U+1F004
+    expect(tileToGlyph({ suit: 'dragon', value: 1 }).codePointAt(0)).toBe(0x1f006)
+    expect(tileToGlyph({ suit: 'dragon', value: 2 }).codePointAt(0)).toBe(0x1f005)
+    expect(tileToGlyph({ suit: 'dragon', value: 3 }).codePointAt(0)).toBe(0x1f004)
+  })
+
+  it('赤ドラは glyph 上は通常 5 と同じ (区別しない)', () => {
+    const normal = tileToGlyph({ suit: 'man', value: 5 })
+    const red = tileToGlyph({ suit: 'man', value: 5, isRed: true })
+    expect(normal).toBe(red)
   })
 })
 

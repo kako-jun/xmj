@@ -12,38 +12,9 @@
 // onClick / keydown の発火を検証する (htmlUi.test.ts)。
 
 import type { GameState, PlayerIndex, PlayerState, Tile } from './types'
+import { tileToGlyph } from './types'
 
 const PLAYER_WIND = ['東', '南', '西', '北'] as const
-
-/**
- * 牌を Unicode 麻雀文字 (U+1F000 群) に変換する。CUI コード "1m" 等を
- * そのまま出すと「m って何？」になるので、ブラウザ版では絵文字牌で見せる。
- *
- * mapping:
- *   - 萬子 1-9 → 🀇🀈🀉🀊🀋🀌🀍🀎🀏 (U+1F007 ..)
- *   - 筒子 1-9 → 🀙🀚🀛🀜🀝🀞🀟🀠🀡 (U+1F019 ..)
- *   - 索子 1-9 → 🀐🀑🀒🀓🀔🀕🀖🀗🀘 (U+1F010 ..)
- *   - 風: 東南西北 → 🀀🀁🀂🀃 (U+1F000 ..)
- *   - 三元: 白發中 → 🀆🀅🀄 (順序注意: 白=U+1F006, 發=U+1F005, 中=U+1F004)
- */
-const tileToGlyph = (tile: Tile): string => {
-  const cp = (n: number): string => String.fromCodePoint(n)
-  switch (tile.suit) {
-    case 'man':
-      return cp(0x1f007 + (tile.value - 1))
-    case 'pin':
-      return cp(0x1f019 + (tile.value - 1))
-    case 'sou':
-      return cp(0x1f010 + (tile.value - 1))
-    case 'wind':
-      return cp(0x1f000 + (tile.value - 1))
-    case 'dragon': {
-      // 白=1→🀆 (1F006), 發=2→🀅 (1F005), 中=3→🀄 (1F004)
-      const map = [0x1f006, 0x1f005, 0x1f004]
-      return cp(map[tile.value - 1] ?? 0x1f004)
-    }
-  }
-}
 
 export interface HtmlUiActionButton {
   /** ボタン識別子。'discard' | 'tsumo' | 'ron' | 'ron-skip' | 'riichi-discard' 等 */
