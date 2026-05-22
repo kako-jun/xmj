@@ -232,6 +232,15 @@ pub struct Game {
     /// 立直成立後の自家ツモタイミングで一発フラグを下ろすため、`current_player + 3 % 4`
     /// 依存を回避する。鳴きで `current_player` が任意席に飛ぶケースにも対応。
     pub last_discarder: Option<usize>,
+    /// #51: 当該局でこれまでに任意の鳴き (Chi/Pon/Kan/Ankan/Shouminkan) が
+    /// 1 度でも入ったか。地和は「子の第一ツモ + 鳴き未発生」が条件のため、
+    /// このフラグが true なら地和は不成立になる。次局頭でリセットされる。
+    pub any_call_made_this_round: bool,
+    /// #51: 当該局における山牌からの draw 回数 (嶺上ツモは含まない)。
+    /// 天和判定で「親がまだツモっていない (= 配牌時 14 枚のまま) 」を確認するため、
+    /// および地和判定で「鳴きなしで自分の第 1 ツモ」を確認するために使う。
+    /// 親=0, 子1=1, 子2=2, 子3=3 が各プレイヤーの「第 1 ツモ」相当のインデックス。
+    pub draws_this_round: u32,
 }
 
 impl Game {
@@ -296,6 +305,8 @@ impl Game {
             last_was_rinshan: false,
             pending_chankan: None,
             last_discarder: None,
+            any_call_made_this_round: false,
+            draws_this_round: 0,
         };
 
         game.initialize_wall();
@@ -493,6 +504,8 @@ impl Game {
             // 通常の draw が走ったので、嶺上 / 河底 / 加槓フラグは下ろす
             self.last_was_rinshan = false;
             self.is_last_discard = false;
+            // #51 山牌からのツモ回数をインクリメント (嶺上ツモは含めない経路)
+            self.draws_this_round = self.draws_this_round.saturating_add(1);
         }
         tile
     }
@@ -806,6 +819,8 @@ impl Game {
             self.current_player = player_idx;
             // #49 鳴きで他家の一発を消す
             self.clear_ippatsu_others(player_idx);
+            // #51 鳴き発生で地和を不成立にする
+            self.any_call_made_this_round = true;
             true
         } else {
             false
@@ -837,6 +852,8 @@ impl Game {
         self.current_player = player_idx;
         // #49 鳴きで他家の一発を消す
         self.clear_ippatsu_others(player_idx);
+        // #51 鳴き発生で地和を不成立にする
+        self.any_call_made_this_round = true;
         true
     }
 
@@ -879,6 +896,8 @@ impl Game {
         self.last_was_rinshan = true;
         // 鳴きが入ったので他家の一発フラグを下ろす
         self.clear_ippatsu_others(player_idx);
+        // #51 鳴き発生で地和を不成立にする
+        self.any_call_made_this_round = true;
 
         self.current_player = player_idx;
         true
@@ -918,6 +937,8 @@ impl Game {
         // 暗槓も鳴きの一種で、他家の一発を消す (リーチ後の暗槓は条件付きで許容されるが
         // ここでは厳密ルールではなく「他家の一発はクリアする」シンプル運用)
         self.clear_ippatsu_others(player_idx);
+        // #51 鳴き発生で地和を不成立にする
+        self.any_call_made_this_round = true;
 
         true
     }
@@ -1039,6 +1060,8 @@ impl Game {
         self.last_was_rinshan = true;
         // 他家の一発を消す
         self.clear_ippatsu_others(player_idx);
+        // #51 鳴き発生で地和を不成立にする
+        self.any_call_made_this_round = true;
         // 槍槓窓口を閉じる
         self.pending_chankan = None;
         self.current_player = player_idx;
@@ -1138,6 +1161,31 @@ impl Game {
         }
         let p = &self.players[player_idx];
         let is_dealer = player_idx == self.dealer;
+
+        // #51: 天和 / 地和
+        // 共通条件: ツモ和了 + 当該プレイヤーの discards 0 + 鳴き未発生
+        // 天和: 上記 + 親 + 全員 discard 0 + 山牌から誰もツモっていない
+        //       (= 親の配牌時 14 枚のままで和了 = `draws_this_round == 0`)
+        // 地和: 上記 + 子 + 「自分の第 1 ツモ」 + 全員 discard 0
+        //       (= 子i 番目の第 1 ツモ index = i = `draws_this_round == winner_seat_offset`)
+        let no_calls_yet = !self.any_call_made_this_round;
+        let winner_no_discards = p.discards.is_empty();
+        let all_no_discards = self.players.iter().all(|pl| pl.discards.is_empty());
+        let is_tenhou = is_tsumo
+            && is_dealer
+            && no_calls_yet
+            && winner_no_discards
+            && all_no_discards
+            && self.draws_this_round == 0;
+        // 子の seat offset (親=0 から時計回りで 1..=3)
+        let seat_offset = ((player_idx + 4 - self.dealer) % 4) as u32;
+        let is_chiihou = is_tsumo
+            && !is_dealer
+            && no_calls_yet
+            && winner_no_discards
+            && all_no_discards
+            && self.draws_this_round == seat_offset;
+
         ScoringContext {
             is_tsumo,
             is_dealer,
@@ -1153,6 +1201,8 @@ impl Game {
             dora_indicators: self.dora_indicators.clone(),
             // 裏ドラは現状未実装 (#54 fast path)。立直成立時のみ集計対象なので空でも実害なし。
             uradora_indicators: Vec::new(),
+            is_tenhou,
+            is_chiihou,
         }
     }
 
@@ -1423,7 +1473,14 @@ impl Game {
         let honba_bonus = HONBA_BONUS * self.honba as i32;
         let riichi_bonus = 1000 * self.riichi_sticks as i32;
         let is_dealer_win = winner == self.dealer;
-        let yakuman_count = count_yakuman(&result.yaku);
+        // #42 #52: `ScoringResult.yakuman_count` を優先して使う (倍役満を含めて正確)。
+        // 古い経路で `yakuman_count` が 0 のままセットされている場合は yaku 列から数える
+        // (旧 dummy_result / yakuman_result テストとの後方互換)。
+        let yakuman_count = if result.yakuman_count > 0 {
+            result.yakuman_count
+        } else {
+            count_yakuman(&result.yaku)
+        };
 
         // 点数移動（本場ボーナス込みで一括）
         self.apply_payment(winner, kind, total, honba_bonus, is_dealer_win);
@@ -1617,6 +1674,9 @@ impl Game {
         self.last_was_rinshan = false;
         self.pending_chankan = None;
         self.last_discarder = None;
+        // #51 鳴き発生フラグをリセット
+        self.any_call_made_this_round = false;
+        self.draws_this_round = 0;
         // ゲーム継続が確定したのでここで初めて last_outcome をクリア
         self.last_outcome = None;
 
