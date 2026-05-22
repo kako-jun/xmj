@@ -42,12 +42,13 @@ describe('createTileGraphics', () => {
     expect(createTileGraphics({ suit: 'dragon', value: 3 }).label).toBe('cn')
   })
 
-  it('全 34 種類が例外なく生成できる (面 + Unicode 文字 = 2 子)', () => {
+  it('全 34 種類が例外なく生成できる (面 + Unicode 文字 = 2 子、白牌のみ glyph 無しで 1 子)', () => {
     for (const tile of enumerateAllTiles()) {
       const c = createTileGraphics(tile)
       expect(c).toBeInstanceOf(Container)
-      // 新実装: 全牌が「角丸面 + Unicode 麻雀タイル文字 1 つ」の 2 子構成
-      expect(c.children).toHaveLength(2)
+      // #92: 白牌 (dragon value=1) は「無地の白い牌」として glyph を描かないため 1 子
+      const expectedChildren = tile.suit === 'dragon' && tile.value === 1 ? 1 : 2
+      expect(c.children).toHaveLength(expectedChildren)
     }
   })
 
@@ -80,13 +81,17 @@ describe('createTileGraphics', () => {
     })
   })
 
-  it('三元牌は白(🀆)發(🀅)中(🀄) (内部 value=1,2,3)', () => {
-    const expected = ['\u{1F006}', '\u{1F005}', '\u{1F004}']
-    expected.forEach((glyph, i) => {
-      const c = createTileGraphics({ suit: 'dragon', value: i + 1 })
-      const text = c.children.find((ch): ch is Text => ch instanceof Text)
-      expect(text?.text).toContain(glyph)
-    })
+  it('三元牌: 白は無地 (#92) / 發 🀅 / 中 🀄', () => {
+    // #92: 白 (value=1) は glyph を描かないため Text 子要素は無い
+    const white = createTileGraphics({ suit: 'dragon', value: 1 })
+    expect(white.children.find((ch): ch is Text => ch instanceof Text)).toBeUndefined()
+
+    const hatsu = createTileGraphics({ suit: 'dragon', value: 2 })
+    expect(hatsu.children.find((ch): ch is Text => ch instanceof Text)?.text).toContain(
+      '\u{1F005}'
+    )
+    const chun = createTileGraphics({ suit: 'dragon', value: 3 })
+    expect(chun.children.find((ch): ch is Text => ch instanceof Text)?.text).toContain('\u{1F004}')
   })
 
   it('赤ドラは文字色が TILE.redTextColor', () => {

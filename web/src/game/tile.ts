@@ -117,6 +117,12 @@ export const createTileGraphics = (tile: Tile, options: TileGraphicsOptions = {}
         return TILE.textColor
     }
   })()
+  // #92 白牌は「無地の白い牌」として描画する (Unicode 🀆 の四角枠模様は使わない)。
+  // 白龍 = 何も書かれていない白い牌、というのが本来の見た目。
+  if (tile.suit === 'dragon' && tile.value === 1) {
+    return container
+  }
+
   // 自然 fontSize で 1 度作って width を測る → bbox にフィットさせる。
   // これでフォントの em metrics に依存せず常に TILE.width いっぱいで描画される。
   const style = new TextStyle({
