@@ -29,6 +29,7 @@ import {
   TURN_GLOW_COLOR,
 } from './constants'
 import { createTileBackGraphics, createTileGraphics } from './tile'
+import { seatColorForPlayerId } from './seatColors'
 import type { GameState, MeldGroup, PlayerIndex, PlayerState, Tile } from './types'
 import { tileToCuiCode } from './types'
 
@@ -659,7 +660,80 @@ export const createTableScene = (
   // 親が東家・他家が南/西/北家の関係は dealer index + 自家からの相対位置で決まる。
   addDealerWindMarker(root, state, humanPlayerIndex)
 
+  // 4 家それぞれの席色ドットを卓上に置く。score panel / chat ログと同じ色で
+  // 「卓上のこの席 = score panel のこの行 = ログのこの色」を一目で対応させる。
+  addSeatColorDots(root, state, humanPlayerIndex)
+
   return root
+}
+
+/**
+ * 各座席に小さな円形ドット (席色) を置く。風で固定された色 (東=赤 / 南=黄 /
+ * 西=青 / 北=緑) を、HTML 側 (score panel / chat ログ) と同じ値で表示する。
+ *
+ * 配置は手牌の中心線上、手牌の外側 (席が見える方向の卓外周寄り)。dealer marker
+ * (= 親「東」マーカー) は河の脇に置いてあるので位置がぶつからない。副露 row は
+ * 「手牌の延長で stage 端方向に並ぶ」ため、ドットは「手牌の中心線・手牌から外側に
+ * 少しだけ突き出した位置」にし、副露の進行方向と直交する側に置く。
+ */
+const addSeatColorDots = (
+  root: Container,
+  state: GameState,
+  humanPlayerIndex: PlayerIndex
+): void => {
+  const DOT_RADIUS = 6
+  const DOT_OFFSET_FROM_HAND_OUTER = 14
+  const handBaseline =
+    STAGE_HEIGHT / 2 + DISCARD_INNER_MARGIN + DISCARD_BLOCK_HEIGHT + TILE.height / 2 + 12
+  const cpuHandBaseline = STAGE_HEIGHT / 2 + 280
+
+  for (const offset of [0, 1, 2, 3] as const) {
+    const player = state.players[((humanPlayerIndex + offset) % 4) as PlayerIndex]
+    const color = seatColorForPlayerId(player.id)
+    const dot = new Graphics()
+    dot
+      .circle(0, 0, DOT_RADIUS)
+      .fill({ color: color.bgNumber })
+      .stroke({ color: 0x101010, width: 1 })
+    dot.label = `seat-dot-${player.id}`
+
+    // 配置: 各家の手牌中心線上で、手牌よりさらに外側 (= 卓の縁方向)。
+    // 副露は手牌と平行に並ぶので、手牌中心線と垂直方向に少しだけ離す。
+    // ここでは「手牌の更に stage 端側」の位置 (副露より外) ではなく、
+    // 副露と被らないよう「手牌中心線上の、手牌の端 (=自家なら左端、右家なら上端) より
+    // 少しだけ手前 (卓中心寄り)」に置く。
+    switch (offset) {
+      case 0: {
+        // 自家 (下): 手牌の左端付近、handBaseline (手牌中心線) の高さ。
+        const handLeftEdge = TABLE_CENTER_X - (13 * TILE.handSpacing) / 2
+        dot.x = handLeftEdge - DOT_OFFSET_FROM_HAND_OUTER
+        dot.y = handBaseline
+        break
+      }
+      case 1: {
+        // 下家 (右): 手牌の下端 (= world y 最大) 付近、cpuHandBaseline (手牌中心線) の x。
+        const handBottomEdge = TABLE_CENTER_Y + (13 * TILE.cpuHandSpacing) / 2
+        dot.x = cpuHandBaseline
+        dot.y = handBottomEdge + DOT_OFFSET_FROM_HAND_OUTER
+        break
+      }
+      case 2: {
+        // 対面 (上): 手牌の右端付近、(STAGE_HEIGHT - cpuHandBaseline) の高さ。
+        const handRightEdge = TABLE_CENTER_X + (13 * TILE.cpuHandSpacing) / 2
+        dot.x = handRightEdge + DOT_OFFSET_FROM_HAND_OUTER
+        dot.y = STAGE_HEIGHT - cpuHandBaseline
+        break
+      }
+      case 3: {
+        // 上家 (左): 手牌の上端付近、(STAGE_HEIGHT - cpuHandBaseline) の x。
+        const handTopEdge = TABLE_CENTER_Y - (13 * TILE.cpuHandSpacing) / 2
+        dot.x = STAGE_HEIGHT - cpuHandBaseline
+        dot.y = handTopEdge - DOT_OFFSET_FROM_HAND_OUTER
+        break
+      }
+    }
+    root.addChild(dot)
+  }
 }
 
 /**
