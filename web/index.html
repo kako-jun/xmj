@@ -8,6 +8,19 @@
     />
     <title>邪雀 Xtreme Mahjong - xmj</title>
     <style>
+      /*
+       * 麻雀牌 (U+1F000–U+1F02B) を mono glyph で固定描画するため、
+       * Noto Sans Symbols 2 の mahjong 範囲だけを subset した 12KB の
+       * woff2 を自前ホストする。これで OS 標準の絵文字フォント (Apple
+       * Color Emoji 等) に乗っ取られず、`fill` 色 (萬子ダークレッド・赤ドラ等)
+       * がそのまま反映される。
+       */
+      @font-face {
+        font-family: "XmjMahjong";
+        src: url("/fonts/noto-sans-symbols2-mahjong.woff2") format("woff2");
+        font-display: block;
+        unicode-range: U+1F000-1F02B;
+      }
       :root {
         --bg-deep: #0a0a0a;
         --bg-panel: #14140f;

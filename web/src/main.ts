@@ -67,6 +67,18 @@ const main = async (): Promise<void> => {
     canStartGame = false
     console.warn('[xmj] Wasm 初期化に失敗しました。UI のみで起動します:', err)
   }
+
+  // 牌描画用の web フォント (XmjMahjong) を待つ。font-display: block で指定して
+  // いるので未ロード時は牌が tofu になる。先に取り切ってから Pixi の Text を
+  // 作らないと、初回 render が空欄で固まる可能性がある。
+  if (typeof document !== 'undefined' && document.fonts) {
+    try {
+      await document.fonts.load('60px XmjMahjong')
+      await document.fonts.ready
+    } catch (err) {
+      console.warn('[xmj] フォント読み込みに失敗しました:', err)
+    }
+  }
   setLoadingProgress(0.5)
 
   const pixiApp = new Application()

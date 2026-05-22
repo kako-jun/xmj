@@ -45,36 +45,36 @@ const tileToUnicodeChar = (tile: Tile): string => {
 }
 
 /**
- * Unicode 麻雀牌を描画するための共通フォントファミリ。
+ * Unicode 麻雀牌の描画フォント。
  *
- * - Apple Color Emoji / Segoe UI Emoji / Noto Color Emoji: カラー絵文字フォント
- * - Noto Sans Symbols 2 / DejaVu Sans: モノクロのシンボルフォント (Linux fallback)
- *
- * Pixi の Text は Canvas でレンダリングするので、システムに該当フォントがあれば
- * fallback チェーンで自動的に拾われる。
+ * `web/public/fonts/noto-sans-symbols2-mahjong.woff2` (Noto Sans Symbols 2 の
+ * U+1F000-1F02B subset, 12KB) を `@font-face: XmjMahjong` として index.html で
+ * 登録済み。**fallback は持たない** — どの OS でも完全に同じ glyph で描画する
+ * ことが目的なので、未ロード時は font-display: block で「フォントが揃うまで
+ * 何も描画しない」方針 (main.ts の `document.fonts.ready` で待つ)。
  */
-const TILE_FONT_FAMILY =
-  '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Noto Sans Symbols2", "DejaVu Sans", sans-serif'
+const TILE_FONT_FAMILY = 'XmjMahjong'
 
 /**
  * 牌 1 枚 (表向き) を PIXI.Container で生成する。
  *
- * - 背景は薄い角丸面 (TILE.faceColor)。Unicode 文字単独だと選択ハロー描画時に
- *   座標基準が掴みづらいので、bounding box として残す。
- * - 中央に Unicode 麻雀タイル文字を 1 つ描く。
- * - 赤ドラ (isRed=true) は文字色を赤にして区別する (カラー絵文字フォントだと
- *   色が効かない場合あり — その場合は系統色で代替する将来 issue でフォロー)。
+ * - 視覚は **Unicode 麻雀牌 1 文字のみ**。背景塗りも外枠 stroke も持たない。
+ *   牌の絵柄と枠線は Unicode 文字 (🀇 等) が自前で担う。
+ * - 透明 (alpha 0) の Graphics rect を hit-area / 選択 glow の座標基準として
+ *   1 枚仕込む。fontFamily は mono symbol フォントを優先、VS-15 で text presentation
+ *   を強制して、Apple Color Emoji 等のカラー絵文字に乗っ取られないようにする。
+ * - 系統色は `fill` で適用 (mono glyph なのでそのまま色が乗る)。赤ドラは最優先。
  */
 export const createTileGraphics = (tile: Tile): Container => {
   const container = new Container()
   container.label = tileToCuiCode(tile)
 
-  // 牌の底面: Unicode タイルの透明領域を埋めるための背景のみ。
-  // 外周の枠線は Unicode 文字 (🀇 など) が自前で持っているので二重に描かない。
-  // 選択 glow の座標基準としても bounding box が必要なので fill は残す。
-  const face = new Graphics()
-  face.roundRect(0, 0, TILE.width, TILE.height, TILE.cornerRadius).fill({ color: TILE.faceColor })
-  container.addChild(face)
+  // 透明な hit-area / 選択 glow の座標基準。視覚的には何も出ない (alpha 0)。
+  // 「文字＝牌」方針: Unicode 牌が自前で枠と絵柄を持つので、cream 背景は描かず
+  // 緑フェルトに文字を直接置く。
+  const hitArea = new Graphics()
+  hitArea.rect(0, 0, TILE.width, TILE.height).fill({ color: 0x000000, alpha: 0 })
+  container.addChild(hitArea)
 
   // Unicode 麻雀タイル文字 1 つ
   // 系統ごとに色分け: 索子=緑 / 筒子=青 / 萬子=ダークレッド / 字牌=黒 / 赤ドラ=赤 (最優先)
@@ -93,7 +93,9 @@ export const createTileGraphics = (tile: Tile): Container => {
   })()
   const style = new TextStyle({
     fontFamily: TILE_FONT_FAMILY,
-    fontSize: 52, // TILE.height (56) より少し小さめ。文字には内側余白が含まれる
+    // bbox (40×56) をなるべく埋めるサイズ。font の em に内余白があるので height
+    // より少し大きめを取り、glyph 全体が見える範囲で詰める。
+    fontSize: 60,
     fill: suitColor,
   })
   const glyph = new Text({ text: tileToUnicodeChar(tile), style })
@@ -116,29 +118,22 @@ export const createTileBackGraphics = (): Container => {
   const container = new Container()
   container.label = 'back'
 
-  // 肌色寄りの竹色ベースに、縦の grain (竹の節目) を重ねて「竹の裏面」風にする。
-  // Unicode 🀫 は OS/フォント差で見た目がブレるうえ大半が暗色なので使わず、
-  // 自前で 2 段重ね (base fill + 縦線群) で描く。
-  const back = new Graphics()
-  back.roundRect(0, 0, TILE.width, TILE.height, TILE.cornerRadius).fill({ color: TILE.backColor })
-  container.addChild(back)
+  // 表向き牌と同じ方針: 透明 hit-area + Unicode 🀫 を mono 強制で 1 文字描く。
+  // 🀫 が自前で枠 + 竹の裏面パターン (ハッチング) を持つので、自前描画はしない。
+  const hitArea = new Graphics()
+  hitArea.rect(0, 0, TILE.width, TILE.height).fill({ color: 0x000000, alpha: 0 })
+  container.addChild(hitArea)
 
-  const grain = new Graphics()
-  const grainStep = 6
-  const grainMargin = 4
-  for (let x = grainStep; x < TILE.width; x += grainStep) {
-    grain
-      .rect(x - 0.5, grainMargin, 1, TILE.height - grainMargin * 2)
-      .fill({ color: TILE.backGrainColor, alpha: 0.35 })
-  }
-  // 竹節 (横方向の節目) を 1〜2 本入れて単調な縦縞にならないようにする
-  grain
-    .rect(grainMargin, TILE.height * 0.36, TILE.width - grainMargin * 2, 1)
-    .fill({ color: TILE.backGrainColor, alpha: 0.45 })
-  grain
-    .rect(grainMargin, TILE.height * 0.66, TILE.width - grainMargin * 2, 1)
-    .fill({ color: TILE.backGrainColor, alpha: 0.45 })
-  container.addChild(grain)
+  const style = new TextStyle({
+    fontFamily: TILE_FONT_FAMILY,
+    fontSize: 60,
+    fill: TILE.backColor,
+  })
+  const glyph = new Text({ text: '\u{1F02B}', style })
+  glyph.anchor.set(0.5)
+  glyph.x = TILE.width / 2
+  glyph.y = TILE.height / 2
+  container.addChild(glyph)
 
   return container
 }

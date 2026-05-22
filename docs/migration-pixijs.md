@@ -30,7 +30,7 @@
 ### Issue #4 / PR #12 — 牌の PixiJS Graphics 実装
 
 - `web/src/game/tile.ts`: `createTileGraphics(tile)` / `createTileBackGraphics()` / `enumerateAllTiles()`
-- 角丸長方形 (アイボリー) を「Unicode 透過領域の埋め背景」として描き、外周 stroke は持たない (Unicode 🀇 等が自前で枠を持つので二重描画を避ける)
+- 牌は Unicode 麻雀文字 1 文字を自前ホスト webフォント `XmjMahjong` (Noto Sans Symbols 2 を U+1F000-1F02B に subset した 12KB woff2) で描く。背景塗りも外周 stroke も持たず、透明 hit-area 矩形だけ仕込む。fallback フォントは持たない (OS 間で glyph を完全に揃えるため)
 - 索子 = 緑 / 筒子 = 青 / 萬子 = ダークレッド (黒寄り) / 字牌 = 黒 / 赤ドラ = 赤 (現行値は `TILE.souColor` / `TILE.pinColor` / `TILE.manColor` / `TILE.textColor` / `TILE.redTextColor` を参照 — `constants.ts` と `DESIGN.md §2` のパレット表が正本)
 - `Container.label` に CUI コードを埋め、テスト・デバッグから参照可
 - 動作確認: `App.showAllTilesDemo()` で 34 種 + 赤ドラ 3 枚を 9 列グリッドで表示

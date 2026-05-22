@@ -179,8 +179,8 @@ xmj の現行値:
 | 中央情報帯 (東1局・山牌枚数・ドラ表示) | 影だけ (`SHADOW_COLOR` alpha 0.22 の薄いラウンド矩形)、ストロークなし |
 | 対局ログ | 影だけ (`SHADOW_COLOR` alpha 0.32)、ストロークなし |
 | 操作 UI (行動エリア) 外周 | 影だけ (`SHADOW_COLOR` alpha 0.34)。**個別のボタン**は枠ありで押せると分かる見た目を維持 |
-| 牌 (表) | **Pixi 側で外周 stroke は描かない**。Unicode 麻雀タイル文字 (🀇 等) が自前で持つ枠線を生かす (二重枠防止)。背景は `TILE.faceColor` で塗って Unicode の透過領域だけ埋める |
-| 牌 (裏) | 同様に Unicode 🀫 は使わず、`TILE.backColor` (肌色寄りの竹色) + `TILE.backGrainColor` の縦 grain + 横節目で「竹の裏面」を自前描画 |
+| 牌 (表) | **Pixi 側で外周 stroke も背景塗りも描かない**。`web/public/fonts/noto-sans-symbols2-mahjong.woff2` (Noto Sans Symbols 2 subset, 12KB) を `@font-face: XmjMahjong` として index.html で登録、`fill` 色で mono glyph を直接着色する。透明 (alpha 0) の hit-area 矩形だけ仕込み、Container の bbox と選択 glow の座標基準を維持。fallback フォントは持たない (OS 間で glyph を完全に揃えるため) — `main.ts` で `document.fonts.ready` 待ち |
+| 牌 (裏) | 同じ `XmjMahjong` で Unicode 🀫 (U+1F02B) を 1 文字描画。`TILE.backColor` で着色して竹の裏面風に |
 
 **Do**: 卓画面 (game-table) の情報表示は卓に直書きされた札のように見せる。操作可能要素 (ボタン) だけ明確な枠で区別する。
 **Don't**: 卓画面の表示要素 (点数・ログ・情報帯) に明るい枠を引いて UI チップ感を出さない。

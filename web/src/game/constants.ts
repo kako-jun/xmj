@@ -48,7 +48,6 @@ export const TILE = {
   discardColPitch: 25,
   discardRowPitch: 35,
   discardScale: 0.625,
-  faceColor: 0xf3ead2,
   cornerRadius: 5,
   textColor: 0x1a1a1a,
   souColor: 0x2f6b3a,
@@ -56,9 +55,8 @@ export const TILE = {
   // 萬子は黒に寄せたダークレッド (字牌は textColor のまま黒)
   manColor: 0x4a2020,
   redTextColor: 0xa83a3a,
-  // 裏面 = 肌色寄りの竹色ベース + grain で竹の節目を縦に走らせる
-  backColor: 0xd9b083,
-  backGrainColor: 0x7a4a22,
+  // 裏面 (Unicode 🀫) の glyph 色。肌色寄りの竹色で「竹の裏面」風に
+  backColor: 0xa07550,
 } as const
 
 // 河 6×3 グリッドの幅・高さ (タイル本体だけ、間隔ピッチで算出)。

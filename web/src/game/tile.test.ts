@@ -51,22 +51,24 @@ describe('createTileGraphics', () => {
     }
   })
 
+  // 各文字には Variation Selector-15 (U+FE0E) が付加される (Apple Color Emoji 等の
+  // カラー絵文字描画を抑止し mono glyph を強制するため)。テストは toContain で照合する。
   it('数牌は Unicode 麻雀タイル文字で描画される (1m=🀇, 5p=🀝, 9s=🀘)', () => {
     expect(
       (createTileGraphics({ suit: 'man', value: 1 }).children.find(
         (ch): ch is Text => ch instanceof Text
       ) as Text).text
-    ).toBe('\u{1F007}') // 🀇
+    ).toContain('\u{1F007}') // 🀇
     expect(
       (createTileGraphics({ suit: 'pin', value: 5 }).children.find(
         (ch): ch is Text => ch instanceof Text
       ) as Text).text
-    ).toBe('\u{1F01D}') // 🀝
+    ).toContain('\u{1F01D}') // 🀝
     expect(
       (createTileGraphics({ suit: 'sou', value: 9 }).children.find(
         (ch): ch is Text => ch instanceof Text
       ) as Text).text
-    ).toBe('\u{1F018}') // 🀘
+    ).toContain('\u{1F018}') // 🀘
   })
 
   it('風牌は U+1F000..U+1F003 (東南西北)', () => {
@@ -74,7 +76,7 @@ describe('createTileGraphics', () => {
     expected.forEach((glyph, i) => {
       const c = createTileGraphics({ suit: 'wind', value: i + 1 })
       const text = c.children.find((ch): ch is Text => ch instanceof Text)
-      expect(text?.text).toBe(glyph)
+      expect(text?.text).toContain(glyph)
     })
   })
 
@@ -83,7 +85,7 @@ describe('createTileGraphics', () => {
     expected.forEach((glyph, i) => {
       const c = createTileGraphics({ suit: 'dragon', value: i + 1 })
       const text = c.children.find((ch): ch is Text => ch instanceof Text)
-      expect(text?.text).toBe(glyph)
+      expect(text?.text).toContain(glyph)
     })
   })
 
@@ -110,10 +112,10 @@ describe('createTileBackGraphics', () => {
     expect(createTileBackGraphics().label).toBe('back')
   })
 
-  it('面 + grain (竹の節目) = 2 子、テキストは含まない', () => {
+  it('透明 hit-area + Unicode 🀫 = 2 子', () => {
     const c = createTileBackGraphics()
     expect(c.children).toHaveLength(2)
     const text = c.children.find((ch): ch is Text => ch instanceof Text)
-    expect(text).toBeUndefined()
+    expect(text?.text).toContain('\u{1F02B}')
   })
 })
