@@ -1117,17 +1117,42 @@ impl Game {
         }
     }
 
-    /// 立直を宣言する (#49)。
+    /// 指定プレイヤーが立直宣言可能かを Game コンテキスト込みで判定する (#91)。
     ///
-    /// `Player::declare_riichi` を呼んだ上で、第一巡 (鳴きなし + 河 0 or 1) かつ
-    /// 全員の打牌が初手以下ならダブル立直として `double_riichi=true` をセットする。
+    /// `Player::can_riichi()` の門前 / テンパイ / 持ち点 1000 以上 / 未リーチ
+    /// に加え、麻雀標準ルールである **「山牌残り 4 枚以上」** をここで担保する。
+    /// 4 枚未満では (自家が立直しても) 他家全員のツモが回り切らないので、
+    /// 一発・ダブリーの成立条件が物理的に満たせない局面で立直棒だけ供託される
+    /// 不整合を防ぐ。
+    ///
+    /// `WasmGame::can_riichi` / `Game::declare_riichi` の両方からここを通すことで、
+    /// 「UI 上は can_riichi=true / 押下時 declare_riichi=false」の食い違い (#91) を防ぐ。
+    pub fn can_riichi(&self, player_idx: usize) -> bool {
+        if player_idx >= self.players.len() {
+            return false;
+        }
+        if !self.players[player_idx].can_riichi() {
+            return false;
+        }
+        // 標準ルール: 山牌 4 枚未満では立直不可
+        if self.wall.len() < 4 {
+            return false;
+        }
+        true
+    }
+
+    /// 立直を宣言する (#49 / #91)。
+    ///
+    /// `Game::can_riichi` を満たす場合のみ `Player::declare_riichi` を呼ぶ。
+    /// 加えて第一巡 (鳴きなし + 河 0 or 1) かつ全員の打牌が初手以下なら
+    /// ダブル立直として `double_riichi=true` をセットする。
     ///
     /// 第一巡判定の簡易ルール:
     /// - 当該プレイヤーの discards が 0 (まだ捨ててない、ツモ直後の宣言)
     /// - 他家からの鳴きが全く発生していない (`Hand::get_melds().is_empty()` を全員でチェック)
     /// - 本局でまだ誰の打牌回数も 1 を超えていない
     pub fn declare_riichi(&mut self, player_idx: usize) -> bool {
-        if player_idx >= self.players.len() {
+        if !self.can_riichi(player_idx) {
             return false;
         }
         // ダブル立直判定: 鳴き無し + 全員 1 巡目以内
@@ -1137,6 +1162,8 @@ impl Game {
             .all(|p| p.hand.get_melds().is_empty() && p.discards.len() == 0);
         let turn = self.round as usize;
         if !self.players[player_idx].declare_riichi(turn) {
+            // Game::can_riichi で通った後に Player::declare_riichi が false を返すのは
+            // 想定外 (両者は同じ Player::can_riichi を経由するため)。防御的に false 返却。
             return false;
         }
         if is_first_round {

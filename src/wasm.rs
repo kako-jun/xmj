@@ -421,10 +421,15 @@ impl WasmGame {
         serde_json::Value::Array(arr).to_string()
     }
 
-    /// リーチ可能かチェック
+    /// リーチ可能かチェック (#91)
+    ///
+    /// `Player::can_riichi()` (門前 / テンパイ / 持ち点 1000 以上 / 未リーチ) に加え、
+    /// 山牌残り 4 枚以上の麻雀標準ルールも `Game::can_riichi` 経由で担保する。
+    /// これにより UI 側の canRiichi=true / declareRiichi=false の食い違いを防ぐ。
     #[wasm_bindgen(js_name = canRiichi)]
     pub fn can_riichi(&self) -> bool {
-        self.game.get_current_player().can_riichi()
+        let idx = self.game.current_player;
+        self.game.can_riichi(idx)
     }
 
     /// リーチを宣言

@@ -23,7 +23,9 @@
 //! TODO(#66 follow-up):
 //! - `Game` に `can_tsumo(idx)` / `can_riichi(idx)` の薄いラッパを `pub` で生やすと、
 //!   `ScenarioRunner::availability` から `wasm.rs` の判定をそのまま再利用できる。
-//!   現状は `extract_agari` + `Player::can_riichi` 等を直接呼んで簡易に再実装している。
+//!   現状は `extract_agari` + `Game::can_riichi` 等を直接呼んで簡易に再実装している
+//!   (#91: `Player::can_riichi` ではなく `Game::can_riichi` 経由で山牌残 4 枚以上の
+//!   標準ルールを取り込む)。
 //! - 役の追加 (#49-#61) は本モジュールには触らない。シナリオ側は「シナリオを組み立てて
 //!   試行する」インフラだけを提供する。
 
@@ -152,7 +154,7 @@ pub struct ScenarioRunner {
 /// 一括で取得して assert したい場面が多い。`Game` 内部 API をまとめて呼ぶ薄いビュー。
 #[derive(Debug, Clone)]
 pub struct ActionAvailability {
-    /// `current_player` がリーチ宣言可能か (`Player::can_riichi`)。
+    /// `current_player` がリーチ宣言可能か (`Game::can_riichi` 経由、#91)。
     pub can_riichi: bool,
     /// `current_player` がツモ和了可能か (14 枚 + `extract_agari` 成立)。
     pub can_tsumo: bool,
@@ -196,7 +198,8 @@ impl ScenarioRunner {
     /// `can_ron` は `last_discard` が存在 / 非闇牌 / 当該プレイヤーが`can_win` を満たす場合に true。
     pub fn availability(&self) -> ActionAvailability {
         let cur = self.game.current_player;
-        let can_riichi = self.game.players[cur].can_riichi();
+        // #91 fix: WasmGame と同じく Game::can_riichi 経由 (山牌残 4 枚以上を含む全条件で統一)
+        let can_riichi = self.game.can_riichi(cur);
 
         let can_tsumo = {
             let hand = &self.game.players[cur].hand;
