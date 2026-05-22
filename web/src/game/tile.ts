@@ -145,9 +145,12 @@ export const createTileBackGraphics = (): Container => {
   const container = new Container()
   container.label = 'back'
 
-  // 表向き牌と同じ方針: 白の角丸 + Unicode 🀫 (枠の内側を白く)。
+  // #99: 麻雀牌の裏面は実物では白ではなく象牙色 (クリーム色)。
+  // 表向き牌の白と差別化することで「裏」の認識が一目で立つ。
   const face = new Graphics()
-  face.roundRect(0, 0, TILE.width, TILE.height, TILE.cornerRadius).fill({ color: 0xffffff })
+  face
+    .roundRect(0, 0, TILE.width, TILE.height, TILE.cornerRadius)
+    .fill({ color: TILE.backFaceColor })
   container.addChild(face)
 
   const style = new TextStyle({
