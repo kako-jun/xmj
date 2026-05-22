@@ -66,39 +66,63 @@ const TILE_FONT_FAMILY = 'XmjMahjong'
  * - 系統色は `fill` で適用 (mono glyph なのでそのまま色が乗る)。赤ドラは最優先。
  */
 /**
- * glyph を bbox いっぱいに拡大する scale を計算する (アスペクト維持)。
- * Pixi の Text は fontFamily / size から自然サイズが決まるので、`text.width` を
- * 測ってから TILE.width に揃える倍率を返す。jsdom 等で canvas が無い (= 測定不可)
- * 環境では 1 を返してテストを通す。
+ * glyph の visible bbox を tile bbox (40×56) ぴったりに合わせる x/y それぞれの
+ * scale を返す (#96 → 余白 0 化)。
+ *
+ * kako-jun 指示: 「フォントも指定したのだから余白 0 にしたい」 — `XmjMahjong`
+ * (Noto Sans Symbols 2 subset) は牌の絵柄として枠込みで描かれているため、
+ * 非等比に伸ばしても破綻しない (= 牌の縦横比に glyph 自体が追従する)。
+ * `getLocalBounds()` で visible 矩形を測り、scale x = TILE.width / bboxW、
+ * scale y = TILE.height / bboxH を別々に返す。
+ *
+ * jsdom 等 (canvas 不在) では bounds が 0 になるので、両方 1 でフォールバック。
  */
-const computeFitScale = (text: Text): number => {
+const computeFitScalesXY = (text: Text): { x: number; y: number } => {
+  try {
+    // anchor 0 起点で visible bbox を測る (anchor 0.5 だと bounds.x/y が負になる)
+    const b = text.getLocalBounds()
+    if (
+      b &&
+      Number.isFinite(b.width) &&
+      Number.isFinite(b.height) &&
+      b.width > 0 &&
+      b.height > 0
+    ) {
+      return { x: TILE.width / b.width, y: TILE.height / b.height }
+    }
+  } catch {
+    // fallthrough
+  }
+  // fallback: text.width / text.height を使う
   try {
     const w = text.width
-    if (!w || w <= 0 || !Number.isFinite(w)) return 1
-    return TILE.width / w
+    const h = text.height
+    if (w > 0 && h > 0 && Number.isFinite(w) && Number.isFinite(h)) {
+      return { x: TILE.width / w, y: TILE.height / h }
+    }
   } catch {
-    return 1
+    // fallthrough
   }
+  return { x: 1, y: 1 }
 }
 
 /**
- * glyph を「visible 矩形が tile bbox 中央」に来るよう x/y を計算する (#96)。
+ * glyph を「visible 矩形が tile bbox 中央 (= 余白 0)」に来るよう scale + 位置を設定 (#96)。
  *
  * `anchor.set(0.5)` だけでは Pixi の Text bbox に font の ascent/descent + lineHeight
- * の余白が含まれるため、上下のどちらかに白い余白が偏る (kako-jun 報告)。
- * `getLocalBounds()` で実際の描画矩形を取り、bbox 中心と tile 中心のズレぶんを
- * x/y のオフセットに足し戻す。
- *
- * jsdom では bounds が 0 になり得るので、その場合は anchor 0.5 だけで素直に中央。
+ * の余白が含まれるため、上下のどちらかに白い余白が偏る。
+ * 1. `getLocalBounds()` で visible 矩形を取得 (anchor 適用前)
+ * 2. scale x = TILE.width / bbox.width、scale y = TILE.height / bbox.height で非等比拡大
+ * 3. anchor 0.5 + tile 中心配置 + visible 中心オフセット補正
  */
-const centerGlyphInTile = (glyph: Text, scale: number): void => {
+const fitAndCenterGlyphInTile = (glyph: Text): void => {
+  const scales = computeFitScalesXY(glyph)
+  glyph.scale.set(scales.x, scales.y)
   glyph.anchor.set(0.5)
-  // anchor 0.5 + (TILE.width/2, TILE.height/2) を起点に、visible bounds の中心ズレを補正。
   glyph.x = TILE.width / 2
   glyph.y = TILE.height / 2
   try {
-    // getLocalBounds は anchor 適用後のローカル座標で矩形を返す。
-    // 中心が原点ぴったりなら補正なし。ズレている場合だけ反対方向に押し戻す。
+    // scale 後の visible 中心が原点とズレていたら補正
     const b = glyph.getLocalBounds()
     if (
       b &&
@@ -111,9 +135,8 @@ const centerGlyphInTile = (glyph: Text, scale: number): void => {
     ) {
       const localCenterX = b.x + b.width / 2
       const localCenterY = b.y + b.height / 2
-      // scale 後の world ズレを y/x から差し引いて、visible 中心を tile 中心に。
-      glyph.x -= localCenterX * scale
-      glyph.y -= localCenterY * scale
+      glyph.x -= localCenterX * scales.x
+      glyph.y -= localCenterY * scales.y
     }
   } catch {
     // jsdom 等で bounds 計算が失敗してもデフォルト位置のまま通す。
@@ -171,9 +194,7 @@ export const createTileGraphics = (tile: Tile, options: TileGraphicsOptions = {}
   })
   const glyph = new Text({ text: tileToUnicodeChar(tile), style })
   container.addChild(glyph)
-  const fitScale = computeFitScale(glyph)
-  glyph.scale.set(fitScale)
-  centerGlyphInTile(glyph, fitScale)
+  fitAndCenterGlyphInTile(glyph)
 
   return container
 }
@@ -204,9 +225,7 @@ export const createTileBackGraphics = (): Container => {
   })
   const glyph = new Text({ text: '\u{1F02B}', style })
   container.addChild(glyph)
-  const fitScale = computeFitScale(glyph)
-  glyph.scale.set(fitScale)
-  centerGlyphInTile(glyph, fitScale)
+  fitAndCenterGlyphInTile(glyph)
 
   return container
 }
