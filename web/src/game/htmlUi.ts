@@ -93,9 +93,18 @@ const renderStatus = (root: HTMLElement, state: HtmlUiState): void => {
     if (dora) dora.replaceChildren()
     return
   }
-  setText(round, `東${g.round}局`)
-  setText(honba, g.honba > 0 ? `${g.honba}本場` : '')
+  // 場風: round 1-4 = 東場、5-8 = 南場 (半荘のみ後者に到達)
+  const bafuu = g.round >= 5 ? '南' : '東'
+  const localRound = ((g.round - 1) % 4) + 1
+  setText(round, `${bafuu}${localRound}局`)
+  setText(honba, `${g.honba}本場`)
   setText(wall, `山 ${g.wall.length}`)
+  // 親プレイヤー名と場風を表示
+  const oya = root.querySelector<HTMLElement>('[data-ui="oya"]')
+  if (oya) {
+    const oyaPlayer = g.players[g.dealer]
+    setText(oya, oyaPlayer ? `親: ${oyaPlayer.name}` : '')
+  }
   if (dora) {
     dora.replaceChildren(
       ...g.doraIndicators.map(tile => {
@@ -154,8 +163,7 @@ const renderScores = (root: HTMLElement, state: HtmlUiState): void => {
 const renderActions = (root: HTMLElement, state: HtmlUiState): void => {
   const actionsEl = root.querySelector<HTMLElement>('[data-ui="actions"]')
   if (!actionsEl) return
-  const hintEl = root.querySelector<HTMLElement>('[data-ui="hint"]')
-  setText(hintEl, state.hint ?? '')
+  // 旧仕様の #ui-hint は廃止 (ボタンの label と hotkey で十分)
   if (state.actions.length === 0) {
     actionsEl.replaceChildren()
     return

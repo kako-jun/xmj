@@ -745,7 +745,7 @@ export class App {
     if (canTsumo) {
       buttons.push({
         key: 'tsumo',
-        label: 'ツモ',
+        label: 'ツモあがり',
         enabled: true,
         hotkey: 'T',
         onActivate: () => {
@@ -890,7 +890,7 @@ export class App {
     if (this.bridge?.canTsumo(this.humanPlayerIndex)) {
       buttons.push({
         key: 'tsumo',
-        label: 'ツモ',
+        label: 'ツモあがり',
         enabled: true,
         hotkey: 'T',
         onActivate: () => {

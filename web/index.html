@@ -152,9 +152,13 @@
         color: var(--text-primary);
       }
       #ui-status .honba,
+      #ui-status .oya,
       #ui-status .wall {
         font-size: 13px;
         color: var(--text-muted);
+      }
+      #ui-status .oya {
+        color: var(--turn-glow);
       }
       #ui-status .dora-row {
         display: flex;
@@ -264,13 +268,6 @@
         margin-left: 4px;
         font-weight: 400;
       }
-      #ui-hint {
-        font-size: 11px;
-        color: var(--text-muted);
-        line-height: 1.4;
-        margin-top: 6px;
-        min-height: 1.4em;
-      }
       #ui-log {
         flex: 1;
         overflow-y: auto;
@@ -377,6 +374,7 @@
           <div id="ui-status">
             <span class="round" data-ui="round">—</span>
             <span class="honba" data-ui="honba"></span>
+            <span class="oya" data-ui="oya"></span>
             <span class="wall" data-ui="wall"></span>
             <span class="dora-row">
               <span class="dora-label">ドラ</span>
@@ -395,7 +393,6 @@
         <section class="side-section" id="ui-actions-section">
           <h2>操作</h2>
           <div id="ui-actions" data-ui="actions"></div>
-          <div id="ui-hint" data-ui="hint"></div>
         </section>
       </aside>
     </div>
