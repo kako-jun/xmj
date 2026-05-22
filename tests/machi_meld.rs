@@ -21,6 +21,7 @@ fn pon(tile: Tile) -> Meld {
         meld_type: MeldType::Pon,
         tiles: vec![tile, tile, tile],
         is_open: true,
+        ..Default::default()
     }
 }
 
@@ -33,6 +34,7 @@ fn chi(suit: Suit, start: u8) -> Meld {
             Tile::new_number(suit, start + 2, false),
         ],
         is_open: true,
+        ..Default::default()
     }
 }
 
@@ -41,6 +43,7 @@ fn kan_open(tile: Tile) -> Meld {
         meld_type: MeldType::Kan,
         tiles: vec![tile, tile, tile, tile],
         is_open: true,
+        ..Default::default()
     }
 }
 

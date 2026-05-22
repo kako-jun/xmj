@@ -10,8 +10,8 @@
 //   - pkg からの動的 import は vi.mock で差し替える (wasm.test.ts)
 //   - ロジック自体はラッパなので、引数の素通しと initialized フラグを確認する
 
-import type { PlayerIndex, RoundWinSummary, Tile } from './types'
-import { parseRoundOutcome, tileToCuiCode } from './types'
+import type { MeldGroup, MeldKind, PlayerIndex, RoundWinSummary, Tile } from './types'
+import { parseRoundOutcome, tileFromCuiCode, tileToCuiCode } from './types'
 
 // pkg の型を再 export しないが、JSDoc で参照できるよう型 import だけしておく。
 // (実体は dynamic import なので tree-shaking には影響しない)
@@ -193,6 +193,64 @@ export class WasmGameBridge {
 
   getPlayerDiscards(playerIdx: number): string {
     return this.game.getPlayerDiscards(playerIdx)
+  }
+
+  /**
+   * プレイヤーの副露 (鳴き面子) を取得する (#83 副露表示)。
+   *
+   * Rust 側 `getPlayerMelds` は JSON 配列を返す:
+   * ```json
+   * [{ "kind": "chi"|"pon"|"ankan"|"minkan"|"kakan",
+   *    "tiles": ["1m","2m","3m"],
+   *    "fromOffset": 0|1|2|3|null,
+   *    "claimedIndex": 0|1|2|null }, ...]
+   * ```
+   * これを `MeldGroup[]` に parse する。空配列・パースエラーは `[]`。
+   */
+  getPlayerMelds(playerIdx: PlayerIndex): MeldGroup[] {
+    const raw = this.game.getPlayerMelds(playerIdx)
+    if (!raw) return []
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return []
+    }
+    if (!Array.isArray(parsed)) return []
+    const out: MeldGroup[] = []
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') continue
+      const m = item as Record<string, unknown>
+      const kind = m.kind as MeldKind
+      if (
+        kind !== 'chi' &&
+        kind !== 'pon' &&
+        kind !== 'ankan' &&
+        kind !== 'minkan' &&
+        kind !== 'kakan'
+      ) {
+        continue
+      }
+      const rawTiles = Array.isArray(m.tiles) ? (m.tiles as unknown[]) : []
+      const tiles: Tile[] = []
+      for (const code of rawTiles) {
+        if (typeof code !== 'string') continue
+        const t = tileFromCuiCode(code)
+        if (t) tiles.push(t)
+      }
+      const fromOffsetRaw = m.fromOffset
+      const fromOffset: MeldGroup['fromOffset'] =
+        fromOffsetRaw === null || fromOffsetRaw === undefined
+          ? null
+          : (((fromOffsetRaw as number) % 4) as 0 | 1 | 2 | 3)
+      const claimedRaw = m.claimedIndex
+      const claimedIndex: number | null =
+        claimedRaw === null || claimedRaw === undefined
+          ? null
+          : (claimedRaw as number)
+      out.push({ kind, tiles, fromOffset, claimedIndex })
+    }
+    return out
   }
 
   // ---- リーチ ----

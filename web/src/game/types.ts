@@ -58,6 +58,36 @@ export const diceRollToHumanSeat = (roll: DiceRoll): PlayerIndex => {
 
 
 /**
+ * 副露 (鳴き面子) の種類 (#83 副露表示)。
+ * - chi: 順子 (チー)
+ * - pon: 刻子 (ポン)
+ * - ankan: 暗槓 (自家 4 枚で槓)
+ * - minkan: 大明槓 (他家の打牌で槓)
+ * - kakan: 加槓 (既存 Pon → Kan に昇格)
+ */
+export type MeldKind = 'chi' | 'pon' | 'ankan' | 'minkan' | 'kakan'
+
+/**
+ * 副露 1 組分の表示用データ (#83 副露表示)。
+ * Pixi 側でこのデータをもとに、横並び + claimed 牌を 90 度回転して描画する。
+ */
+export interface MeldGroup {
+  kind: MeldKind
+  tiles: Tile[]
+  /**
+   * 鳴き元の自プレイヤー相対 offset。`(from_player - player_idx + 4) % 4`。
+   * - 1: 下家 (右) から
+   * - 2: 対面 (上) から
+   * - 3: 上家 (左) から
+   * - 0: 自家 (通常は加槓のみ、claimed の鳴き元は元 Pon と同じ向き)
+   * - null: 暗槓 (鳴き元なし)
+   */
+  fromOffset: 0 | 1 | 2 | 3 | null
+  /** tiles の何番目が他家から取った牌か。暗槓は null。 */
+  claimedIndex: number | null
+}
+
+/**
  * プレイヤー 1 人の状態。手牌・河・点数を持つ。
  * isCPU で CPU/人間を区別 (Wasm 側の human_player_index に対応)。
  */
@@ -66,6 +96,8 @@ export interface PlayerState {
   name: string
   hand: Tile[]
   discards: Tile[]
+  /** 副露 (鳴き) の面子配列。鳴きが無ければ空 (#83)。 */
+  melds: MeldGroup[]
   score: number
   isCPU: boolean
   isRiichi: boolean

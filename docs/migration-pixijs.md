@@ -92,6 +92,17 @@
 - Rust core の新 API は増やさず、既存の `newHybrid(human_name, human_position)` だけでモード差分を吸収
 - テスト追加: 既定の東家開始に加え、南家選択後の開始が `createBridge('cpu-south')` で呼ばれることを `App.test.ts` で固定
 
+### Issue #83 / PR #88 — 副露 (鳴き面子) の表示
+
+- `web/src/game/types.ts`: `MeldGroup` 型 (kind / tiles / fromOffset / claimedIndex) と `PlayerState.melds` を追加し、Rust 側 `Meld` と 1:1 対応する Web 表示用データを定義
+- `web/src/game/wasm.ts`: `WasmGameBridge.getPlayerMelds(idx)` を追加し、Rust 側 `Game::get_player_melds_json()` の JSON を `MeldGroup[]` に復元
+- `web/src/game/bridgeState.ts`: `createGameStateFromBridge` で `getPlayerMelds` を呼んで各プレイヤーの副露を取り込む。旧 mock 互換用に `typeof === 'function'` ガードを残す (テスト用 fallback)
+- `web/src/game/table.ts`: 副露 1 組分の Container を作る `createMeldGroup`、複数 meld を横並びにする `createMeldRow`、横幅 fit (`fitMeldScale`) と CPU 外側余白 fit (`fitMeldDepthScale`) を実装
+- 自家 (offset 0) は手牌の下に右端揃え、CPU (offset 1/2/3) は手牌の **外側** (stage 端方向) に副露 row を並べる。`cpuHandBaseline` は `STAGE_HEIGHT/2 + 280` で、副露 sideways (= TILE.height × 0.7 ≈ 39.2px) + 8px gap が stage 端まで安全に収まる
+- 副露の見た目: chi/pon/kakan は 3 スロット並び (face/face/sideways)、minkan は 4 スロット並び (face×3 + sideways)、kakan は sideways の上にさらに 1 枚を横向きで stack、ankan は中 2 枚を裏向きにした 4 縦並び。`fromOffset` で sideways の位置 (上家=左端 / 対面=中央 / 下家=右端 or 4 スロット最右) を決める
+- Rust 側 `Game::do_chi`: pattern (0=n-2/n-1/n, 1=n-1/n/n+1, 2=n/n+1/n+2) に応じて `tiles` を昇順に並べ、`claimed_index` を pattern から確定的に決定する (last_discard 位置 = pattern 0→2 / 1→1 / 2→0)
+- テスト追加: `table.test.ts` で `createMeldGroup` 直接呼び出しの構造検証 (minkan sideways 位置、ankan の裏向き配置、kakan の stack 牌 y 座標)
+
 ## 残 Issue
 
 | Issue | 内容 | 主要成果物 |

@@ -769,36 +769,39 @@ impl Game {
         let tile = self.last_discard.unwrap();
 
         if let TileType::Number { suit, value } = tile.tile_type {
-            let (t1, t2) = match pattern {
+            // pattern ごとに「手牌から取り出す 2 枚 (t1, t2)」と、副露表示用に
+            // 昇順で並べた tiles 配列 + claimed_index を組み立てる。
+            // - pattern 0 (n-2, n-1, n): tiles = [t1, t2, tile]、claimed_index = 2 (右端)
+            // - pattern 1 (n-1, n, n+1): tiles = [t1, tile, t2]、claimed_index = 1 (中央)
+            // - pattern 2 (n, n+1, n+2): tiles = [tile, t1, t2]、claimed_index = 0 (左端)
+            // いずれも tiles はチーの自然な並び (昇順)、claimed_index は last_discard の位置。
+            let (t1, t2, tiles_vec, claimed_index_value) = match pattern {
                 0 => {
                     // n-2, n-1, n
                     if value < 3 {
                         return false;
                     }
-                    (
-                        Tile::new_number(suit, value - 2, false),
-                        Tile::new_number(suit, value - 1, false),
-                    )
+                    let a = Tile::new_number(suit, value - 2, false);
+                    let b = Tile::new_number(suit, value - 1, false);
+                    (a, b, vec![a, b, tile], 2usize)
                 }
                 1 => {
                     // n-1, n, n+1
                     if value < 2 || value > 8 {
                         return false;
                     }
-                    (
-                        Tile::new_number(suit, value - 1, false),
-                        Tile::new_number(suit, value + 1, false),
-                    )
+                    let a = Tile::new_number(suit, value - 1, false);
+                    let b = Tile::new_number(suit, value + 1, false);
+                    (a, b, vec![a, tile, b], 1usize)
                 }
                 2 => {
                     // n, n+1, n+2
                     if value > 7 {
                         return false;
                     }
-                    (
-                        Tile::new_number(suit, value + 1, false),
-                        Tile::new_number(suit, value + 2, false),
-                    )
+                    let a = Tile::new_number(suit, value + 1, false);
+                    let b = Tile::new_number(suit, value + 2, false);
+                    (a, b, vec![tile, a, b], 0usize)
                 }
                 _ => return false,
             };
@@ -808,10 +811,17 @@ impl Game {
                 return false;
             }
 
+            // #83 副露表示: 鳴き元 (= 直前打牌者) と claimed_index を保存する。
+            // tiles は昇順、claimed_index は pattern から確定的に決める。
+            let claimed_index = Some(claimed_index_value);
+            let from_player = self.last_discarder;
             let meld = crate::hand::Meld {
                 meld_type: crate::hand::MeldType::Chi,
-                tiles: vec![t1, tile, t2],
+                tiles: tiles_vec,
                 is_open: true,
+                from_player,
+                is_kakan: false,
+                claimed_index,
             };
 
             player.hand.add_meld(meld);
@@ -834,6 +844,7 @@ impl Game {
         }
 
         let tile = self.last_discard.unwrap();
+        let from_player = self.last_discarder;
         let player = &mut self.players[player_idx];
 
         // 同じ牌を2枚削除
@@ -841,10 +852,14 @@ impl Game {
             return false;
         }
 
+        // #83 副露表示: ポンは 3 枚同種なので claimed_index = 0 で OK。
         let meld = crate::hand::Meld {
             meld_type: crate::hand::MeldType::Pon,
             tiles: vec![tile, tile, tile],
             is_open: true,
+            from_player,
+            is_kakan: false,
+            claimed_index: Some(0),
         };
 
         player.hand.add_meld(meld);
@@ -864,6 +879,7 @@ impl Game {
         }
 
         let tile = self.last_discard.unwrap();
+        let from_player = self.last_discarder;
         let player = &mut self.players[player_idx];
 
         // 同じ牌を3枚削除
@@ -873,10 +889,14 @@ impl Game {
             }
         }
 
+        // #83 副露表示: 大明槓は claimed_index = 0、from_player に直前打牌者を入れる。
         let meld = crate::hand::Meld {
             meld_type: crate::hand::MeldType::Kan,
             tiles: vec![tile, tile, tile, tile],
             is_open: true,
+            from_player,
+            is_kakan: false,
+            claimed_index: Some(0),
         };
 
         player.hand.add_meld(meld);
@@ -914,10 +934,14 @@ impl Game {
             }
         }
 
+        // #83 副露表示: 暗槓は from_player / claimed_index ともに None。
         let meld = crate::hand::Meld {
             meld_type: crate::hand::MeldType::Kan,
             tiles: vec![tile, tile, tile, tile],
             is_open: false,
+            from_player: None,
+            is_kakan: false,
+            claimed_index: None,
         };
 
         player.hand.add_meld(meld);
@@ -1043,6 +1067,9 @@ impl Game {
                 meld.meld_type = crate::hand::MeldType::Kan;
                 meld.tiles.push(tile);
                 meld.is_open = true;
+                // #83 副露表示: 加槓 (Pon → Kan 昇格) フラグを立てる。from_player は
+                // 元 Pon の値を維持 (= 元の鳴き元家を保持)、claimed_index も触らない。
+                meld.is_kakan = true;
             } else {
                 // 直前に position で見つけているので通常到達不能
                 return false;

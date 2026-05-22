@@ -72,6 +72,7 @@ fn install_pon(hand: &mut Hand, tile: Tile) {
         meld_type: MeldType::Pon,
         tiles: vec![tile, tile, tile],
         is_open: true,
+        ..Default::default()
     });
 }
 
@@ -241,6 +242,7 @@ fn test_can_shouminkan_ignores_non_pon_melds() {
         meld_type: MeldType::Chi,
         tiles: vec![tile!(3m), tile!(4m), tile!(5m)],
         is_open: true,
+        ..Default::default()
     });
     hand.add_tile(tile!(5m));
     game.players[0].hand = hand;

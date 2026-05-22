@@ -58,6 +58,7 @@ fn kan_meld(tile: Tile, is_open: bool) -> Meld {
         meld_type: MeldType::Kan,
         tiles: vec![tile, tile, tile, tile],
         is_open,
+        ..Default::default()
     }
 }
 
@@ -66,6 +67,7 @@ fn pon_meld(tile: Tile) -> Meld {
         meld_type: MeldType::Pon,
         tiles: vec![tile, tile, tile],
         is_open: true,
+        ..Default::default()
     }
 }
 
