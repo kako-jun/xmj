@@ -125,11 +125,15 @@ const renderScores = (root: HTMLElement, state: HtmlUiState): void => {
       if (player.id === state.humanPlayerIndex) row.dataset.self = '1'
       const wind = document.createElement('span')
       wind.className = 'wind'
-      wind.textContent = PLAYER_WIND[player.id]
+      // CPU 名 ("CPU 南" 等) には既に風が含まれているため .wind を空にして二重表記を回避。
+      // 人間プレイヤー (name="あなた" 等) では風を表示する。
+      const wk = PLAYER_WIND[player.id]
+      const nameContainsWind = player.name.includes(wk)
+      wind.textContent = nameContainsWind ? '' : wk
       const name = document.createElement('span')
       name.className = 'name'
-      name.textContent =
-        player.id === state.humanPlayerIndex ? `${player.name} (あなた)` : player.name
+      // 人間でも name が "あなた" のままで十分なので "(あなた)" は付けない。
+      name.textContent = player.name
       const pts = document.createElement('span')
       pts.className = 'points'
       pts.textContent = player.score.toLocaleString()
@@ -181,6 +185,16 @@ const renderActions = (root: HTMLElement, state: HtmlUiState): void => {
   )
 }
 
+// MMORPG のチャット欄風: 行ごとに [発信者] と本文を分けて、発信者ごとに色分け。
+// 発信者の検出は行頭の "東家 が" / "あなた が" / "CPU 南 が" などのパターンで行う。
+const SPEAKER_PATTERNS: Array<{ tag: string; regex: RegExp; klass: string }> = [
+  { tag: '東家', regex: /^(?:CPU\s+東|東家)/, klass: 'spk-east' },
+  { tag: '南家', regex: /^(?:CPU\s+南|南家)/, klass: 'spk-south' },
+  { tag: '西家', regex: /^(?:CPU\s+西|西家)/, klass: 'spk-west' },
+  { tag: '北家', regex: /^(?:CPU\s+北|北家)/, klass: 'spk-north' },
+  { tag: '自分', regex: /^あなた/, klass: 'spk-self' },
+]
+
 const renderLog = (root: HTMLElement, state: HtmlUiState): void => {
   const logEl = root.querySelector<HTMLElement>('[data-ui="log"]')
   if (!logEl) return
@@ -188,11 +202,24 @@ const renderLog = (root: HTMLElement, state: HtmlUiState): void => {
     ...state.eventLog.map(entry => {
       const row = document.createElement('div')
       row.className = 'log-entry'
-      row.textContent = entry
+      const matched = SPEAKER_PATTERNS.find(p => p.regex.test(entry))
+      if (matched) {
+        row.classList.add(matched.klass)
+        const tag = document.createElement('span')
+        tag.className = 'log-tag'
+        tag.textContent = matched.tag
+        const body = document.createElement('span')
+        body.className = 'log-body'
+        body.textContent = entry.replace(/^[^\s]+\s*(が)?\s*/, '')
+        row.appendChild(tag)
+        row.appendChild(body)
+      } else {
+        row.classList.add('log-system')
+        row.textContent = entry
+      }
       return row
     })
   )
-  // 最新行が常に見えるよう下端に自動スクロール
   logEl.scrollTop = logEl.scrollHeight
 }
 

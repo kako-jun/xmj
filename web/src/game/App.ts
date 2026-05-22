@@ -232,11 +232,9 @@ export class App {
       createModeSelectScene({
         selectedMode: this.selectedGameMode,
         modes: this.buildGameModes(),
+        // タップ即確定: 選択 + 場決めシーン遷移を 1 タップで行う
         onSelectMode: mode => {
           this.selectedGameMode = mode
-          this.showModeSelectScene()
-        },
-        onConfirm: () => {
           this.showDiceRollScene()
         },
         onBack: () => {
@@ -249,20 +247,26 @@ export class App {
 
   showDiceRollScene(roll?: DiceRoll): void {
     this.invalidateCpuTurnTask()
-    this.activeScene = 'dice-roll'
     const settledRoll = roll ?? this.rollDice()
     const humanSeat = diceRollToHumanSeat(settledRoll)
     this.selectedHumanSeat = humanSeat
 
-    this.replaceStageRoot(
-      createDiceRollScene({
-        roll: settledRoll,
-        humanSeat,
-        onComplete: () => {
-          this.startNewGame()
-        },
-      })
-    )
+    // 対局画面を先に出してから、その上にサイコロ overlay を被せる
+    const started = this.startNewGame()
+    if (!started) return
+
+    this.activeScene = 'dice-roll'
+    const overlay = createDiceRollScene({
+      roll: settledRoll,
+      humanSeat,
+      onComplete: () => {
+        overlay.parent?.removeChild(overlay)
+        overlay.destroy({ children: true })
+        this.activeScene = 'table'
+        this.renderHtmlOverlay()
+      },
+    })
+    this.app.stage.addChild(overlay)
     this.renderHtmlOverlay()
   }
 
@@ -411,6 +415,8 @@ export class App {
       ? this.gameState.players[this.humanPlayerIndex].hand
       : []
     this.justDrawnTile = diffNewlyAddedTile(beforeHand, afterHand)
+    // デフォルトの打牌候補をツモ牌に合わせる (UX: 連打で即切り)
+    this.selectedHandIndex = this.findHandIndexOfJustDrawn()
     // 新しいツモを引いた時点で、このターンの「リーチしない」決定はリセット。
     this.riichiDeclinedThisTurn = false
     // Issue #46: 暗槓 / 加槓が可能ならカンモーダル、そうでなければリーチモーダルへ
@@ -419,6 +425,16 @@ export class App {
     }
     this.renderTable()
     return true
+  }
+
+  private findHandIndexOfJustDrawn(): number | null {
+    if (!this.gameState || !this.justDrawnTile) return null
+    const hand = this.gameState.players[this.humanPlayerIndex].hand
+    const key = tileToCuiCode(this.justDrawnTile)
+    for (let i = hand.length - 1; i >= 0; i--) {
+      if (tileToCuiCode(hand[i]) === key) return i
+    }
+    return null
   }
 
   /**
@@ -1381,7 +1397,7 @@ export class App {
         key: 'hanchan',
         title: '半荘戦',
         description: '東南両場を打つ標準ルール',
-        enabled: false,
+        enabled: true,
       },
     ]
   }

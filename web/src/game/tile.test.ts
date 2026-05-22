@@ -95,10 +95,13 @@ describe('createTileGraphics', () => {
     expect(text?.style.fill).toBe(TILE.redTextColor)
   })
 
-  it('赤ドラでない通常牌は文字色が TILE.textColor (スート差し色は Unicode 絵柄に委譲)', () => {
-    const c = createTileGraphics({ suit: 'sou', value: 3 })
-    const text = c.children.find((ch): ch is Text => ch instanceof Text)
-    expect(text?.style.fill).toBe(TILE.textColor)
+  it('索子は緑、筒子は青、萬子は黒 (赤ドラ以外は系統色で塗り分ける)', () => {
+    const sou = createTileGraphics({ suit: 'sou', value: 3 })
+    expect((sou.children.find((c): c is Text => c instanceof Text))?.style.fill).toBe(TILE.souColor)
+    const pin = createTileGraphics({ suit: 'pin', value: 5 })
+    expect((pin.children.find((c): c is Text => c instanceof Text))?.style.fill).toBe(TILE.pinColor)
+    const man = createTileGraphics({ suit: 'man', value: 1 })
+    expect((man.children.find((c): c is Text => c instanceof Text))?.style.fill).toBe(TILE.textColor)
   })
 })
 

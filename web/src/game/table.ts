@@ -18,11 +18,9 @@ import {
   DISCARD_COLS,
   DISCARD_SLOT_COLOR,
   PANEL_ACCENT_COLOR,
-  PANEL_BORDER_COLOR,
   STAGE_HEIGHT,
   STAGE_WIDTH,
   TABLE_BG_COLOR,
-  TABLE_BORDER_COLOR,
   TABLE_CENTER_X,
   TABLE_CENTER_Y,
   TABLE_FELT_INNER_COLOR,
@@ -67,22 +65,13 @@ const createTableSurface = (): Container => {
   const table = new Container()
   table.label = 'table-surface'
 
-  const outerMargin = 24
-  const outerSize = STAGE_WIDTH - outerMargin * 2
-  const outer = new Graphics()
-  outer
-    .roundRect(outerMargin, outerMargin, outerSize, outerSize, 28)
-    .fill({ color: TABLE_BORDER_COLOR })
-    .stroke({ color: PANEL_BORDER_COLOR, width: 4 })
-  table.addChild(outer)
-
-  const innerMargin = outerMargin + 20
+  // 金色フレーム廃止 — 緑のフェルトをステージ端近くまで広げる
+  const innerMargin = 16
   const innerSize = STAGE_WIDTH - innerMargin * 2
   const inner = new Graphics()
   inner
-    .roundRect(innerMargin, innerMargin, innerSize, innerSize, 22)
+    .roundRect(innerMargin, innerMargin, innerSize, innerSize, 24)
     .fill({ color: TABLE_BG_COLOR })
-    .stroke({ color: PANEL_ACCENT_COLOR, width: 2, alpha: 0.45 })
   table.addChild(inner)
 
   // 中央の薄い felt。河に囲まれた領域を視覚的に示す。
@@ -97,7 +86,6 @@ const createTableSurface = (): Container => {
       18
     )
     .fill({ color: TABLE_FELT_INNER_COLOR })
-    .stroke({ color: PANEL_ACCENT_COLOR, width: 2, alpha: 0.4 })
   table.addChild(center)
 
   return table
@@ -255,7 +243,9 @@ const addSeatLayout = (
 
   // 河ブロックの内縁から卓中心までの距離 = DISCARD_INNER_MARGIN
   // 自家河は中央から下に DISCARD_INNER_MARGIN ぶん離した位置に上端を置く
-  const handBaseline = STAGE_HEIGHT / 2 + DISCARD_INNER_MARGIN + DISCARD_BLOCK_HEIGHT + 22
+  // CPU の手牌は卓の対称ラインから少し外側 (overlap 回避のため自家より外) に置く
+  const handBaseline = STAGE_HEIGHT / 2 + DISCARD_INNER_MARGIN + DISCARD_BLOCK_HEIGHT + 14
+  const cpuHandBaseline = STAGE_HEIGHT / 2 + 304
 
   const discardBlock = createDiscardBlock(player)
   const handRow = createHandRow(player, offset === 0 ? options : {})
@@ -271,12 +261,12 @@ const addSeatLayout = (
       break
     }
     case 1: {
-      // 右 (下家): -90° 回転。ローカル (col,row)=(x,y) は画面では (TABLE_CENTER_X + INNER + row*pitch, TABLE_CENTER_Y + BLOCK_WIDTH/2 - col*pitch)
+      // 右 (下家): -90° 回転。CPU は別 baseline で外側へ
       discardBlock.rotation = -Math.PI / 2
       discardBlock.x = TABLE_CENTER_X + DISCARD_INNER_MARGIN
       discardBlock.y = TABLE_CENTER_Y + DISCARD_BLOCK_WIDTH / 2
       handRow.rotation = -Math.PI / 2
-      handRow.x = STAGE_WIDTH - (STAGE_HEIGHT - handBaseline)
+      handRow.x = cpuHandBaseline
       handRow.y = TABLE_CENTER_Y
       break
     }
@@ -287,7 +277,7 @@ const addSeatLayout = (
       discardBlock.y = TABLE_CENTER_Y - DISCARD_INNER_MARGIN
       handRow.rotation = Math.PI
       handRow.x = TABLE_CENTER_X
-      handRow.y = STAGE_HEIGHT - handBaseline
+      handRow.y = STAGE_HEIGHT - cpuHandBaseline
       break
     }
     case 3: {
@@ -296,7 +286,7 @@ const addSeatLayout = (
       discardBlock.x = TABLE_CENTER_X - DISCARD_INNER_MARGIN
       discardBlock.y = TABLE_CENTER_Y - DISCARD_BLOCK_WIDTH / 2
       handRow.rotation = Math.PI / 2
-      handRow.x = STAGE_HEIGHT - handBaseline
+      handRow.x = STAGE_HEIGHT - cpuHandBaseline
       handRow.y = TABLE_CENTER_Y
       break
     }

@@ -110,8 +110,15 @@ const getHandTile = (stage: Container, label: string): Container => {
 }
 
 
-const getSceneButton = (stage: Container, label: string): Container =>
-  (stage.children[0] as Container).getChildByLabel(label) as Container
+const getSceneButton = (stage: Container, label: string): Container => {
+  // 新仕様: 卓 + dice overlay のように複数 scene が stage 直下に並ぶことがあるので
+  // すべての children を走査して該当ラベルの最初の Container を返す。
+  for (const child of stage.children) {
+    const found = (child as Container).getChildByLabel?.(label)
+    if (found) return found as Container
+  }
+  return null as unknown as Container
+}
 
 const getModeCard = (stage: Container, key: string): Container =>
   ((stage.children[0] as Container).getChildByLabel('mode-card-row') as Container).getChildByLabel(
@@ -130,9 +137,13 @@ const walkToGame = (
   roll: { d1: number; d2: number }
 ): void => {
   getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
-  getSceneButton(stage, 'mode-select-confirm').emit('pointertap', {} as never)
+  // mode-select-confirm 廃止: カードタップで即進行する形に変更したのでこのテスト経路は dice 直接呼び出しに統合
+  // (本来はカードタップだが、テストは showDiceRollScene を直接呼ぶ)
   app.showDiceRollScene(roll)
-  getSceneButton(stage, 'dice-roll-start-button').emit('pointertap', {} as never)
+  // dice overlay は startNewGame 成功時のみ出る。bridge factory が例外を投げる
+  // テストケースでは title-scene へ戻り overlay が出ないので、ボタンが null でも進める。
+  const startBtn = getSceneButton(stage, 'dice-roll-start-button')
+  if (startBtn) startBtn.emit('pointertap', {} as never)
 }
 
 describe('App', () => {
@@ -314,14 +325,15 @@ Dora indicators: 5p
     getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
     expect((stage.children[0] as Container).label).toBe('mode-select-scene')
 
-    // モード選択 → 場決め (デフォルト tonpuusen のまま「次へ」)
-    getSceneButton(stage, 'mode-select-confirm').emit('pointertap', {} as never)
+    // モード選択 → 場決め (新仕様: dice は対局画面の上に overlay 表示)
     // テスト用に明示的な dice を注入する
     app.showDiceRollScene({ d1: 2, d2: 1 })
-    expect((stage.children[0] as Container).label).toBe('dice-roll-scene')
+    // 卓が先に描画され、その上に dice overlay が乗る (children[0]=game-table, children[last]=dice-roll-scene)
+    expect((stage.children[0] as Container).label).toBe('game-table')
+    expect((stage.children[stage.children.length - 1] as Container).label).toBe('dice-roll-scene')
     expect(app.selectedHumanSeat).toBe(1)
 
-    // 場決め → 対局開始
+    // dice overlay の「対局を始める」で overlay が消える (対局はすでに始まっている)
     getSceneButton(stage, 'dice-roll-start-button').emit('pointertap', {} as never)
 
     expect(createBridge).toHaveBeenCalledTimes(1)
@@ -357,11 +369,13 @@ Dora indicators: 5p
 
     app.showTitleScene()
     getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
-    getSceneButton(stage, 'mode-select-confirm').emit('pointertap', {} as never)
+    // 半荘戦カードでも tonpuusen でもどちらでも良いが、カードタップで即 dice へ進む
+    getModeCard(stage, 'tonpuusen').emit('pointertap', {} as never)
 
     expect(rollDice).toHaveBeenCalledTimes(1)
     expect(app.selectedHumanSeat).toBe(0)
-    expect((stage.children[0] as Container).label).toBe('dice-roll-scene')
+    // 卓の上に dice overlay
+    expect((stage.children[stage.children.length - 1] as Container).label).toBe('dice-roll-scene')
   })
 
   it('場決め後の dice-roll-start で createBridge が例外を投げたら title-scene に戻り理由を表示する', () => {
@@ -383,18 +397,15 @@ Dora indicators: 5p
     ).toBe(true)
   })
 
-  it('mode-card で半荘戦を選んでも enabled=false のため確定ボタンが反応しない', () => {
+  it('東風戦・半荘戦どちらのカードもタップ可能 (両モードとも enabled)', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const app = new App(fakeApp, { createBridge: () => createBridgeMock() })
 
     app.showTitleScene()
     getSceneButton(stage, 'title-start-button').emit('pointertap', {} as never)
-    // 半荘戦は disabled なのでカード自体が pointertap を受け付けない
-    const hanchanCard = getModeCard(stage, 'hanchan')
-    expect(hanchanCard.eventMode).not.toBe('static')
-    // 東風戦はちゃんと取れる
-    expect(getModeCard(stage, 'tonpuusen')).toBeTruthy()
+    expect(getModeCard(stage, 'tonpuusen').eventMode).toBe('static')
+    expect(getModeCard(stage, 'hanchan').eventMode).toBe('static')
   })
 
   it('立直中のプレイヤーだけ score badge に立直表示が出る', () => {
@@ -575,7 +586,8 @@ Dora indicators: 5p
     expect(discardCount).toBe(1)
     expect(cpuCount).toBe(3)
     expect(drawCount).toBe(1)
-    expect(app.selectedHandIndex).toBe(null)
+    // 新仕様: ツモ後はデフォルトで「ツモ牌」が選択された状態になるため selectedHandIndex は非 null
+    expect(app.selectedHandIndex).not.toBe(null)
     expect(app.gameState?.currentTurn).toBe(0)
     expect(app.gameState?.players[0].hand).toHaveLength(14)
   })
@@ -703,7 +715,8 @@ Last discard: 5m`,
     expect((stage.children[0] as Container).label).toBe('mode-select-scene')
 
     // モード選択 → 場決め (d1=2,d2=2 → 合計4 → (4-2)%4=2 → 西家) → 開始
-    getSceneButton(stage, 'mode-select-confirm').emit('pointertap', {} as never)
+    // mode-select-confirm 廃止: カードタップで即進行する形に変更したのでこのテスト経路は dice 直接呼び出しに統合
+  // (本来はカードタップだが、テストは showDiceRollScene を直接呼ぶ)
     app.showDiceRollScene({ d1: 2, d2: 2 })
     getSceneButton(stage, 'dice-roll-start-button').emit('pointertap', {} as never)
 

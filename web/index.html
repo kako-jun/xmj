@@ -217,17 +217,24 @@
         color: var(--text-danger);
         font-weight: 700;
       }
+      /* 操作ブロックは右下に固定。ボタン数が増えても領域は広がらず、
+       * grid auto-fill で均等分割されるので 1 ボタンあたりが小さくなる。 */
+      #ui-actions-section {
+        background: rgba(0, 0, 0, 0.25);
+      }
+      /* 1 行に全部のアクションを並べ、ボタンが増えるほど 1 個あたりが横に細くなる */
       #ui-actions {
         display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
+        flex-wrap: nowrap;
+        gap: 4px;
+        height: 56px;
       }
       .action-btn {
-        flex: 1 1 auto;
-        min-width: 80px;
-        min-height: 44px;
-        padding: 8px 12px;
-        font-size: 15px;
+        flex: 1 1 0;
+        min-width: 0;
+        min-height: 0;
+        padding: 4px 6px;
+        font-size: 13px;
         font-weight: 700;
         font-family: inherit;
         color: var(--text-primary);
@@ -274,12 +281,59 @@
         font-family: "JetBrains Mono", "Menlo", monospace;
       }
       #ui-log .log-entry {
-        padding: 1px 0;
-        opacity: 0.85;
+        padding: 4px 6px;
+        margin: 2px 0;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.03);
+        border-left: 3px solid transparent;
+        display: flex;
+        gap: 6px;
+        align-items: baseline;
+      }
+      #ui-log .log-entry .log-tag {
+        font-size: 10px;
+        font-weight: bold;
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.08);
+        flex-shrink: 0;
+        line-height: 1.4;
+      }
+      #ui-log .log-entry .log-body {
+        flex: 1;
+        word-break: break-word;
+      }
+      #ui-log .log-entry.spk-self {
+        border-left-color: #ffd75f;
+        background: rgba(255, 215, 95, 0.06);
+      }
+      #ui-log .log-entry.spk-self .log-tag {
+        color: #1a1a1a;
+        background: #ffd75f;
+      }
+      #ui-log .log-entry.spk-east .log-tag {
+        color: #1a1a1a;
+        background: #ff8a6b;
+      }
+      #ui-log .log-entry.spk-south .log-tag {
+        color: #1a1a1a;
+        background: #ffd14d;
+      }
+      #ui-log .log-entry.spk-west .log-tag {
+        color: #fff;
+        background: #6fa8dc;
+      }
+      #ui-log .log-entry.spk-north .log-tag {
+        color: #fff;
+        background: #8c6fdc;
+      }
+      #ui-log .log-entry.log-system {
+        color: var(--text-muted);
+        font-style: italic;
+        border-left-color: rgba(255, 255, 255, 0.2);
       }
       #ui-log .log-entry:last-child {
-        opacity: 1;
-        color: var(--turn-glow);
+        background: rgba(255, 215, 95, 0.1);
       }
       #loading {
         position: fixed;
@@ -334,14 +388,14 @@
           <h2>点数</h2>
           <div id="ui-scores" data-ui="scores"></div>
         </section>
-        <section class="side-section">
-          <h2>操作</h2>
-          <div id="ui-actions" data-ui="actions"></div>
-          <div id="ui-hint" data-ui="hint"></div>
-        </section>
         <section class="side-section" style="flex: 1; min-height: 0; display: flex; flex-direction: column;">
           <h2>実況</h2>
           <div id="ui-log" data-ui="log"></div>
+        </section>
+        <section class="side-section" id="ui-actions-section">
+          <h2>操作</h2>
+          <div id="ui-actions" data-ui="actions"></div>
+          <div id="ui-hint" data-ui="hint"></div>
         </section>
       </aside>
     </div>

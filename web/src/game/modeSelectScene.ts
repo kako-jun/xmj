@@ -33,8 +33,8 @@ const makeText = (
 interface ModeSelectSceneOptions {
   selectedMode: GameMode
   modes: GameModeOption[]
+  /** カードタップで「選択 + 確定」を一括で行うコールバック。 */
   onSelectMode: (mode: GameMode) => void
-  onConfirm: () => void
   onBack: () => void
 }
 
@@ -161,51 +161,11 @@ export const createModeSelectScene = (options: ModeSelectSceneOptions): Containe
   })
   root.addChild(cardsRow)
 
-  const selectedMode = options.modes.find(mode => mode.key === options.selectedMode)
-  const confirmEnabled = selectedMode?.enabled ?? false
-
-  const confirmW = 240
-  const confirmH = 52
-  const confirmY = 160 + totalHeight + 18
-  const confirmButton = new Container()
-  confirmButton.label = 'mode-select-confirm'
-  confirmButton.x = cx - confirmW / 2
-  confirmButton.y = confirmY
-
-  const confirmBg = new Graphics()
-  confirmBg
-    .roundRect(0, 0, confirmW, confirmH, 16)
-    .fill({ color: confirmEnabled ? 0x281608 : 0x2a2a2a, alpha: confirmEnabled ? 0.96 : 0.8 })
-    .stroke({
-      color: confirmEnabled ? PANEL_ACCENT_COLOR : TEXT_MUTED_COLOR,
-      width: 3,
-      alpha: confirmEnabled ? 1 : 0.5,
-    })
-  confirmButton.addChild(confirmBg)
-
-  const confirmLabel = makeText(
-    '次へ',
-    22,
-    confirmEnabled ? TEXT_PRIMARY_COLOR : TEXT_MUTED_COLOR,
-    'center',
-    'bold'
-  )
-  confirmLabel.anchor.set(0.5)
-  confirmLabel.x = confirmW / 2
-  confirmLabel.y = confirmH / 2
-  confirmButton.addChild(confirmLabel)
-
-  if (confirmEnabled) {
-    confirmButton.eventMode = 'static'
-    confirmButton.cursor = 'pointer'
-    confirmButton.on('pointertap', options.onConfirm)
-  }
-  root.addChild(confirmButton)
-
+  // 「次へ」ボタンは廃止。カードタップで即確定するため不要。
   const backButton = new Container()
   backButton.label = 'mode-select-back'
   backButton.x = cx - 60
-  backButton.y = confirmY + confirmH + 20
+  backButton.y = 160 + totalHeight + 30
 
   const backLabel = makeText('< 戻る', 16, TEXT_MUTED_COLOR, 'center')
   backLabel.anchor.set(0.5)

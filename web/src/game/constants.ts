@@ -37,10 +37,10 @@ export const TILE = {
   width: 40,
   height: 56,
   // 自家手牌のピッチ
-  handSpacing: 44,
+  handSpacing: 42,
   // CPU 裏向き手牌のスケールと spacing
   cpuHandScale: 0.7,
-  cpuHandSpacing: 30,
+  cpuHandSpacing: 26,
   // 河のグリッドピッチ
   discardColPitch: 30,
   discardRowPitch: 42,
@@ -63,4 +63,4 @@ export const DISCARD_BLOCK_HEIGHT = DISCARD_ROWS * TILE.discardRowPitch
 
 // 河ブロックの内縁から卓中心までの距離。4 方位で同じ値を使うことで対称配置を保証する。
 // 中央に「直前打牌・流れ表示」などのちょっとした余地を残しつつ、河同士の被りを防ぐ。
-export const DISCARD_INNER_MARGIN = 56
+export const DISCARD_INNER_MARGIN = 96

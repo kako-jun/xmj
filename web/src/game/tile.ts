@@ -78,10 +78,22 @@ export const createTileGraphics = (tile: Tile): Container => {
   container.addChild(face)
 
   // Unicode 麻雀タイル文字 1 つ
+  // 系統ごとに色分け: 索子=緑 / 筒子=青 / 萬子・字牌=黒 / 赤ドラ=赤 (最優先)
+  const suitColor = (() => {
+    if (tile.isRed) return TILE.redTextColor
+    switch (tile.suit) {
+      case 'sou':
+        return TILE.souColor
+      case 'pin':
+        return TILE.pinColor
+      default:
+        return TILE.textColor
+    }
+  })()
   const style = new TextStyle({
     fontFamily: TILE_FONT_FAMILY,
     fontSize: 52, // TILE.height (56) より少し小さめ。文字には内側余白が含まれる
-    fill: tile.isRed ? TILE.redTextColor : TILE.textColor,
+    fill: suitColor,
   })
   const glyph = new Text({ text: tileToUnicodeChar(tile), style })
   glyph.anchor.set(0.5)

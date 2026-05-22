@@ -5,8 +5,6 @@ import {
   PANEL_BORDER_COLOR,
   STAGE_HEIGHT,
   STAGE_WIDTH,
-  TABLE_BG_COLOR,
-  TABLE_GLOW_COLOR,
   TEXT_MUTED_COLOR,
   TEXT_PRIMARY_COLOR,
 } from './constants'
@@ -107,19 +105,20 @@ export const createDiceRollScene = (options: DiceRollSceneOptions): Container =>
 
   const cx = STAGE_WIDTH / 2
 
+  // 対局画面の上に薄くかぶせる overlay。背面の卓が透けて見える設計。
   const bg = new Graphics()
-  bg.rect(0, 0, STAGE_WIDTH, STAGE_HEIGHT).fill({ color: 0x040404 })
-  bg.circle(cx, STAGE_HEIGHT / 2 - 60, STAGE_WIDTH * 0.5).fill({ color: TABLE_GLOW_COLOR, alpha: 0.12 })
-  bg.circle(cx, STAGE_HEIGHT / 2, STAGE_WIDTH * 0.4).fill({ color: TABLE_BG_COLOR, alpha: 0.45 })
+  bg.rect(0, 0, STAGE_WIDTH, STAGE_HEIGHT).fill({ color: 0x000000, alpha: 0.55 })
   root.addChild(bg)
 
-  const frameMargin = 32
-  const frame = new Graphics()
-  frame
-    .roundRect(frameMargin, frameMargin, STAGE_WIDTH - frameMargin * 2, STAGE_HEIGHT - frameMargin * 2, 24)
-    .fill({ color: PANEL_BG_COLOR, alpha: 0.9 })
+  // 中央のパネルだけ濃く
+  const panelW = 420
+  const panelH = 440
+  const panel = new Graphics()
+  panel
+    .roundRect(cx - panelW / 2, STAGE_HEIGHT / 2 - panelH / 2 - 30, panelW, panelH, 24)
+    .fill({ color: PANEL_BG_COLOR, alpha: 0.94 })
     .stroke({ color: PANEL_BORDER_COLOR, width: 3 })
-  root.addChild(frame)
+  root.addChild(panel)
 
   const heading = makeText('場決め', 34, TEXT_PRIMARY_COLOR, 'center', 'bold')
   heading.anchor.set(0.5)
