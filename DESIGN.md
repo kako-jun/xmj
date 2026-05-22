@@ -147,15 +147,38 @@ STAGE = 720×720、中心 (360, 360)、`DISCARD_INNER_MARGIN = 96`。
 
 | Layer | y range | Notes |
 | ----- | ------- | ----- |
+| 自家副露 (melds row)          | 631-687 | 手牌底辺 + 8px gap、stage 右端揃え、`fitMeldScale` で stage 内に自動縮小 |
 | 自家手牌 (handBaseline = 575) | 547-603 | 13 牌 + ツモ牌 × handSpacing 40px (密着) |
 | 自家河 (discards)             | 456-561 | 6 列 × 25px × 3 行 × 35px (scale 0.625、密着) |
 | Center info panel             | 264-456 | 局・山残・ドラ・直前打牌 |
 
 **CPU 山と自家手牌の交差を避けるため CPU 用は別 baseline** — CPU の手牌は卓中心から
-`cpuHandBaseline = 304px` 離した位置 (上下左右いずれも) に置く。自家手牌の右端と右家
-CPU 山の x 位置が衝突しないよう、`handSpacing` (自家) と `cpuHandSpacing` (CPU) を
-連動して選定する。レイアウトを変える時は **4 方位 × (手牌 / 河) の 8 ブロックすべて**の
-コーナーが衝突しないか確認する。
+`cpuHandBaseline = 280px` 離した位置 (上下左右いずれも) に置く (session505 で旧 304 から
+24px 縮小。CPU 副露 row が stage 外側余白に 8px gap を持って収まる値)。
+自家手牌の右端と右家 CPU 山の x 位置が衝突しないよう、`handSpacing` (自家) と
+`cpuHandSpacing` (CPU) を連動して選定する。レイアウトを変える時は
+**4 方位 × (手牌 / 河 / 副露) の 12 ブロックすべて**のコーナーが衝突しないか確認する。
+
+### 副露 (鳴き面子) row
+
+副露は手牌・河と独立した row として配置する (Issue #83 / PR #88)。
+
+- **自家 (offset 0)**: 手牌の下に並べ、stage 右端揃え (麻雀牌譜の慣習)。`preferredScale = 0.8`、
+  横方向 `fitMeldScale(STAGE_WIDTH - 24)` で stage 内に自動縮小 (下限 0.4)。
+- **CPU (offset 1/2/3)**: 手牌の **外側** (stage 端方向) に並べる。横方向 (= 手牌と平行) は
+  `fitMeldScale(STAGE_HEIGHT - 24)` で詰め、深さ方向 (= stage 端への張り出し) は
+  `fitMeldDepthScale(outerSpace)` で更に縮小して **stage からはみ出さない** ことを保証する。
+  ここで `outerSpace = (stage 端) - (手牌外側) - STAGE_EDGE_MARGIN(12) - 8(gap)`。
+- **kind 別の見た目**:
+  - chi / pon / kakan: 3 スロット並び (face/face/sideways)。sideways 位置は `fromOffset` で決まる
+    (上家=左端 / 対面=中央 / 下家=右端)。kakan は sideways の上にさらに 1 枚 face を 90° 回転で
+    stack する (旧 Pon の上に加えた 1 枚を乗せる慣習表現)。
+  - minkan: 4 スロット並び (face×3 + sideways)。sideways 位置は同じく fromOffset から。
+    fromOffset=1 (下家) のときは最右端 (= スロット 3)。
+  - ankan: 4 スロット並び、両端 face / 中 2 枚は裏向き (createTileBackGraphics)、回転なし。
+
+**牌の重なりはバグとして扱う。** 副露 row も含めて、4 方位の手牌 / 河 / 副露の
+12 ブロックが互いに重ならず、stage 端を越えないことが必須条件。
 
 **Tile Spacing Rule (重要)** — 手牌・CPU 手牌・河の **ピッチは「width × scale」ぴったり** に揃え、
 すべての牌を隙間なく密着させる。手牌・CPU 手牌・河でばらつきがあると見た目が散らかるので
