@@ -34,7 +34,8 @@ fn test_yaku_riichi() {
     s.dealer = 0;
     s.hands[0] = Some(tenpai_hand_4s_7s_wait());
     // 次にツモる牌 = 7s (山牌は末尾から pop されるので末尾に置く)
-    s.wall = vec![tile!(7s)];
+    // 山牌は最低 4 枚 (#91 山牌残 < 4 では立直不可)。先頭 3 枚はダミー埋め。
+    s.wall = vec![tile!(1m), tile!(1m), tile!(1m), tile!(7s)];
     let mut r = ScenarioRunner::from_scenario(s);
 
     // ダブル立直回避のため、他家に 1 枚 discard させて第一巡を抜ける。
@@ -64,7 +65,8 @@ fn test_yaku_ippatsu() {
     let mut s = Scenario::default();
     s.dealer = 0;
     s.hands[0] = Some(tenpai_hand_4s_7s_wait());
-    s.wall = vec![tile!(7s)];
+    // 山牌は最低 4 枚必要 (#91)。先頭 3 枚はダミー、末尾の 7s が次のツモ。
+    s.wall = vec![tile!(1m), tile!(1m), tile!(1m), tile!(7s)];
     let mut r = ScenarioRunner::from_scenario(s);
 
     assert!(r.declare_riichi());
@@ -82,7 +84,8 @@ fn test_yaku_double_riichi() {
     let mut s = Scenario::default();
     s.dealer = 0;
     s.hands[0] = Some(tenpai_hand_4s_7s_wait());
-    s.wall = vec![tile!(7s)];
+    // 山牌は最低 4 枚必要 (#91)。先頭 3 枚はダミー、末尾の 7s が次のツモ。
+    s.wall = vec![tile!(1m), tile!(1m), tile!(1m), tile!(7s)];
     let mut r = ScenarioRunner::from_scenario(s);
 
     // 第一巡: 全員 discard 0 で、誰も鳴いていない状態で立直宣言
@@ -101,6 +104,89 @@ fn test_yaku_double_riichi() {
         "DoubleRiichi 成立時は Riichi を二重 push しない: {:?}",
         result.yaku
     );
+}
+
+/// #91 リーチ false-positive バグ回帰テスト:
+/// 山牌残り < 4 では `Game::can_riichi` / `Game::declare_riichi` が false を返す。
+/// (一発・他家のツモ機会が物理的に確保できない局面で立直棒だけ供託される問題を防止)
+#[test]
+fn test_riichi_blocked_when_wall_below_four() {
+    let mut s = Scenario::default();
+    s.dealer = 0;
+    s.hands[0] = Some(tenpai_hand_4s_7s_wait());
+    // wall = 3 枚 (海底直前)。テンパイ + 門前 + 持ち点 OK でも山牌不足で立直不可。
+    s.wall = vec![tile!(1m), tile!(1m), tile!(7s)];
+    let mut r = ScenarioRunner::from_scenario(s);
+
+    assert!(
+        !r.game.can_riichi(0),
+        "山牌残 < 4 では立直不可 (#91 受け入れ条件)"
+    );
+    let score_before = r.game.players[0].score;
+    let sticks_before = r.game.riichi_sticks;
+    assert!(
+        !r.declare_riichi(),
+        "山牌残 < 4 では declare_riichi=false"
+    );
+    assert!(!r.game.players[0].is_riichi, "is_riichi も false のまま");
+    assert_eq!(r.game.players[0].score, score_before, "供託 1000 点を引かない");
+    assert_eq!(r.game.riichi_sticks, sticks_before, "立直棒を積まない");
+}
+
+/// #91 受け入れ条件: 山牌ちょうど 4 枚は立直可能。
+#[test]
+fn test_riichi_allowed_when_wall_exactly_four() {
+    let mut s = Scenario::default();
+    s.dealer = 0;
+    s.hands[0] = Some(tenpai_hand_4s_7s_wait());
+    s.wall = vec![tile!(1m), tile!(1m), tile!(1m), tile!(7s)];
+    let mut r = ScenarioRunner::from_scenario(s);
+
+    assert!(r.game.can_riichi(0), "山牌残 == 4 は立直可能");
+    assert!(r.declare_riichi(), "境界値で declare_riichi=true");
+}
+
+/// #91 受け入れ条件: Game::can_riichi と Game::declare_riichi の整合性
+/// (can_riichi=true なら declare_riichi=true、can_riichi=false なら declare_riichi=false)。
+#[test]
+fn test_can_riichi_and_declare_riichi_agree() {
+    // ケース 1: 全条件 OK
+    {
+        let mut s = Scenario::default();
+        s.dealer = 0;
+        s.hands[0] = Some(tenpai_hand_4s_7s_wait());
+        s.wall = vec![tile!(1m), tile!(1m), tile!(1m), tile!(7s)];
+        let mut r = ScenarioRunner::from_scenario(s);
+        assert_eq!(r.game.can_riichi(0), r.declare_riichi(), "OK ケース で一致");
+    }
+    // ケース 2: 持ち点 500 (NG)
+    {
+        let mut s = Scenario::default();
+        s.dealer = 0;
+        s.hands[0] = Some(tenpai_hand_4s_7s_wait());
+        s.wall = vec![tile!(1m), tile!(1m), tile!(1m), tile!(7s)];
+        let mut r = ScenarioRunner::from_scenario(s);
+        r.game.players[0].score = 500;
+        assert_eq!(
+            r.game.can_riichi(0),
+            r.declare_riichi(),
+            "持ち点不足ケースで一致 (両者 false)"
+        );
+        assert!(!r.game.players[0].is_riichi);
+    }
+    // ケース 3: 山牌不足 (NG)
+    {
+        let mut s = Scenario::default();
+        s.dealer = 0;
+        s.hands[0] = Some(tenpai_hand_4s_7s_wait());
+        s.wall = vec![tile!(7s)]; // wall=1
+        let mut r = ScenarioRunner::from_scenario(s);
+        assert_eq!(
+            r.game.can_riichi(0),
+            r.declare_riichi(),
+            "山牌不足ケースで一致 (両者 false)"
+        );
+    }
 }
 
 /// 海底摸月: 山残り 0 のツモで Yaku::Haitei 成立。

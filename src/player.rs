@@ -473,4 +473,183 @@ mod tests {
         // ゼロサム不変
         assert_eq!(payer.score + receiver.score, sum_before, "ゼロサムが維持される");
     }
+
+    // ==================== can_riichi / declare_riichi 受け入れ条件 (#91) ====================
+    //
+    // 「リーチ false-positive」バグ調査用テスト群。
+    // can_riichi が false を返すべきケース全てで false を返すこと、
+    // declare_riichi の戻り値と state 遷移 (is_riichi / score) が一致することを担保する。
+
+    use crate::hand::{Meld, MeldType};
+    use crate::tile::Honor;
+
+    /// 13 枚テンパイ手 (タンヤオ平和形 4s/7s 両面待ち) を作る。
+    /// `Player::can_riichi` は手牌 13 枚 (打牌直前 = ツモ前) でも、
+    /// 14 枚 (ツモ後 = リーチ宣言可否判定の典型タイミング) でも呼ばれうる。
+    /// 本テストでは 13 枚状態を基準にする。
+    fn make_tenpai_player() -> Player {
+        let mut p = Player::new(0, "tester".to_string());
+        let tenpai_tiles = vec![
+            Tile::new_number(Suit::Man, 2, false),
+            Tile::new_number(Suit::Man, 3, false),
+            Tile::new_number(Suit::Man, 4, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Sou, 2, false),
+            Tile::new_number(Suit::Sou, 3, false),
+            Tile::new_number(Suit::Sou, 4, false),
+            Tile::new_number(Suit::Sou, 5, false),
+            Tile::new_number(Suit::Sou, 6, false),
+            Tile::new_number(Suit::Man, 8, false),
+            Tile::new_number(Suit::Man, 8, false),
+        ];
+        for t in tenpai_tiles {
+            p.hand.add_tile(t);
+        }
+        p
+    }
+
+    #[test]
+    fn test_can_riichi_baseline_tenpai_menzen_with_score() {
+        let p = make_tenpai_player();
+        assert!(p.is_tenpai(), "ベースラインは 13 枚テンパイ");
+        assert!(p.can_riichi(), "テンパイ + 門前 + 1000 点以上 + 未リーチ → 立直可能");
+    }
+
+    #[test]
+    fn test_can_riichi_false_when_not_tenpai() {
+        // 明らかに非テンパイ (バラバラの 13 枚)
+        let mut p = Player::new(0, "noten".to_string());
+        let noten_tiles = vec![
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 5, false),
+            Tile::new_number(Suit::Man, 9, false),
+            Tile::new_number(Suit::Pin, 1, false),
+            Tile::new_number(Suit::Pin, 5, false),
+            Tile::new_number(Suit::Pin, 9, false),
+            Tile::new_number(Suit::Sou, 1, false),
+            Tile::new_number(Suit::Sou, 5, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Nan),
+            Tile::new_honor(Honor::Shaa),
+            Tile::new_honor(Honor::Pei),
+        ];
+        for t in noten_tiles {
+            p.hand.add_tile(t);
+        }
+        assert!(!p.is_tenpai(), "国士無双以外の非テンパイ手");
+        assert!(!p.can_riichi(), "非テンパイは立直不可");
+    }
+
+    #[test]
+    fn test_can_riichi_false_when_score_below_1000() {
+        let mut p = make_tenpai_player();
+        p.score = 500;
+        assert!(p.is_tenpai());
+        assert!(!p.can_riichi(), "持ち点 < 1000 は立直不可");
+        // 境界: ちょうど 1000 は OK
+        p.score = 1000;
+        assert!(p.can_riichi(), "持ち点 == 1000 は立直可能");
+        p.score = 999;
+        assert!(!p.can_riichi(), "持ち点 999 は不可");
+    }
+
+    #[test]
+    fn test_can_riichi_false_when_has_meld() {
+        let mut p = make_tenpai_player();
+        // 副露を生やす (テンパイ判定上は無視されるが、can_riichi は門前破れで弾く)
+        p.hand.add_meld(Meld {
+            meld_type: MeldType::Pon,
+            tiles: vec![
+                Tile::new_honor(Honor::Chun),
+                Tile::new_honor(Honor::Chun),
+                Tile::new_honor(Honor::Chun),
+            ],
+            is_open: true,
+            from_player: Some(1),
+            is_kakan: false,
+            claimed_index: Some(0),
+        });
+        assert!(!p.can_riichi(), "副露ありは立直不可 (門前破れ)");
+    }
+
+    #[test]
+    fn test_can_riichi_false_when_already_riichi() {
+        let mut p = make_tenpai_player();
+        assert!(p.declare_riichi(0), "1 回目の立直は成功");
+        assert!(p.is_riichi);
+        assert!(!p.can_riichi(), "既に立直済みなら立直不可");
+        // 2 回目の declare は弾く
+        let score_before = p.score;
+        assert!(!p.declare_riichi(1), "立直済みからの再宣言は false");
+        assert_eq!(p.score, score_before, "失敗時は供託 1000 点を引かない");
+    }
+
+    /// 14 枚 (ツモ直後) の non-tenpai 手で is_tenpai/can_riichi が誤って true を返さないか。
+    /// Issue #91 の実機症状は「ツモ後にリーチボタンが出る」なので、
+    /// 14 枚状態こそ false-positive の主要疑惑タイミング。
+    #[test]
+    fn test_can_riichi_false_for_14tile_noten() {
+        let mut p = Player::new(0, "noten14".to_string());
+        // 14 枚バラバラ (筒子・索子・字牌混在、面子要素を最小限に)
+        let tiles = vec![
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 5, false),
+            Tile::new_number(Suit::Man, 9, false),
+            Tile::new_number(Suit::Pin, 1, false),
+            Tile::new_number(Suit::Pin, 5, false),
+            Tile::new_number(Suit::Pin, 9, false),
+            Tile::new_number(Suit::Sou, 1, false),
+            Tile::new_number(Suit::Sou, 5, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Nan),
+            Tile::new_honor(Honor::Shaa),
+            Tile::new_honor(Honor::Pei),
+            Tile::new_honor(Honor::Haku),
+        ];
+        for t in tiles {
+            p.hand.add_tile(t);
+        }
+        assert_eq!(p.hand.get_tiles().len(), 14, "ツモ直後は 14 枚");
+        assert!(
+            !p.can_riichi(),
+            "14 枚バラバラの noten 手で can_riichi=true は false-positive (#91)"
+        );
+    }
+
+    /// 14 枚で「1 枚捨てればテンパイ」になる手 (ツモ直後に立直可能であるべき正例)。
+    /// テンパイ手 + 浮き牌 1 枚 で 14 枚を作る。
+    #[test]
+    fn test_can_riichi_true_for_14tile_tenpai_drawn() {
+        // 13 枚テンパイ手にツモ牌 (浮き牌 9m) を追加 → 14 枚状態
+        let mut p = make_tenpai_player();
+        p.hand.add_tile(Tile::new_number(Suit::Man, 9, false));
+        assert_eq!(p.hand.get_tiles().len(), 14);
+        assert!(p.can_riichi(), "14 枚でも 1 枚捨ててテンパイ維持できるなら立直可能");
+    }
+
+    #[test]
+    fn test_declare_riichi_state_consistent_with_return_value() {
+        // 成功ケース: 戻り値 true ⇒ is_riichi=true / score -1000 / ippatsu=true
+        let mut p = make_tenpai_player();
+        let score_before = p.score;
+        assert!(p.declare_riichi(3));
+        assert!(p.is_riichi, "戻り値 true なら is_riichi=true");
+        assert_eq!(p.score, score_before - 1000, "供託 1000 点引かれている");
+        assert!(p.ippatsu, "宣言直後は ippatsu=true");
+        assert_eq!(p.riichi_turn, Some(3), "宣言ターンが記録される");
+
+        // 失敗ケース: 戻り値 false ⇒ state は一切変わらない
+        let mut p2 = make_tenpai_player();
+        p2.score = 500;
+        let score_before2 = p2.score;
+        assert!(!p2.declare_riichi(0), "score < 1000 は宣言失敗");
+        assert!(!p2.is_riichi, "失敗時は is_riichi=false のまま");
+        assert_eq!(p2.score, score_before2, "失敗時は供託を引かない");
+        assert!(!p2.ippatsu);
+        assert_eq!(p2.riichi_turn, None);
+    }
 }
