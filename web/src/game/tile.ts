@@ -81,6 +81,45 @@ const computeFitScale = (text: Text): number => {
   }
 }
 
+/**
+ * glyph を「visible 矩形が tile bbox 中央」に来るよう x/y を計算する (#96)。
+ *
+ * `anchor.set(0.5)` だけでは Pixi の Text bbox に font の ascent/descent + lineHeight
+ * の余白が含まれるため、上下のどちらかに白い余白が偏る (kako-jun 報告)。
+ * `getLocalBounds()` で実際の描画矩形を取り、bbox 中心と tile 中心のズレぶんを
+ * x/y のオフセットに足し戻す。
+ *
+ * jsdom では bounds が 0 になり得るので、その場合は anchor 0.5 だけで素直に中央。
+ */
+const centerGlyphInTile = (glyph: Text, scale: number): void => {
+  glyph.anchor.set(0.5)
+  // anchor 0.5 + (TILE.width/2, TILE.height/2) を起点に、visible bounds の中心ズレを補正。
+  glyph.x = TILE.width / 2
+  glyph.y = TILE.height / 2
+  try {
+    // getLocalBounds は anchor 適用後のローカル座標で矩形を返す。
+    // 中心が原点ぴったりなら補正なし。ズレている場合だけ反対方向に押し戻す。
+    const b = glyph.getLocalBounds()
+    if (
+      b &&
+      Number.isFinite(b.x) &&
+      Number.isFinite(b.y) &&
+      Number.isFinite(b.width) &&
+      Number.isFinite(b.height) &&
+      b.width > 0 &&
+      b.height > 0
+    ) {
+      const localCenterX = b.x + b.width / 2
+      const localCenterY = b.y + b.height / 2
+      // scale 後の world ズレを y/x から差し引いて、visible 中心を tile 中心に。
+      glyph.x -= localCenterX * scale
+      glyph.y -= localCenterY * scale
+    }
+  } catch {
+    // jsdom 等で bounds 計算が失敗してもデフォルト位置のまま通す。
+  }
+}
+
 export interface TileGraphicsOptions {
   /**
    * 選択中の牌。`true` のとき、面色を白からハイライト色 (黄) に変える (#98)。
@@ -131,11 +170,10 @@ export const createTileGraphics = (tile: Tile, options: TileGraphicsOptions = {}
     fill: suitColor,
   })
   const glyph = new Text({ text: tileToUnicodeChar(tile), style })
-  glyph.anchor.set(0.5)
   container.addChild(glyph)
-  glyph.scale.set(computeFitScale(glyph))
-  glyph.x = TILE.width / 2
-  glyph.y = TILE.height / 2
+  const fitScale = computeFitScale(glyph)
+  glyph.scale.set(fitScale)
+  centerGlyphInTile(glyph, fitScale)
 
   return container
 }
@@ -165,11 +203,10 @@ export const createTileBackGraphics = (): Container => {
     fill: TILE.backColor,
   })
   const glyph = new Text({ text: '\u{1F02B}', style })
-  glyph.anchor.set(0.5)
   container.addChild(glyph)
-  glyph.scale.set(computeFitScale(glyph))
-  glyph.x = TILE.width / 2
-  glyph.y = TILE.height / 2
+  const fitScale = computeFitScale(glyph)
+  glyph.scale.set(fitScale)
+  centerGlyphInTile(glyph, fitScale)
 
   return container
 }
