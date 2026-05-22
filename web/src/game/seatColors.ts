@@ -29,7 +29,12 @@ export interface SeatColor {
 
 /**
  * 背景色 (#rrggbb) に対して読みやすい文字色 (黒 or 白) を返す。
- * sRGB 輝度の WCAG 推奨ライン (~0.55) で切る — 中明度の青や緑は黒文字優先。
+ * sRGB 輝度 (WCAG 相当式) の閾値 0.44 で切る:
+ *   - 東 #d65a4a luma≈0.45 → 黒文字
+ *   - 南 #e8c94a luma≈0.71 → 黒文字
+ *   - 西 #3a7ab8 luma≈0.30 → 白文字
+ *   - 北 #3f9a5b luma≈0.51 → 白文字
+ * CSS で各 SEAT_COLORS の文字色をハードコードしている箇所と一致させる。
  */
 export const pickReadableFgColor = (bgHex: string): string => {
   const hex = bgHex.replace(/^#/, '')
@@ -37,30 +42,36 @@ export const pickReadableFgColor = (bgHex: string): string => {
   const r = parseInt(hex.slice(0, 2), 16) / 255
   const g = parseInt(hex.slice(2, 4), 16) / 255
   const b = parseInt(hex.slice(4, 6), 16) / 255
-  // 簡易輝度 (WCAG 相当の係数)
   const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
-  return lum > 0.55 ? '#1a1a1a' : '#ffffff'
+  return lum > 0.44 ? '#1a1a1a' : '#ffffff'
 }
 
-const buildSeatColor = (bg: string): SeatColor => ({
+const buildSeatColor = (bg: string, fg: string): SeatColor => ({
   bg,
-  fg: pickReadableFgColor(bg),
+  fg,
   bgNumber: parseInt(bg.replace(/^#/, ''), 16),
 })
 
 /**
  * 風 → 席色の対応。
  * 彩度を抑え、4 色がはっきり区別できる中明度系。
- * - 東 (#d65a4a): 落ち着いた赤橙。黒文字が乗る明度。
- * - 南 (#e8c94a): 黄。黒文字。
- * - 西 (#3a7ab8): 青。白文字 (pickReadableFgColor で自動)。
- * - 北 (#3f9a5b): 緑。白文字 or 黒文字いずれも可読、自動選択。
+ *
+ * `fg` (文字色) は **明示指定** にした。WCAG 簡易輝度では東 (#d65a4a, luma≈0.452)
+ * と西 (#3a7ab8, luma≈0.442) がほぼ同等で、`pickReadableFgColor` のような単純
+ * 閾値では両方とも同じ側に倒れてしまう。視覚的には「赤橙 = 黒文字、青 = 白文字」
+ * が自然なのでハードコードする。
+ * - 東 (#d65a4a): 落ち着いた赤橙 + 黒文字
+ * - 南 (#e8c94a): 黄 + 黒文字
+ * - 西 (#3a7ab8): 青 + 白文字
+ * - 北 (#3f9a5b): 緑 + 白文字
+ *
+ * `pickReadableFgColor` は外部 (custom) 色用のユーティリティとして残す。
  */
 export const SEAT_COLORS: Record<SeatWind, SeatColor> = {
-  east: buildSeatColor('#d65a4a'),
-  south: buildSeatColor('#e8c94a'),
-  west: buildSeatColor('#3a7ab8'),
-  north: buildSeatColor('#3f9a5b'),
+  east: buildSeatColor('#d65a4a', '#1a1a1a'),
+  south: buildSeatColor('#e8c94a', '#1a1a1a'),
+  west: buildSeatColor('#3a7ab8', '#ffffff'),
+  north: buildSeatColor('#3f9a5b', '#ffffff'),
 }
 
 /**
