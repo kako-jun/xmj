@@ -191,12 +191,6 @@ const createHandRow = (player: PlayerState, options: TableSceneOptions = {}): Co
   const leftEdgeX = -totalWidth / 2
 
   const placeTile = (tile: Tile, slotIndex: number, isTsumoTile: boolean): void => {
-    const sprite = isCpu ? createTileBackGraphics() : createTileGraphics(tile)
-    sprite.scale.set(tileScale)
-    const extraGap = isTsumoTile ? tsumoGap : 0
-    sprite.x = leftEdgeX + slotIndex * spacing + extraGap - (TILE.width * tileScale) / 2
-    sprite.y = -(TILE.height * tileScale) / 2
-
     // 元 hand 配列での index (タップハンドラに渡す)。Rust 側 hand と一致させる。
     const originalIndex = isTsumoTile
       ? drawnIdx
@@ -210,16 +204,15 @@ const createHandRow = (player: PlayerState, options: TableSceneOptions = {}): Co
     const isInteractive =
       options.interactiveHandPlayerId === player.id && typeof options.onHandTileTap === 'function'
     const isSelected = options.selectedHandIndex === originalIndex && isInteractive
-    if (isSelected) {
-      const glow = new Graphics()
-      glow
-        .roundRect(-4, -6, TILE.width + 8, TILE.height + 8, TILE.cornerRadius + 2)
-        .fill({ color: TURN_GLOW_COLOR, alpha: 0.16 })
-        .stroke({ color: TURN_GLOW_COLOR, width: 2, alpha: 0.9 })
-      sprite.addChildAt(glow, 0)
-      sprite.y -= 14
-      sprite.scale.set(tileScale * 1.04)
-    }
+
+    // #98: 選択中は周囲に halo を描かず、牌の面色を黄色に塗って状態を示す。
+    const sprite = isCpu
+      ? createTileBackGraphics()
+      : createTileGraphics(tile, { selected: isSelected })
+    sprite.scale.set(tileScale)
+    const extraGap = isTsumoTile ? tsumoGap : 0
+    sprite.x = leftEdgeX + slotIndex * spacing + extraGap - (TILE.width * tileScale) / 2
+    sprite.y = -(TILE.height * tileScale) / 2
 
     if (isInteractive) {
       sprite.label = `${sprite.label ?? 'tile'}-${originalIndex}`

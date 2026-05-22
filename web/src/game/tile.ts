@@ -81,15 +81,25 @@ const computeFitScale = (text: Text): number => {
   }
 }
 
-export const createTileGraphics = (tile: Tile): Container => {
+export interface TileGraphicsOptions {
+  /**
+   * 選択中の牌。`true` のとき、面色を白からハイライト色 (黄) に変える (#98)。
+   * 旧仕様の「外側の glow 枠」描画はやめて、面そのものを着色するのが意図 (kako-jun 指示)。
+   */
+  selected?: boolean
+}
+
+export const createTileGraphics = (tile: Tile, options: TileGraphicsOptions = {}): Container => {
   const container = new Container()
   container.label = tileToCuiCode(tile)
 
-  // 白い角丸面 = 「ユニコード文字の枠の内側」を白で塗る。Unicode 牌の枠線・
+  // 角丸面 = 「ユニコード文字の枠の内側」を塗る。Unicode 牌の枠線・
   // 中の絵柄はこの上に重ねる。visible なタイル境界は bbox (TILE.width × TILE.height)
   // と一致するので、spacing = TILE.width で完全密着する。
+  // 選択中は白 → 黄色 (TILE.selectedFaceColor) に切り替え。
+  const faceColor = options.selected === true ? TILE.selectedFaceColor : 0xffffff
   const face = new Graphics()
-  face.roundRect(0, 0, TILE.width, TILE.height, TILE.cornerRadius).fill({ color: 0xffffff })
+  face.roundRect(0, 0, TILE.width, TILE.height, TILE.cornerRadius).fill({ color: faceColor })
   container.addChild(face)
 
   // Unicode 麻雀タイル文字 1 つ
