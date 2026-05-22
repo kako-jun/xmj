@@ -101,6 +101,11 @@ pub fn scoring_summary_json(result: &ScoringResult) -> String {
         "totalPoints".into(),
         serde_json::Value::Number(result.total_points.into()),
     );
+    // #42 #51 #52: 役満倍率 (0 = 非役満、1 = 単役満、2 = ダブル役満、…)
+    obj.insert(
+        "yakumanCount".into(),
+        serde_json::Value::Number(result.yakuman_count.into()),
+    );
     obj.insert(
         "yaku".into(),
         serde_json::Value::Array(

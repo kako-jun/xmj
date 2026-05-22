@@ -54,6 +54,12 @@ pub struct ScoringContext {
     pub dora_indicators: Vec<Tile>,
     /// 裏ドラ表示牌 (立直成立時のみ集計対象)
     pub uradora_indicators: Vec<Tile>,
+    /// #51: 天和 (親の配牌時点で和了)。winner == dealer かつ自家ツモ + 全員 discard 0 +
+    /// 全員副露 0 のときに `Game::build_scoring_context` から true で渡される。
+    pub is_tenhou: bool,
+    /// #51: 地和 (子の第一ツモで和了)。winner != dealer かつ自家ツモ +
+    /// 当該プレイヤーの discards 0 + これまでに誰も鳴いていないときに true。
+    pub is_chiihou: bool,
 }
 
 impl Default for ScoringContext {
@@ -72,6 +78,8 @@ impl Default for ScoringContext {
             seat_wind: Honor::Ton,
             dora_indicators: Vec::new(),
             uradora_indicators: Vec::new(),
+            is_tenhou: false,
+            is_chiihou: false,
         }
     }
 }
@@ -147,6 +155,11 @@ pub struct ScoringResult {
     /// `dora` には槓ドラぶんも含まれている。本フィールドは表示用の補助で
     /// 0 のままになるケースが多い)
     pub kandora: u32,
+    /// 役満の倍率 (#42 #52)。単役満 = 1、ダブル役満 = 2、…。
+    /// 0 のときは非役満手。`calculate_base_points` はこの値が 1 以上のとき
+    /// `8000 * yakuman_count` を返す (han は 13 固定で参考値)。
+    /// 複数の役満が同時成立した場合は単純加算 (例: 大三元 + 字一色 = 2)。
+    pub yakuman_count: u32,
 }
 
 pub struct ScoringEngine;
@@ -179,6 +192,9 @@ impl ScoringEngine {
         let is_dealer = ctx.is_dealer;
         let mut yaku = Vec::new();
         let mut han = 0;
+        // #42 #51 #52: 役満の倍率カウンタ。単役満で +1、ダブル役満で +2 ずつ加算する。
+        // 役満の有無は `yakuman_count > 0` で判定し、base_points は `8000 * yakuman_count`。
+        let mut yakuman_count: u32 = 0;
         // TODO: 暗カン (Meld where !is_open) は門前扱いが正解。立直・平和・ツモ・一盃口・二盃口・九蓮宝燈の判定に影響。別 Issue 化
         let is_menzen = hand.get_melds().is_empty();
 
@@ -195,45 +211,97 @@ impl ScoringEngine {
         all_tiles.push(*winning_tile);
 
         // 役満チェック
+        // #42: 国士無双は和了形と「13 面待ち (純正)」を別判定する。
+        // 13 面: 和了前の手牌 13 枚に 13 種すべての么九牌が 1 枚ずつ揃っており、
+        // winning_tile が么九牌のどれかに合流する形。yakuman_count += 2 (ダブル役満)。
         if Self::check_kokushi(hand, &all_tiles) {
             yaku.push(Yaku::Kokushi);
             han += 13;
+            if Self::check_kokushi_juusan_mendachi(hand, winning_tile) {
+                yakuman_count += 2;
+            } else {
+                yakuman_count += 1;
+            }
         }
 
         if Self::check_suuankou(hand, winning_tile, is_tsumo) {
             yaku.push(Yaku::Suuankou);
             han += 13;
+            yakuman_count += 1;
         }
 
         if Self::check_daisangen(hand) {
             yaku.push(Yaku::Daisangen);
             han += 13;
+            yakuman_count += 1;
         }
 
         if Self::check_tsuuiisou(&all_tiles) {
             yaku.push(Yaku::Tsuuiisou);
             han += 13;
+            yakuman_count += 1;
         }
 
         if Self::check_ryuuiisou(&all_tiles) {
             yaku.push(Yaku::Ryuuiisou);
             han += 13;
+            yakuman_count += 1;
         }
 
         if Self::check_chinroutou(&all_tiles) {
             yaku.push(Yaku::Chinroutou);
             han += 13;
+            yakuman_count += 1;
         }
 
+        // #42: 九蓮宝燈は通常 + 9 面待ち (純正) を区別する。
+        // 9 面: 和了前の手牌 13 枚が 1112345678999 (同色) かつ winning_tile が同色任意。
+        // → yakuman_count += 2 (ダブル役満)。
         if Self::check_chuuren(&all_tiles, is_menzen) {
             yaku.push(Yaku::Chuuren);
             han += 13;
+            if Self::check_chuuren_kyuumendachi(hand, winning_tile, is_menzen) {
+                yakuman_count += 2;
+            } else {
+                yakuman_count += 1;
+            }
+        }
+
+        // #52: 大四喜 / 小四喜 (排他)。
+        if Self::check_daisuushii(hand, winning_tile) {
+            yaku.push(Yaku::Daisuushii);
+            han += 26;
+            yakuman_count += 2; // ダブル役満
+        } else if Self::check_shousuushii(hand, winning_tile) {
+            yaku.push(Yaku::Shousuushii);
+            han += 13;
+            yakuman_count += 1;
+        }
+
+        // #52: 四槓子 (役満)。四槓子なら三槓子は重複させない (後段でガード)。
+        if Self::check_suukantsu(hand) {
+            yaku.push(Yaku::Suukantsu);
+            han += 13;
+            yakuman_count += 1;
+        }
+
+        // #51: 天和 (親配牌時和了) / 地和 (子第一ツモ和了)。
+        // ScoringContext からフラグを受け取って push する。
+        if ctx.is_tenhou {
+            yaku.push(Yaku::Tenhou);
+            han += 13;
+            yakuman_count += 1;
+        }
+        if ctx.is_chiihou {
+            yaku.push(Yaku::Chiihou);
+            han += 13;
+            yakuman_count += 1;
         }
 
         // 役満がある場合は他の役をチェックしない
-        if han >= 13 {
+        if yakuman_count > 0 {
             let fu = Self::calculate_fu(hand, winning_tile, is_tsumo);
-            let base_points = 8000; // 役満
+            let base_points = 8000 * yakuman_count;
             let total_points = Self::calculate_total_points(base_points, is_dealer, is_tsumo);
 
             return Some(ScoringResult {
@@ -246,6 +314,7 @@ impl ScoringEngine {
                 uradora: 0,
                 akadora: 0,
                 kandora: 0,
+                yakuman_count,
             });
         }
 
@@ -390,6 +459,20 @@ impl ScoringEngine {
             han += 2;
         }
 
+        // #52: 三槓子 (二飜)。手牌内暗槓 + 副露 Kan の合計が 3 のときに成立。
+        // 四槓子は前段で役満として確定済みのためここには来ない。
+        if Self::check_sankantsu(hand) {
+            yaku.push(Yaku::Sankantsu);
+            han += 2;
+        }
+
+        // #52: 混老頭 (二飜)。すべての構成牌が么九 (1/9/字) かつ字牌を含む。
+        // 清老頭 (役満) は前段で確定済みなのでここには来ない (字牌を含む条件で区別)。
+        if Self::check_honroutou(&all_tiles) {
+            yaku.push(Yaku::Honroutou);
+            han += 2;
+        }
+
         // 混一色
         if Self::check_honitsu(&all_tiles) {
             yaku.push(Yaku::Honitsu);
@@ -439,6 +522,7 @@ impl ScoringEngine {
             uradora,
             akadora,
             kandora,
+            yakuman_count: 0,
         })
     }
     
@@ -848,6 +932,196 @@ impl ScoringEngine {
             return false;
         }
         crate::agari::is_chuuren(tiles)
+    }
+
+    /// #42: 国士無双 13 面待ち (純正国士、ダブル役満)。
+    ///
+    /// 和了前の手牌 13 枚に 13 種の么九牌が 1 枚ずつ全て揃っており、
+    /// winning_tile が么九牌のどれかであれば 13 面待ち。
+    /// 副露があれば国士は不成立 (本関数は呼び出し側で `check_kokushi` が
+    /// true を返した後に呼ばれる前提)。
+    fn check_kokushi_juusan_mendachi(hand: &Hand, winning_tile: &Tile) -> bool {
+        if !hand.get_melds().is_empty() {
+            return false;
+        }
+        // winning_tile が么九牌か?
+        if !Self::is_yaochuu(winning_tile) {
+            return false;
+        }
+        let tiles = hand.get_tiles();
+        if tiles.len() != 13 {
+            return false;
+        }
+        let yaochuus: [Tile; 13] = [
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 9, false),
+            Tile::new_number(Suit::Pin, 1, false),
+            Tile::new_number(Suit::Pin, 9, false),
+            Tile::new_number(Suit::Sou, 1, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Nan),
+            Tile::new_honor(Honor::Shaa),
+            Tile::new_honor(Honor::Pei),
+            Tile::new_honor(Honor::Haku),
+            Tile::new_honor(Honor::Hatsu),
+            Tile::new_honor(Honor::Chun),
+        ];
+        let mut tile_map: HashMap<Tile, usize> = HashMap::new();
+        for t in tiles {
+            *tile_map.entry(*t).or_insert(0) += 1;
+        }
+        // 13 種それぞれが手牌に 1 枚ずつ含まれる (= 13 面待ち)
+        yaochuus
+            .iter()
+            .all(|y| tile_map.get(y).copied().unwrap_or(0) == 1)
+    }
+
+    /// 么九牌 (1, 9, 字牌) 判定。
+    fn is_yaochuu(tile: &Tile) -> bool {
+        match tile.tile_type {
+            TileType::Number { value, .. } => value == 1 || value == 9,
+            TileType::Honor(_) => true,
+        }
+    }
+
+    /// #42: 九蓮宝燈 9 面待ち (純正九蓮、ダブル役満)。
+    ///
+    /// 和了前の手牌 13 枚が `1112345678999` (同色) かつ winning_tile が同色任意の牌
+    /// のときに 9 面待ち成立。副露なしのときのみ。
+    fn check_chuuren_kyuumendachi(hand: &Hand, winning_tile: &Tile, is_menzen: bool) -> bool {
+        if !is_menzen {
+            return false;
+        }
+        if !hand.get_melds().is_empty() {
+            return false;
+        }
+        let tiles = hand.get_tiles();
+        if tiles.len() != 13 {
+            return false;
+        }
+        // winning_tile が数牌で、手牌と同色か
+        let win_suit = match winning_tile.tile_type {
+            TileType::Number { suit, .. } => suit,
+            _ => return false,
+        };
+        // 手牌すべてが同色数牌 (win_suit と同じ) か確認しつつ各数値をカウント
+        let mut counts = [0u8; 10];
+        for t in tiles {
+            match t.tile_type {
+                TileType::Number { suit, value } if suit == win_suit => {
+                    counts[value as usize] += 1;
+                }
+                _ => return false,
+            }
+        }
+        // 1112345678999 = [_,3,1,1,1,1,1,1,1,3]
+        counts[1] == 3
+            && counts[2] == 1
+            && counts[3] == 1
+            && counts[4] == 1
+            && counts[5] == 1
+            && counts[6] == 1
+            && counts[7] == 1
+            && counts[8] == 1
+            && counts[9] == 3
+    }
+
+    /// #52: 大四喜。4 種の風牌すべてを刻子 / 槓子で抱える (ダブル役満)。
+    ///
+    /// 副露 (Pon/Kan) と手牌中の暗刻 (winning_tile を含めて 3 枚以上) の合計で
+    /// 4 種すべてを抑えていれば成立。雀頭が風牌になっている場合は小四喜になり、
+    /// 大四喜は不成立。
+    fn check_daisuushii(hand: &Hand, winning_tile: &Tile) -> bool {
+        let winds = [Honor::Ton, Honor::Nan, Honor::Shaa, Honor::Pei];
+        winds
+            .iter()
+            .all(|h| Self::wind_triplet_count(hand, winning_tile, *h) >= 3)
+    }
+
+    /// #52: 小四喜。4 種の風牌のうち 3 種が刻子 / 槓子、残り 1 種が雀頭 (役満)。
+    fn check_shousuushii(hand: &Hand, winning_tile: &Tile) -> bool {
+        let winds = [Honor::Ton, Honor::Nan, Honor::Shaa, Honor::Pei];
+        let mut triplet = 0;
+        let mut pair = 0;
+        for h in &winds {
+            let count = Self::wind_triplet_count(hand, winning_tile, *h);
+            if count >= 3 {
+                triplet += 1;
+            } else if count == 2 {
+                pair += 1;
+            }
+        }
+        triplet == 3 && pair == 1
+    }
+
+    /// 風牌の刻子相当の枚数 (副露 Pon/Kan は 3 として、手牌中は実枚数を返す)。
+    ///
+    /// `winning_tile` が当該風牌なら +1 する (シャンポン / 単騎で組み込まれる前提)。
+    fn wind_triplet_count(hand: &Hand, winning_tile: &Tile, honor: Honor) -> u32 {
+        let mut count: u32 = 0;
+        for meld in hand.get_melds() {
+            if matches!(meld.meld_type, MeldType::Pon | MeldType::Kan) {
+                if let Some(t) = meld.tiles.first() {
+                    if let TileType::Honor(h) = t.tile_type {
+                        if h == honor {
+                            count += 3;
+                        }
+                    }
+                }
+            }
+        }
+        for t in hand.get_tiles() {
+            if let TileType::Honor(h) = t.tile_type {
+                if h == honor {
+                    count += 1;
+                }
+            }
+        }
+        if let TileType::Honor(h) = winning_tile.tile_type {
+            if h == honor {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    /// #52: 四槓子。4 つの槓子で和了 (役満)。
+    fn check_suukantsu(hand: &Hand) -> bool {
+        hand.get_melds()
+            .iter()
+            .filter(|m| matches!(m.meld_type, MeldType::Kan))
+            .count()
+            == 4
+    }
+
+    /// #52: 三槓子 (二飜)。3 つの槓子で和了。
+    fn check_sankantsu(hand: &Hand) -> bool {
+        hand.get_melds()
+            .iter()
+            .filter(|m| matches!(m.meld_type, MeldType::Kan))
+            .count()
+            == 3
+    }
+
+    /// #52: 混老頭 (二飜)。すべての構成牌が么九 (1/9/字牌) で、字牌を 1 枚以上含む。
+    ///
+    /// 字牌が無い場合は清老頭 (役満) になるため、ここでは「字牌を含む」を必須条件にする。
+    fn check_honroutou(tiles: &[Tile]) -> bool {
+        let mut has_honor = false;
+        for t in tiles {
+            match t.tile_type {
+                TileType::Number { value, .. } => {
+                    if value != 1 && value != 9 {
+                        return false;
+                    }
+                }
+                TileType::Honor(_) => {
+                    has_honor = true;
+                }
+            }
+        }
+        has_honor
     }
     
     fn calculate_fu(_hand: &Hand, _winning_tile: &Tile, is_tsumo: bool) -> u32 {

@@ -224,6 +224,9 @@ fn test_yaku_yakuhai_round_wind() {
         tile!(5s), tile!(5s),
     ]);
     let mut r = ScenarioRunner::from_scenario(s);
+    // 天和回避: 他家に discard を 1 枚仕込んで「配牌時和了」条件から外す
+    use xmj_core::player::Discard;
+    r.game.players[1].discards.push(Discard { tile: tile!(1m), is_hidden: false });
 
     let result = r.try_tsumo().expect("和了");
     // 場風 + 自風 が両方 East → Yakuhai(East) が 2 回 push される
@@ -249,6 +252,9 @@ fn test_yaku_yakuhai_ankou_sangenpai() {
         tile!(5s), tile!(5s),
     ]);
     let mut r = ScenarioRunner::from_scenario(s);
+    // 天和回避: 他家 discard 1 枚で「配牌時和了」条件から外す
+    use xmj_core::player::Discard;
+    r.game.players[1].discards.push(Discard { tile: tile!(1m), is_hidden: false });
 
     let result = r.try_tsumo().expect("和了");
     assert!(
@@ -274,6 +280,9 @@ fn test_yaku_dora() {
     // ドラ表示牌 = 1m → ドラは 2m
     s.dora_indicators = vec![tile!(1m)];
     let mut r = ScenarioRunner::from_scenario(s);
+    // 天和回避: 他家 discard 1 枚で「配牌時和了」条件から外す
+    use xmj_core::player::Discard;
+    r.game.players[1].discards.push(Discard { tile: tile!(1m), is_hidden: false });
 
     // ドラ表示牌から実際のドラを算出 (sanity check)
     assert_eq!(dora_indicator_to_dora(&tile!(1m)), tile!(2m));
@@ -299,6 +308,9 @@ fn test_yaku_akadora() {
         tile!(5s), tile!(6s), tile!(7s),
     ]);
     let mut r = ScenarioRunner::from_scenario(s);
+    // 天和回避: 他家 discard 1 枚で「配牌時和了」条件から外す
+    use xmj_core::player::Discard;
+    r.game.players[1].discards.push(Discard { tile: tile!(1m), is_hidden: false });
 
     let result = r.try_tsumo().expect("和了");
     assert_eq!(result.akadora, 1, "赤 5m を 1 枚保持: akadora={}", result.akadora);
