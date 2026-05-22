@@ -143,18 +143,26 @@ Focus: border-color becomes primary, glow effect added.
 ### Mahjong Table Stacking (Human Player, Bottom Edge)
 
 下から上に向かって以下の順で重ねる。各帯は y 範囲を排他にして牌の重なりを禁ずる。
+STAGE = 720×720、中心 (360, 360)、`DISCARD_INNER_MARGIN = 96`。
 
 | Layer | y range | Notes |
 | ----- | ------- | ----- |
-| Footer shadow strip | 702-720 | 視覚的底辺、操作物は置かない |
-| Hand (自家手牌)     | 612-682 | 13 牌 × handSpacing 54px (重なり禁止) |
-| Self discards (河)  | 450-595 | 6 列 × 36px × 3 行 × 50px |
-| Center info panel   | 253-443 | 局・山残・ドラ・直前打牌 |
+| 自家手牌 (handBaseline = 596) | 568-624 | 13 牌 + ツモ牌 × handSpacing 42px |
+| 自家河 (discards)             | 456-582 | 6 列 × 30px × 3 行 × 42px (scale 0.62) |
+| Center info panel             | 264-456 | 局・山残・ドラ・直前打牌 |
+
+**CPU 山と自家手牌の交差を避けるため CPU 用は別 baseline** — CPU の手牌は卓中心から
+`cpuHandBaseline = 304px` 離した位置 (上下左右いずれも) に置く。自家手牌の右端と右家
+CPU 山の x 位置が衝突しないよう、`handSpacing` (自家) と `cpuHandSpacing` (CPU) を
+連動して選定する。レイアウトを変える時は **4 方位 × (手牌 / 河) の 8 ブロックすべて**の
+コーナーが衝突しないか確認する。
 
 **Tile Spacing Rule (重要)** — 手牌の隣接牌中心間ピッチは必ず `TILE.width` 以上にする。
-xmj の `TILE.handSpacing` は 54px (width 50 + gap 4)。河 (捨牌) の列ピッチは
-`TILE.discardColPitch = 36px` (scale 0.62 → 実効 width 31)、行ピッチ
-`TILE.discardRowPitch = 50px` (scale 0.62 → 実効 height 43.4) で `+ gap` を確保する。
+xmj の現行値:
+- `TILE.handSpacing = 42px` (width 40 + gap 2)
+- `TILE.cpuHandSpacing = 26px` (CPU は scale 0.7 → 実効 width 28、ぎっしり詰める「壁」表現)
+- `TILE.discardColPitch = 30px` / `TILE.discardRowPitch = 42px` (scale 0.62 → 実効 width 25 / height 35)
+
 **牌の重なりはバグとして扱う。**
 
 ### Frame Minimalism (枠は必要なところだけ)
@@ -175,16 +183,37 @@ xmj の `TILE.handSpacing` は 54px (width 50 + gap 4)。河 (捨牌) の列ピ�
 
 **例外**: タイトル / モード選択 / 場決め等のオーバーレイ系シーン (titleScene, modeSelectScene, diceRollScene) は卓ではなくダイアログ的な性格を持つので、`PANEL_BORDER_COLOR` の枠を持つフレームを許容する。Frame Minimalism のルールは「卓上に重ねた情報表示は枠を持たない」という範囲で適用する。
 
-### Mobile Touch Targets (右下集約)
+### Mobile Touch Targets (操作はサイドパネル末尾 = 右下)
 
 スマホ片手操作を想定し、能動的な操作 UI は画面右下に集める。
+**現行実装は Pixi canvas に直書きせず、HTML サイドパネルの末尾 section に配置する。**
 
-- **Action area** (打牌・立直など): `x = STAGE_WIDTH - 220 - 24`, `y = 底辺 - 24 - height`
-- **Turn marker** (あなたの手番): action area の真上 (`y = actionY - 44`)
-- **Event log** (受動情報): 左下、`x = 24`, `y = 底辺 - 104 - 24` で操作 UI と分離
-- **Buttons**: 最小高さ 52px (Apple HIG / Material タッチターゲット推奨 44px+)
-- ボタンは横並びではなく**縦積み**にする (親指で当てやすい)
-- ラベルは 18px 太字
+- **Action area** (打牌・立直など): `#ui-actions-section` をサイドパネル最下段に置く
+- **Event log** (受動情報): 同じサイドパネルだが `flex: 1` で大きく取り、操作の上に積む
+- **Hint テキスト**: ボタン外の説明行は持たない。`label` (目的: 例「打牌」) と `hotkey` (操作: 例「[D]」) で完結させる
+- **Buttons**: `min-height: 38px`、`font-size: 13px` (Apple HIG / Material 推奨 44px は端末幅により下回ることを許容、その代わり面積総和を固定して 1 個あたりが小さくなる方を優先)
+- **ボタン配列**: 1 行 flex (no-wrap) で並べ、ボタン数が増えるほど 1 個あたりの幅が縮む。
+  `display: flex; flex-wrap: nowrap` + `flex: 1 1 0` + `min-width: 0`
+- 「縦積み」は採用しない (面積が増えると操作領域が広がってしまうため)
+
+### Side Panel UI (HTML overlay)
+
+サイドパネルは Pixi 卓の外。卓自体は felt のみに集中させ、テキスト情報はすべて
+HTML overlay に集約する。
+
+- **Status bar** (`#ui-status`): `{場風}{局}局 + {本場}本場 + 親: {名前} + 山残 + ドラ` を 1 行で表示
+  - 場風は `round` から導出 (round 1-4 = 東場 / 5-8 = 南場)
+  - 本場は 0 でも常時 "0本場" を出す (位置の安定性を優先)
+  - 親は `gameState.dealer` で索引、強調色 (`--turn-glow`)
+- **Score rows** (`#ui-scores`): `{風}{名前}{点数}{立直?}` を 2 列グリッド
+  - **重複表記の禁止**: 名前文字列にすでに風漢字が含まれる場合 (例 "CPU 南") は `.wind` span を空にする
+  - 人間プレイヤーには `(あなた)` のような追記は付けない (name 自体が "あなた")
+- **Event log** (`#ui-log`): MMORPG チャット欄風
+  - 行ごとに発信者を検出 (行頭 `あなた` / `CPU 東/南/西/北` / `東家/...` 等) し、発信者タグ + 本文に分割
+  - 発信者ごとに色分け (`.spk-self` / `.spk-east` / `.spk-south` / `.spk-west` / `.spk-north`)
+  - システム行はイタリック + 控えめな左罫線
+  - 最新行は背景 highlight
+- **Actions** (`#ui-actions`): 1 行 flex で全ボタンを並べる (上記 Mobile Touch Targets 参照)
 
 ### Spacing
 
