@@ -1292,6 +1292,7 @@ mod tests {
             meld_type: MeldType::Pon,
             tiles: vec![tile, tile, tile],
             is_open: true,
+            ..Default::default()
         }
     }
 
@@ -1304,6 +1305,7 @@ mod tests {
                 Tile::new_number(suit, start + 2, false),
             ],
             is_open: true,
+            ..Default::default()
         }
     }
 

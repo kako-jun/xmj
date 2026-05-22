@@ -361,6 +361,66 @@ impl WasmGame {
         }
     }
 
+    /// プレイヤーの副露 (鳴き面子) を JSON で取得する (#83 副露表示)。
+    ///
+    /// 戻り値 JSON 配列の各要素:
+    /// ```json
+    /// {
+    ///   "kind": "chi" | "pon" | "ankan" | "minkan" | "kakan",
+    ///   "tiles": ["1m", "2m", "3m"],
+    ///   "fromOffset": 0|1|2|3|null,   // 自家から見た鳴き元の相対 offset
+    ///   "claimedIndex": 0|1|2|null     // tiles[claimedIndex] が他家から取った牌
+    /// }
+    /// ```
+    /// - `kind` は `MeldType` + `is_open` + `is_kakan` から決定する。
+    /// - `fromOffset = (from_player - player_idx + 4) % 4`。暗槓のときは null。
+    /// - 副露が無い / player_idx 不正は `"[]"`。
+    #[wasm_bindgen(js_name = getPlayerMelds)]
+    pub fn get_player_melds(&self, player_idx: usize) -> String {
+        if player_idx >= self.game.players.len() {
+            return "[]".to_string();
+        }
+        let melds = self.game.players[player_idx].hand.get_melds();
+        let mut arr: Vec<serde_json::Value> = Vec::with_capacity(melds.len());
+        for m in melds {
+            let kind = match m.meld_type {
+                crate::hand::MeldType::Chi => "chi",
+                crate::hand::MeldType::Pon => "pon",
+                crate::hand::MeldType::Kan => {
+                    if !m.is_open {
+                        "ankan"
+                    } else if m.is_kakan {
+                        "kakan"
+                    } else {
+                        "minkan"
+                    }
+                }
+            };
+            let tiles: Vec<serde_json::Value> = m
+                .tiles
+                .iter()
+                .map(|t| serde_json::Value::String(t.to_string()))
+                .collect();
+            let from_offset = match m.from_player {
+                Some(from) => serde_json::Value::Number(
+                    (((from + 4) - player_idx) % 4).into(),
+                ),
+                None => serde_json::Value::Null,
+            };
+            let claimed_index = match m.claimed_index {
+                Some(i) => serde_json::Value::Number(i.into()),
+                None => serde_json::Value::Null,
+            };
+            let mut obj = serde_json::Map::new();
+            obj.insert("kind".into(), serde_json::Value::String(kind.into()));
+            obj.insert("tiles".into(), serde_json::Value::Array(tiles));
+            obj.insert("fromOffset".into(), from_offset);
+            obj.insert("claimedIndex".into(), claimed_index);
+            arr.push(serde_json::Value::Object(obj));
+        }
+        serde_json::Value::Array(arr).to_string()
+    }
+
     /// リーチ可能かチェック
     #[wasm_bindgen(js_name = canRiichi)]
     pub fn can_riichi(&self) -> bool {
@@ -1059,6 +1119,7 @@ mod tests {
                 Tile::new_number(Suit::Man, 1, false),
             ],
             is_open: true,
+            ..Default::default()
         });
         let result = extract_agari(&hand);
         assert!(result.is_some(), "ポン込み和了形は extract_agari が成立");
@@ -1094,6 +1155,7 @@ mod tests {
                 Tile::new_number(Suit::Man, 6, false),
             ],
             is_open: true,
+            ..Default::default()
         });
         let result = extract_agari(&hand);
         assert!(result.is_some(), "チー込み和了形は extract_agari が成立");
@@ -1130,6 +1192,7 @@ mod tests {
                 Tile::new_number(Suit::Man, 9, false),
             ],
             is_open: true,
+            ..Default::default()
         });
         let result = extract_agari(&hand);
         assert!(result.is_some(), "明槓込み和了形は extract_agari が成立");
@@ -1165,6 +1228,7 @@ mod tests {
                 Tile::new_honor(Honor::Haku),
             ],
             is_open: true,
+            ..Default::default()
         });
         assert!(extract_agari(&hand).is_none(), "副露あり・バラバラ手は不成立");
     }
@@ -1201,6 +1265,7 @@ mod tests {
                 Tile::new_honor(Honor::Haku),
             ],
             is_open: true,
+            ..Default::default()
         });
         g.game.players[0].hand = hand;
         let s = g.resolve_win_tsumo(0);
@@ -1418,6 +1483,7 @@ mod tests {
             meld_type: MeldType::Pon,
             tiles: vec![hatsu, hatsu, hatsu],
             is_open: true,
+            ..Default::default()
         });
         assert_eq!(hand.tile_count(), 14, "副露 1 + 手牌 11 = tile_count 14");
         g.game.players[0].hand = hand;

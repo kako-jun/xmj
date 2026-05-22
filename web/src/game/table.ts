@@ -29,7 +29,7 @@ import {
   TURN_GLOW_COLOR,
 } from './constants'
 import { createTileBackGraphics, createTileGraphics } from './tile'
-import type { GameState, PlayerIndex, PlayerState, Tile } from './types'
+import type { GameState, MeldGroup, PlayerIndex, PlayerState, Tile } from './types'
 import { tileToCuiCode } from './types'
 
 export interface TableSceneOptions {
@@ -242,6 +242,191 @@ const createHandRow = (player: PlayerState, options: TableSceneOptions = {}): Co
 }
 
 /**
+ * 副露 1 組分の Container を作る (#83 副露表示)。
+ *
+ * ローカル座標は (0,0) = 左端の縦中心 (= 横並びの牌の中央 y) として組む。
+ * 牌は左から右へ並び、`claimedIndex` の牌だけ 90° 回転して横向き (= 取った牌)。
+ * - chi / pon / minkan: claimed 牌の表示位置は `fromOffset` で決まる
+ *     1 (下家)  → meld の **右端**
+ *     2 (対面)  → meld の **中央**
+ *     3 (上家)  → meld の **左端**
+ * - ankan: 4 枚すべて表示、両端 2 枚が表向き、中 2 枚が裏向き、回転なし
+ * - kakan: minkan と同じ並びに加えて、claimed 牌の **上に** 4 枚目を横向きで重ねる
+ *
+ * @param meld 副露データ
+ * @param scale 牌の表示倍率 (自家は 1.0、CPU は TILE.cpuHandScale)
+ */
+const createMeldGroup = (meld: MeldGroup, scale: number): Container => {
+  const root = new Container()
+  root.label = `meld-${meld.kind}`
+
+  const tileW = TILE.width * scale
+  const tileH = TILE.height * scale
+
+  /** 表向き牌スプライト (Container)。tile はそのまま createTileGraphics に渡す。 */
+  const makeFace = (tile: Tile): Container => {
+    const sprite = createTileGraphics(tile)
+    sprite.scale.set(scale)
+    return sprite
+  }
+  /** 裏向き牌スプライト (Container)。 */
+  const makeBack = (): Container => {
+    const sprite = createTileBackGraphics()
+    sprite.scale.set(scale)
+    return sprite
+  }
+
+  // 暗槓は特別扱い (claimed なし、中 2 枚を裏向き)
+  if (meld.kind === 'ankan') {
+    const tiles = meld.tiles
+    if (tiles.length === 0) return root
+    let cursorX = 0
+    for (let i = 0; i < tiles.length; i++) {
+      const isBack = i === 1 || i === 2
+      const sprite = isBack ? makeBack() : makeFace(tiles[i])
+      sprite.x = cursorX
+      sprite.y = -tileH / 2
+      root.addChild(sprite)
+      cursorX += tileW
+    }
+    return root
+  }
+
+  // chi / pon / minkan / kakan: claimed 牌だけ横向き (90° 回転)
+  // 横向き牌のローカル bbox は (tileH 横, tileW 縦) — 元の縦長を寝かせる。
+  // 通常牌 4 枚 (or 3 枚) を並べたうち、claimed の位置に応じて横向きにする。
+  //
+  // 並べる順序:
+  //   - 非 claimed タイルを「鳴き元家 → 自家手牌」順に並べる、と言いたいところだが
+  //     簡易実装として「claimed 以外の tiles 配列順序」で配置する。
+  //   - fromOffset で「sideways position」を決め、その位置に claimed を置く。
+  //
+  // tiles の長さ (chi/pon=3、minkan=4、kakan=4) を考慮する。kakan は minkan と同じ
+  // 「3 枚並び + claimed sideways」に加えて、stacked タイルを上に置く。
+
+  const claimedIdx = meld.claimedIndex ?? 0
+  const fromOffset = meld.fromOffset ?? 1
+
+  // base 3 枚 = pon/chi の場合は tiles 全部 / kan 系の場合は tiles から 1 枚抜く
+  // kakan の場合: minkan の見た目 (= 3 枚並び) + 4 枚目を claimed の上に stack
+  // minkan の場合: 4 枚並び、ただし 4 枚並びだとはみ出すので「3 枚並び + claimed の上に 1 枚 stack」
+  //               にする (慣習的なリーチ麻雀牌譜表記)。
+  const useStack = meld.kind === 'minkan' || meld.kind === 'kakan'
+  const claimedTile = meld.tiles[claimedIdx] ?? meld.tiles[0]
+  const nonClaimedTiles: Tile[] = []
+  meld.tiles.forEach((t, i) => {
+    if (i === claimedIdx) return
+    nonClaimedTiles.push(t)
+  })
+  // minkan / kakan は 4 枚あり non-claimed=3 だが、stacked 枠で 1 枚使うので
+  // 並びには non-claimed の前 2 枚だけ使う想定 (見た目: face / sideways+stack / face)。
+  // ただし「3 枚並びの基本構成 (face / face / face のうち claimed 1 枚を sideways に)」
+  // のため、minkan/kakan の表示は (非claimed 2 枚 + claimed 1 枚) を 3 枚並び + stack 1 枚にする。
+  const baseTiles: Tile[] = useStack ? nonClaimedTiles.slice(0, 2) : nonClaimedTiles
+
+  // sideways position index (0 = 左端 / 1 = 中央 / 2 = 右端)
+  const sidewaysPos: 0 | 1 | 2 =
+    fromOffset === 3 ? 0 : fromOffset === 2 ? 1 : 2
+
+  // 並び順を決める。3 スロットに base 2 枚 + claimed 1 枚 (sideways) を配置する。
+  // baseTiles の順序はそのまま (左→右で詰める)。
+  const slots: Array<{ kind: 'face' | 'sideways'; tile: Tile }> = []
+  let baseCursor = 0
+  for (let pos = 0; pos < 3; pos++) {
+    if (pos === sidewaysPos) {
+      slots.push({ kind: 'sideways', tile: claimedTile })
+    } else {
+      const t = baseTiles[baseCursor] ?? claimedTile
+      baseCursor += 1
+      slots.push({ kind: 'face', tile: t })
+    }
+  }
+
+  // 横向き牌の幅 = 元の高さ * scale (= tileH)。縦向き牌の幅 = tileW。
+  // 横向き牌の縦寸 = tileW。縦向き牌の縦寸 = tileH。
+  // base line は「縦向き牌の底辺」に合わせる (= y = 0 が底、上が -tileH)。
+  // 横向き牌は底辺合わせで y = -tileW (横向きの高さ)。
+  let cursorX = 0
+  const stackTargets: Array<{ x: number; sidewaysWidth: number }> = []
+  for (const slot of slots) {
+    if (slot.kind === 'face') {
+      const sprite = makeFace(slot.tile)
+      sprite.x = cursorX
+      sprite.y = -tileH
+      root.addChild(sprite)
+      cursorX += tileW
+    } else {
+      // sideways: 90° 回転 (pivot を tile 中心に合わせる)
+      const sprite = makeFace(slot.tile)
+      // 元の bbox は (TILE.width, TILE.height) — pivot を中心に。
+      // pivot を中心にすると scale 後の中心が (0,0) になり、回転後の中心も維持される。
+      sprite.pivot.set(TILE.width / 2, TILE.height / 2)
+      sprite.rotation = Math.PI / 2
+      // 回転後の bbox 中心が (cursorX + tileH/2, -tileW/2) になるよう配置 (底辺合わせ)。
+      sprite.x = cursorX + tileH / 2
+      sprite.y = -tileW / 2
+      const sidewaysX = cursorX
+      cursorX += tileH
+      if (useStack) {
+        stackTargets.push({ x: sidewaysX, sidewaysWidth: tileH })
+      }
+    }
+  }
+
+  // 加槓 / 大明槓の stacked タイル (claimed の上に 4 枚目を横向きで重ねる)
+  if (useStack && stackTargets.length > 0) {
+    const target = stackTargets[0]
+    // 4 枚目の tile = meld.tiles のうち、まだ使われてない 1 枚 (= nonClaimedTiles[2])
+    const stackTile: Tile = nonClaimedTiles[2] ?? claimedTile
+    const sprite = makeFace(stackTile)
+    sprite.pivot.set(TILE.width / 2, TILE.height / 2)
+    sprite.rotation = Math.PI / 2
+    sprite.x = target.x + target.sidewaysWidth / 2
+    // claimed の上にもう 1 段 (-tileW ぶん上にずらす)
+    sprite.y = -tileW / 2 - tileW
+    root.addChild(sprite)
+  }
+
+  return root
+}
+
+/**
+ * 1 プレイヤー分の副露ブロック (複数 meld を横並びにしたもの) を作る (#83 副露表示)。
+ *
+ * ローカル座標は (0,0) = 左端・縦中心。meld 間に `gap` の空きを入れる。
+ * 結果 Container は handRow と同じローカル系に乗せられる前提。
+ */
+const createMeldRow = (melds: MeldGroup[], scale: number): Container => {
+  const row = new Container()
+  row.label = 'meld-row'
+  if (melds.length === 0) return row
+  const GAP = 8
+  let cursorX = 0
+  for (const meld of melds) {
+    const group = createMeldGroup(meld, scale)
+    group.x = cursorX
+    row.addChild(group)
+    // group の width は構成によって変わるため bbox は使わず、構成枚数からおおよそ算出する。
+    // 概算: face 3 枚 = tileW * 3 / kan 系 (sideways+stack 含む) = tileW * 2 + tileH。
+    // 簡易: 牌 1 枚 ≒ TILE.width * scale、kan の sideways は TILE.height * scale。
+    const tileW = TILE.width * scale
+    const tileH = TILE.height * scale
+    let approxWidth: number
+    if (meld.kind === 'ankan') {
+      approxWidth = tileW * 4
+    } else if (meld.kind === 'chi' || meld.kind === 'pon') {
+      // base 2 枚 + sideways 1 枚
+      approxWidth = tileW * 2 + tileH
+    } else {
+      // minkan / kakan: base 2 枚 + sideways 1 枚 (上に stack が乗るだけで横幅は同じ)
+      approxWidth = tileW * 2 + tileH
+    }
+    cursorX += approxWidth + GAP
+  }
+  return row
+}
+
+/**
  * プレイヤー i の手牌 + 河を配置する。
  *   offset 0 = 自家 (下)、1 = 下家 (右)、2 = 対面 (上)、3 = 上家 (左)。
  * 配置は卓中心軸対称: 下と上は y 反転、左右は x 反転 + 90° 回転。
@@ -275,7 +460,18 @@ const addSeatLayout = (
   const discardBlock = createDiscardBlock(player, highlightLast)
   const handRow = createHandRow(player, offset === 0 ? options : {})
 
+  // #83 副露 (鳴き) ブロック。自家は scale 1.0、CPU は cpuHandScale でサイズを揃える。
+  // meldRow は (0,0) = 左端 / y は手牌縦中心 (= 牌の底辺が y=0) のローカル系で組まれている。
+  const meldScale = player.isCPU ? TILE.cpuHandScale : 1
+  const meldRow = createMeldRow(player.melds ?? [], meldScale)
+
   // 各 offset の配置・回転をまとめて定義。座標は卓中心 (TABLE_CENTER_X, TABLE_CENTER_Y) 基準。
+  // 副露ブロックは「手牌の右側 (player の右手側)」に置く。座席ごとの右側はそれぞれ:
+  //   offset 0 (自家 / 下): 画面右へ
+  //   offset 1 (下家 / 右): 画面下へ (回転後の右)
+  //   offset 2 (対面 / 上): 画面左へ
+  //   offset 3 (上家 / 左): 画面上へ
+  const meldGap = 16
   switch (offset) {
     case 0: {
       // 下 (自家): 回転なし
@@ -283,6 +479,11 @@ const addSeatLayout = (
       discardBlock.y = TABLE_CENTER_Y + DISCARD_INNER_MARGIN
       handRow.x = TABLE_CENTER_X
       handRow.y = handBaseline
+      // 副露は handRow の右側に。handRow 右端は handRow.x + (14 牌相当幅)/2。
+      // 簡易: handRow.x からスペーシング配分。meldRow の y は handRow.y + TILE.height/2
+      // にすると牌の底辺が一致する (handRow 内では tile の y = -TILE.height/2 で配置済み)。
+      meldRow.x = handRow.x + 14 * TILE.handSpacing * 0.5 + meldGap
+      meldRow.y = handRow.y + TILE.height / 2
       break
     }
     case 1: {
@@ -293,6 +494,14 @@ const addSeatLayout = (
       handRow.rotation = -Math.PI / 2
       handRow.x = cpuHandBaseline
       handRow.y = TABLE_CENTER_Y
+      // -90° 回転後、ローカル +x → world -y、ローカル +y → world +x。
+      // handRow の中心 (= handRow.x, handRow.y) からローカル +x 方向に「14 牌幅/2 + gap」
+      // 進めた点が world では (handRow.x + (handRow.y 増分), handRow.y - (handRow.x 増分))。
+      // 簡単のため meldRow にも同じ rotation を適用し、handRow と平行に配置する。
+      meldRow.rotation = -Math.PI / 2
+      const cpuHandHalf = 13 * TILE.cpuHandSpacing * 0.5
+      meldRow.x = handRow.x + TILE.height * TILE.cpuHandScale / 2
+      meldRow.y = handRow.y + cpuHandHalf + meldGap
       break
     }
     case 2: {
@@ -303,6 +512,10 @@ const addSeatLayout = (
       handRow.rotation = Math.PI
       handRow.x = TABLE_CENTER_X
       handRow.y = STAGE_HEIGHT - cpuHandBaseline
+      meldRow.rotation = Math.PI
+      const cpuHandHalf = 13 * TILE.cpuHandSpacing * 0.5
+      meldRow.x = handRow.x - cpuHandHalf - meldGap
+      meldRow.y = handRow.y - TILE.height * TILE.cpuHandScale / 2
       break
     }
     case 3: {
@@ -313,12 +526,17 @@ const addSeatLayout = (
       handRow.rotation = Math.PI / 2
       handRow.x = STAGE_HEIGHT - cpuHandBaseline
       handRow.y = TABLE_CENTER_Y
+      meldRow.rotation = Math.PI / 2
+      const cpuHandHalf = 13 * TILE.cpuHandSpacing * 0.5
+      meldRow.x = handRow.x - TILE.height * TILE.cpuHandScale / 2
+      meldRow.y = handRow.y - cpuHandHalf - meldGap
       break
     }
   }
 
   root.addChild(discardBlock)
   root.addChild(handRow)
+  root.addChild(meldRow)
 }
 
 /**

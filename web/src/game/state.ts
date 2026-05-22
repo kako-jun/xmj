@@ -21,6 +21,7 @@ export const createEmptyPlayer = (
   name,
   hand: [],
   discards: [],
+  melds: [],
   score: 25000,
   isCPU,
   isRiichi: false,

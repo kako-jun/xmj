@@ -1,4 +1,4 @@
-import type { GameState, PlayerIndex, PlayerState, Tile } from './types'
+import type { GameState, MeldGroup, PlayerIndex, PlayerState, Tile } from './types'
 import { tileFromCuiCode } from './types'
 import { WasmGameBridge } from './wasm'
 
@@ -21,12 +21,14 @@ const createPlayerState = (
   hand: Tile[],
   discards: Tile[],
   isCPU: boolean,
-  isRiichi: boolean
+  isRiichi: boolean,
+  melds: MeldGroup[] = []
 ): PlayerState => ({
   id,
   name,
   hand,
   discards,
+  melds,
   score,
   isCPU,
   isRiichi,
@@ -121,12 +123,20 @@ export const createGameStateFromBridge = (
 ): GameState => {
   const base = parseFormattedGameState(bridge.getGameStateJson(), humanPlayerIndex)
   const currentPlayerId = bridge.getCurrentPlayerId() as PlayerIndex
+  // #83: 副露を bridge から取得する。getPlayerMelds 未実装の旧 bridge mock では空。
+  const getMelds = (idx: number): MeldGroup[] => {
+    if (typeof bridge.getPlayerMelds === 'function') {
+      return bridge.getPlayerMelds(idx as PlayerIndex)
+    }
+    return []
+  }
   const players = base.players.map((player, idx) => ({
     ...player,
     score: bridge.getPlayerScore(idx),
     name: bridge.getPlayerName(idx),
     discards: parseTileList(bridge.getPlayerDiscards(idx)),
     isRiichi: bridge.isPlayerRiichi(idx),
+    melds: getMelds(idx),
   })) as GameState['players']
 
   if (currentPlayerId === humanPlayerIndex) {

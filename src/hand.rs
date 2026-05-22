@@ -19,6 +19,34 @@ pub struct Meld {
     pub meld_type: MeldType,
     pub tiles: Vec<Tile>,
     pub is_open: bool,
+    /// 鳴き元プレイヤーの座席 index (#83 副露表示)。
+    /// - チー / ポン / 大明槓: 直前打牌者 (= `Game::last_discarder`) の index を入れる
+    /// - 暗槓 (ankan): `None`
+    /// - 加槓 (kakan): 元の Pon の `from_player` を維持
+    pub from_player: Option<usize>,
+    /// 加槓 (Pon → Kan に昇格した小明槓) かどうか (#83 副露表示)。
+    /// `complete_shouminkan` で `true` にする。`do_kan` (大明槓) や `do_ankan` (暗槓)
+    /// では `false`。表示時に大明槓と加槓を区別するために使う。
+    pub is_kakan: bool,
+    /// `tiles` 配列のうち「他家から取った牌」の index (#83 副露表示)。
+    /// - チー: 取った牌が tiles 中で何番目か (構築時の順序による)
+    /// - ポン / 大明槓: 0 を入れる (後段の表示で fromOffset と合わせて並べ替える)
+    /// - 暗槓: `None`
+    /// - 加槓: 0 (元 Pon の先頭) に揃える
+    pub claimed_index: Option<usize>,
+}
+
+impl Default for Meld {
+    fn default() -> Self {
+        Self {
+            meld_type: MeldType::Pon,
+            tiles: Vec::new(),
+            is_open: false,
+            from_player: None,
+            is_kakan: false,
+            claimed_index: None,
+        }
+    }
 }
 
 impl Hand {
@@ -902,6 +930,7 @@ mod tests {
             meld_type: MeldType::Pon,
             tiles: vec![tile, tile, tile],
             is_open: true,
+            ..Default::default()
         }
     }
     fn chi_meld(suit: Suit, start: u8) -> Meld {
@@ -913,6 +942,7 @@ mod tests {
                 Tile::new_number(suit, start + 2, false),
             ],
             is_open: true,
+            ..Default::default()
         }
     }
     fn kan_meld(tile: Tile, is_open: bool) -> Meld {
@@ -920,6 +950,7 @@ mod tests {
             meld_type: MeldType::Kan,
             tiles: vec![tile, tile, tile, tile],
             is_open,
+            ..Default::default()
         }
     }
 
