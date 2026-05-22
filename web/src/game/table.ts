@@ -749,45 +749,60 @@ const addDealerWindMarker = (
   const marker = new Container()
   marker.label = 'dealer-marker'
 
+  // #107: 親「東」マーカーは普通赤い札。pivot を札の中央にして、各家の向きに回転。
   const W = 30
   const H = 30
   const bg = new Graphics()
-  bg.roundRect(0, 0, W, H, 4)
-    .fill({ color: 0xffffff })
-    .stroke({ color: 0x4a4a4a, width: 1 })
+  // pivot を札中央 (W/2, H/2) に置けるように、roundRect も中央起点に。
+  bg.roundRect(-W / 2, -H / 2, W, H, 4)
+    .fill({ color: 0xc83232 })
+    .stroke({ color: 0x6a1818, width: 1 })
   marker.addChild(bg)
 
   const style = new TextStyle({
     fontFamily: '"Hiragino Mincho ProN", "Yu Mincho", "Noto Serif CJK JP", serif',
     fontSize: 22,
     fontWeight: '700',
-    fill: 0x1a1a1a,
+    fill: 0xffffff,
   })
   const text = new Text({ text: '東', style })
   text.anchor.set(0.5)
-  text.x = W / 2
-  text.y = H / 2 + 1
+  text.x = 0
+  text.y = 1
   marker.addChild(text)
 
-  // 自家手牌の左外側、上家・下家・対面はそれぞれ手番表示と被らない卓内寄り。
-  // 自家を 0 として時計回りに、(0=下) (1=右) (2=上) (3=左)
+  // 親 (= 東家) の向きに札を回転。自家を 0 として時計回りに:
+  //   0 = 下 (自家) → 回転なし (正立)
+  //   1 = 右 (下家) → -90°
+  //   2 = 上 (対面) → 180°
+  //   3 = 左 (上家) → +90°
+  const rotations: Record<0 | 1 | 2 | 3, number> = {
+    0: 0,
+    1: -Math.PI / 2,
+    2: Math.PI,
+    3: Math.PI / 2,
+  }
+  marker.rotation = rotations[dealerOffset]
+
+  // 配置: 親が居る席の手牌脇 (河ブロック外側 / 手牌内側) に置く。
+  // 札中央 (marker.x, marker.y) を world 座標で指定する。
   const inset = 18
   switch (dealerOffset) {
     case 0:
-      marker.x = TABLE_CENTER_X - DISCARD_BLOCK_WIDTH / 2 - W - inset
-      marker.y = TABLE_CENTER_Y + DISCARD_INNER_MARGIN + DISCARD_BLOCK_HEIGHT - H
+      marker.x = TABLE_CENTER_X - DISCARD_BLOCK_WIDTH / 2 - W / 2 - inset
+      marker.y = TABLE_CENTER_Y + DISCARD_INNER_MARGIN + DISCARD_BLOCK_HEIGHT - H / 2
       break
     case 1:
-      marker.x = TABLE_CENTER_X + DISCARD_INNER_MARGIN + DISCARD_BLOCK_HEIGHT - W
-      marker.y = TABLE_CENTER_Y - DISCARD_BLOCK_WIDTH / 2 - H - inset
+      marker.x = TABLE_CENTER_X + DISCARD_INNER_MARGIN + DISCARD_BLOCK_HEIGHT - H / 2
+      marker.y = TABLE_CENTER_Y - DISCARD_BLOCK_WIDTH / 2 - W / 2 - inset
       break
     case 2:
-      marker.x = TABLE_CENTER_X + DISCARD_BLOCK_WIDTH / 2 + inset
-      marker.y = TABLE_CENTER_Y - DISCARD_INNER_MARGIN - DISCARD_BLOCK_HEIGHT
+      marker.x = TABLE_CENTER_X + DISCARD_BLOCK_WIDTH / 2 + W / 2 + inset
+      marker.y = TABLE_CENTER_Y - DISCARD_INNER_MARGIN - DISCARD_BLOCK_HEIGHT + H / 2
       break
     case 3:
-      marker.x = TABLE_CENTER_X - DISCARD_INNER_MARGIN - DISCARD_BLOCK_HEIGHT
-      marker.y = TABLE_CENTER_Y + DISCARD_BLOCK_WIDTH / 2 + inset
+      marker.x = TABLE_CENTER_X - DISCARD_INNER_MARGIN - DISCARD_BLOCK_HEIGHT + H / 2
+      marker.y = TABLE_CENTER_Y + DISCARD_BLOCK_WIDTH / 2 + W / 2 + inset
       break
   }
   root.addChild(marker)
