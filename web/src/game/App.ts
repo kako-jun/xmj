@@ -415,7 +415,9 @@ export class App {
       ? this.gameState.players[this.humanPlayerIndex].hand
       : []
     this.justDrawnTile = diffNewlyAddedTile(beforeHand, afterHand)
-    // デフォルトの打牌候補をツモ牌に合わせる (UX: 連打で即切り)
+    // デフォルトの打牌候補をツモ牌に合わせる (UX: 連打で即切り)。
+    // 立直/カン モーダル中の誤打牌は `isHumanTurnInteractive()` で pendingDecision を
+    // チェックしているので、selectedHandIndex が tsumo に向いていても安全。
     this.selectedHandIndex = this.findHandIndexOfJustDrawn()
     // 新しいツモを引いた時点で、このターンの「リーチしない」決定はリセット。
     this.riichiDeclinedThisTurn = false

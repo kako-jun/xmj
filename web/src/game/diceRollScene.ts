@@ -106,9 +106,14 @@ export const createDiceRollScene = (options: DiceRollSceneOptions): Container =>
   const cx = STAGE_WIDTH / 2
 
   // 対局画面の上に薄くかぶせる overlay。背面の卓が透けて見える設計。
+  // overlay 中は背面の卓の牌・ボタンへのクリックを意図せずブロックしたいので
+  // (場決め中に勝手に打牌できない方が安全)、root を interactive にして bg が
+  // pointer を吸収する形にする。
   const bg = new Graphics()
   bg.rect(0, 0, STAGE_WIDTH, STAGE_HEIGHT).fill({ color: 0x000000, alpha: 0.55 })
+  bg.eventMode = 'static'
   root.addChild(bg)
+  root.eventMode = 'static'
 
   // 中央のパネルだけ濃く
   const panelW = 420

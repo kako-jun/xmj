@@ -141,9 +141,11 @@ const walkToGame = (
   // (本来はカードタップだが、テストは showDiceRollScene を直接呼ぶ)
   app.showDiceRollScene(roll)
   // dice overlay は startNewGame 成功時のみ出る。bridge factory が例外を投げる
-  // テストケースでは title-scene へ戻り overlay が出ないので、ボタンが null でも進める。
+  // テストケース (title-scene へ戻る) では overlay が無いことが期待値。
+  // ボタンが見つかれば tap、無ければそのフロー (失敗フロー) として呼び出し側が assert する。
   const startBtn = getSceneButton(stage, 'dice-roll-start-button')
   if (startBtn) startBtn.emit('pointertap', {} as never)
+  // 呼び出し側で「started フラグ」を見たい場合は app.bridge が non-null かを確認すること。
 }
 
 describe('App', () => {

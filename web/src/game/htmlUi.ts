@@ -93,8 +93,10 @@ const renderStatus = (root: HTMLElement, state: HtmlUiState): void => {
     if (dora) dora.replaceChildren()
     return
   }
-  // 場風: round 1-4 = 東場、5-8 = 南場 (半荘のみ後者に到達)
-  const bafuu = g.round >= 5 ? '南' : '東'
+  // 場風: round 1-4 = 東場、5-8 = 南場 (半荘のみ後者に到達)。
+  // 9 局以上は通常の麻雀ルール外なので "?" でフォールバック (西場/北場まで対応する
+  // 拡張ルールは現状未対応 — 想定外データを黙って 南 と表示しない)。
+  const bafuu = g.round >= 9 ? '?' : g.round >= 5 ? '南' : '東'
   const localRound = ((g.round - 1) % 4) + 1
   setText(round, `${bafuu}${localRound}局`)
   setText(honba, `${g.honba}本場`)
@@ -134,14 +136,16 @@ const renderScores = (root: HTMLElement, state: HtmlUiState): void => {
       if (player.id === state.humanPlayerIndex) row.dataset.self = '1'
       const wind = document.createElement('span')
       wind.className = 'wind'
-      // CPU 名 ("CPU 南" 等) には既に風が含まれているため .wind を空にして二重表記を回避。
+      // CPU 名 ("CPU 東/南/西/北") は既に風が含まれているので .wind を空にして二重表記を回避。
       // 人間プレイヤー (name="あなた" 等) では風を表示する。
+      // **構造的判定**: 「CPU + 風漢字」の厳密パターンだけ抑止 (人間が "東田さん" 等の風漢字を含む名前を
+      // 付けても風表示が消えないようにする — name.includes(wk) の素朴判定は誤動作する)。
       const wk = PLAYER_WIND[player.id]
-      const nameContainsWind = player.name.includes(wk)
-      wind.textContent = nameContainsWind ? '' : wk
+      const cpuWindPattern = new RegExp(`^CPU\\s*${wk}$`)
+      const isCpuWindName = cpuWindPattern.test(player.name)
+      wind.textContent = isCpuWindName ? '' : wk
       const name = document.createElement('span')
       name.className = 'name'
-      // 人間でも name が "あなた" のままで十分なので "(あなた)" は付けない。
       name.textContent = player.name
       const pts = document.createElement('span')
       pts.className = 'points'
@@ -195,12 +199,14 @@ const renderActions = (root: HTMLElement, state: HtmlUiState): void => {
 
 // MMORPG のチャット欄風: 行ごとに [発信者] と本文を分けて、発信者ごとに色分け。
 // 発信者の検出は行頭の "東家 が" / "あなた が" / "CPU 南 が" などのパターンで行う。
-const SPEAKER_PATTERNS: Array<{ tag: string; regex: RegExp; klass: string }> = [
-  { tag: '東家', regex: /^(?:CPU\s+東|東家)/, klass: 'spk-east' },
-  { tag: '南家', regex: /^(?:CPU\s+南|南家)/, klass: 'spk-south' },
-  { tag: '西家', regex: /^(?:CPU\s+西|西家)/, klass: 'spk-west' },
-  { tag: '北家', regex: /^(?:CPU\s+北|北家)/, klass: 'spk-north' },
-  { tag: '自分', regex: /^あなた/, klass: 'spk-self' },
+// 発信者検出: 各パターンは「話者名にマッチする capturing prefix」をひとまとまりで持つ。
+// body は entry からその prefix と、続く「 が 」 (任意) を一気に剥がしたもの。
+const SPEAKER_PATTERNS: Array<{ tag: string; prefix: RegExp; klass: string }> = [
+  { tag: '東家', prefix: /^(?:CPU\s+東|東家)\s*(?:が\s*)?/, klass: 'spk-east' },
+  { tag: '南家', prefix: /^(?:CPU\s+南|南家)\s*(?:が\s*)?/, klass: 'spk-south' },
+  { tag: '西家', prefix: /^(?:CPU\s+西|西家)\s*(?:が\s*)?/, klass: 'spk-west' },
+  { tag: '北家', prefix: /^(?:CPU\s+北|北家)\s*(?:が\s*)?/, klass: 'spk-north' },
+  { tag: '自分', prefix: /^あなた\s*(?:が\s*)?/, klass: 'spk-self' },
 ]
 
 const renderLog = (root: HTMLElement, state: HtmlUiState): void => {
@@ -210,7 +216,7 @@ const renderLog = (root: HTMLElement, state: HtmlUiState): void => {
     ...state.eventLog.map(entry => {
       const row = document.createElement('div')
       row.className = 'log-entry'
-      const matched = SPEAKER_PATTERNS.find(p => p.regex.test(entry))
+      const matched = SPEAKER_PATTERNS.find(p => p.prefix.test(entry))
       if (matched) {
         row.classList.add(matched.klass)
         const tag = document.createElement('span')
@@ -218,7 +224,8 @@ const renderLog = (root: HTMLElement, state: HtmlUiState): void => {
         tag.textContent = matched.tag
         const body = document.createElement('span')
         body.className = 'log-body'
-        body.textContent = entry.replace(/^[^\s]+\s*(が)?\s*/, '')
+        const stripped = entry.replace(matched.prefix, '')
+        body.textContent = stripped.length > 0 ? stripped : entry
         row.appendChild(tag)
         row.appendChild(body)
       } else {
