@@ -58,7 +58,7 @@
 - 人間手番かつ下側の手牌だけ `pointertap` を有効化。1 回タップで選択、同じ牌の再タップで `discardTile()` を呼ぶ
 - 打牌後は `createGameStateFromBridge()` で UI state を再構築し、CPU が手番の間は `executeCpuTurn()` を順に実行
 - CPU 3 人の処理が終わって人間手番へ戻ったら、手牌 13 枚を検知して `drawTile()` を自動実行
-- `web/src/game/table.ts`: PixiJS で選択牌の浮き上がり表現を追加。`行動` パネルに最小 action area を実装し、選択牌の確定ボタンを表示。`canRiichi()` 時はこの確定ボタンを「立直して打牌」に切り替える
+- `web/src/game/table.ts`: PixiJS で選択牌の状態表示を実装 (**#98 で外側 halo を廃止し、牌の面色を `TILE.selectedFaceColor` (黄) に切替える方式に変更済**)。`行動` パネルに最小 action area を実装し、選択牌の確定ボタンを表示。`canRiichi()` 時はこの確定ボタンを「立直して打牌」に切り替える
 - テスト追加: 自動ツモ、タップ選択、再タップ打牌、立直成功後の打牌と CPU ループ、人間復帰を `App.test.ts` で固定
 
 ### Issue #7 — Wasm 関数呼び出しフロー整備（ツモ・打牌・CPU AI・終局）

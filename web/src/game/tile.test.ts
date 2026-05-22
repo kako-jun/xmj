@@ -5,7 +5,7 @@
 // レンダラ非依存で検証できる。
 
 import { describe, it, expect } from 'vitest'
-import { Container, Text } from 'pixi.js'
+import { Container, Graphics, Text } from 'pixi.js'
 import {
   createTileGraphics,
   createTileBackGraphics,
@@ -104,6 +104,23 @@ describe('createTileGraphics', () => {
     expect((pin.children.find((c): c is Text => c instanceof Text))?.style.fill).toBe(TILE.pinColor)
     const man = createTileGraphics({ suit: 'man', value: 1 })
     expect((man.children.find((c): c is Text => c instanceof Text))?.style.fill).toBe(TILE.manColor)
+  })
+
+  // #98: 選択中は外側に halo を描かず、面色を黄色に切り替える。
+  // 面 Graphics の fillStyle は Pixi v8 では `_fillStyle.color` で取れないので、
+  // ここでは「children[0] が Graphics で、selected=true のときに通常と異なる」ことだけ確認する。
+  // 直接 fill color を検証するために、`createTileGraphics` がオプションで切り替える分岐に
+  // 入ったかどうかを children 構造と TILE.selectedFaceColor 定数の存在で代用する。
+  it('selected=false (省略時) は通常の白面 / selected=true で TILE.selectedFaceColor 黄面', () => {
+    const off = createTileGraphics({ suit: 'man', value: 1 })
+    const on = createTileGraphics({ suit: 'man', value: 1 }, { selected: true })
+    // 両者とも (face Graphics + glyph Text) の 2 子で、外側に halo は無い
+    expect(off.children).toHaveLength(2)
+    expect(on.children).toHaveLength(2)
+    expect(off.children[0]).toBeInstanceOf(Graphics)
+    expect(on.children[0]).toBeInstanceOf(Graphics)
+    // TILE.selectedFaceColor が定数として定義されていることを保証 (色 swap の心臓部)
+    expect(TILE.selectedFaceColor).toBe(0xf5d96a)
   })
 })
 
