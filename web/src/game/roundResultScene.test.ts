@@ -26,7 +26,7 @@ describe('createRoundResultScene', () => {
       outcome,
       getPlayerName: namer,
       onNext: () => undefined,
-      onBackToTitle: () => undefined,
+
     })
     expect(scene.label).toBe('round-result-scene')
 
@@ -47,7 +47,7 @@ describe('createRoundResultScene', () => {
       outcome,
       getPlayerName: namer,
       onNext: () => undefined,
-      onBackToTitle: () => undefined,
+
     })
     const texts = collectTexts(scene).map(t => t.text)
     expect(texts).toContain('流局')
@@ -63,7 +63,7 @@ describe('createRoundResultScene', () => {
       outcome,
       getPlayerName: namer,
       onNext: () => undefined,
-      onBackToTitle: () => undefined,
+
     })
     const texts = collectTexts(scene).map(t => t.text)
     expect(texts.some(t => t.includes('全員ノーテン'))).toBe(true)
@@ -78,7 +78,7 @@ describe('createRoundResultScene', () => {
       outcome,
       getPlayerName: namer,
       onNext: () => undefined,
-      onBackToTitle: () => undefined,
+
     })
     const texts = collectTexts(scene).map(t => t.text)
     expect(
@@ -95,7 +95,7 @@ describe('createRoundResultScene', () => {
       outcome,
       getPlayerName: namer,
       onNext: () => undefined,
-      onBackToTitle: () => undefined,
+
     })
     const texts = collectTexts(scene).map(t => t.text)
     expect(
@@ -112,7 +112,7 @@ describe('createRoundResultScene', () => {
       outcome,
       getPlayerName: namer,
       onNext: () => undefined,
-      onBackToTitle: () => undefined,
+
     })
     const texts = collectTexts(scene).map(t => t.text)
     expect(
@@ -130,16 +130,15 @@ describe('createRoundResultScene', () => {
         outcome,
         getPlayerName: namer,
         onNext: () => undefined,
-        onBackToTitle: () => undefined,
+  
       })
       const texts = collectTexts(scene).map(t => t.text)
       expect(texts.some(t => t.includes('ノーテン罰符') && t.includes('なし'))).toBe(true)
     }
   })
 
-  it('「次局へ」ボタンで onNext、「タイトルへ」で onBackToTitle が発火', () => {
+  it('「次局へ」ボタンで onNext が発火し、タイトルへ戻るボタンは存在しない (#90)', () => {
     const onNext = vi.fn()
-    const onBackToTitle = vi.fn()
     const outcome: RoundOutcome = {
       kind: 'draw',
       data: { tenpaiPlayers: [] },
@@ -148,16 +147,14 @@ describe('createRoundResultScene', () => {
       outcome,
       getPlayerName: namer,
       onNext,
-      onBackToTitle,
     })
     const next = scene.getChildByLabel('round-result-next-button') as Container
-    const back = scene.getChildByLabel('round-result-title-button') as Container
+    const back = scene.getChildByLabel('round-result-title-button')
     expect(next).toBeTruthy()
-    expect(back).toBeTruthy()
+    // #90: 局終了画面にタイトル戻り導線は出さない
+    expect(back).toBeNull()
     next.emit('pointertap', {} as never)
     expect(onNext).toHaveBeenCalledTimes(1)
-    back.emit('pointertap', {} as never)
-    expect(onBackToTitle).toHaveBeenCalledTimes(1)
   })
 })
 
