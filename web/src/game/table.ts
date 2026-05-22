@@ -390,38 +390,59 @@ const createMeldGroup = (meld: MeldGroup, scale: number): Container => {
   return root
 }
 
+const MELD_GAP = 8
+
+/**
+ * 副露 1 グループの占有横幅 (scale 適用済み)。
+ *   - chi / pon / minkan / kakan: 横向き 1 枚 (= tileH) + 縦向き 2 枚 (= tileW * 2)
+ *   - ankan: 縦向き 4 枚 (= tileW * 4)
+ */
+const meldGroupWidth = (meld: MeldGroup, scale: number): number => {
+  const tileW = TILE.width * scale
+  const tileH = TILE.height * scale
+  if (meld.kind === 'ankan') return tileW * 4
+  return tileW * 2 + tileH
+}
+
+/** 副露 row の合計横幅 (gap 込み)。 */
+const meldRowWidth = (melds: MeldGroup[], scale: number): number => {
+  if (melds.length === 0) return 0
+  return melds.reduce((sum, m) => sum + meldGroupWidth(m, scale), 0) + (melds.length - 1) * MELD_GAP
+}
+
+/**
+ * 副露 row が `maxWidth` に収まる最大 scale を求める。
+ * 上限 `preferredScale` を超えない範囲で 0.4 まで段階的に下げる。
+ */
+const fitMeldScale = (
+  melds: MeldGroup[],
+  preferredScale: number,
+  maxWidth: number
+): number => {
+  if (melds.length === 0) return preferredScale
+  let scale = preferredScale
+  while (scale > 0.4 && meldRowWidth(melds, scale) > maxWidth) {
+    scale -= 0.05
+  }
+  return Math.max(scale, 0.4)
+}
+
 /**
  * 1 プレイヤー分の副露ブロック (複数 meld を横並びにしたもの) を作る (#83 副露表示)。
  *
- * ローカル座標は (0,0) = 左端・縦中心。meld 間に `gap` の空きを入れる。
+ * ローカル座標は (0,0) = 左端・縦中心。meld 間に `MELD_GAP` の空きを入れる。
  * 結果 Container は handRow と同じローカル系に乗せられる前提。
  */
 const createMeldRow = (melds: MeldGroup[], scale: number): Container => {
   const row = new Container()
   row.label = 'meld-row'
   if (melds.length === 0) return row
-  const GAP = 8
   let cursorX = 0
   for (const meld of melds) {
     const group = createMeldGroup(meld, scale)
     group.x = cursorX
     row.addChild(group)
-    // group の width は構成によって変わるため bbox は使わず、構成枚数からおおよそ算出する。
-    // 概算: face 3 枚 = tileW * 3 / kan 系 (sideways+stack 含む) = tileW * 2 + tileH。
-    // 簡易: 牌 1 枚 ≒ TILE.width * scale、kan の sideways は TILE.height * scale。
-    const tileW = TILE.width * scale
-    const tileH = TILE.height * scale
-    let approxWidth: number
-    if (meld.kind === 'ankan') {
-      approxWidth = tileW * 4
-    } else if (meld.kind === 'chi' || meld.kind === 'pon') {
-      // base 2 枚 + sideways 1 枚
-      approxWidth = tileW * 2 + tileH
-    } else {
-      // minkan / kakan: base 2 枚 + sideways 1 枚 (上に stack が乗るだけで横幅は同じ)
-      approxWidth = tileW * 2 + tileH
-    }
-    cursorX += approxWidth + GAP
+    cursorX += meldGroupWidth(meld, scale) + MELD_GAP
   }
   return row
 }
@@ -460,18 +481,18 @@ const addSeatLayout = (
   const discardBlock = createDiscardBlock(player, highlightLast)
   const handRow = createHandRow(player, offset === 0 ? options : {})
 
-  // #83 副露 (鳴き) ブロック。自家は scale 1.0、CPU は cpuHandScale でサイズを揃える。
-  // meldRow は (0,0) = 左端 / y は手牌縦中心 (= 牌の底辺が y=0) のローカル系で組まれている。
-  const meldScale = player.isCPU ? TILE.cpuHandScale : 1
-  const meldRow = createMeldRow(player.melds ?? [], meldScale)
+  // #83 副露 (鳴き) ブロック。
+  // 配置方針: 「どの牌とも重ならない」ことを最優先。
+  //   - 自家 (offset 0): 手牌の下、stage 下辺と手牌底辺の間の空き帯に、右端揃え。
+  //   - CPU (offset 1/2/3): 手牌の外側 (stage 外周方向) の余白に、手牌方向と平行で。
+  // 余白幅に応じて scale を自動縮小する。
+  const STAGE_EDGE_MARGIN = 12
+  const preferredMeldScale = player.isCPU ? TILE.cpuHandScale : 0.8
+  const meldList = player.melds ?? []
+  const meldRow = new Container()
+  meldRow.label = 'meld-row'
 
   // 各 offset の配置・回転をまとめて定義。座標は卓中心 (TABLE_CENTER_X, TABLE_CENTER_Y) 基準。
-  // 副露ブロックは「手牌の右側 (player の右手側)」に置く。座席ごとの右側はそれぞれ:
-  //   offset 0 (自家 / 下): 画面右へ
-  //   offset 1 (下家 / 右): 画面下へ (回転後の右)
-  //   offset 2 (対面 / 上): 画面左へ
-  //   offset 3 (上家 / 左): 画面上へ
-  const meldGap = 16
   switch (offset) {
     case 0: {
       // 下 (自家): 回転なし
@@ -479,29 +500,43 @@ const addSeatLayout = (
       discardBlock.y = TABLE_CENTER_Y + DISCARD_INNER_MARGIN
       handRow.x = TABLE_CENTER_X
       handRow.y = handBaseline
-      // 副露は handRow の右側に。handRow 右端は handRow.x + (14 牌相当幅)/2。
-      // 簡易: handRow.x からスペーシング配分。meldRow の y は handRow.y + TILE.height/2
-      // にすると牌の底辺が一致する (handRow 内では tile の y = -TILE.height/2 で配置済み)。
-      meldRow.x = handRow.x + 14 * TILE.handSpacing * 0.5 + meldGap
-      meldRow.y = handRow.y + TILE.height / 2
+      // 自家副露: 手牌の下に並べ、stage 右端寄せ。手牌底辺 (handBaseline + TILE.height/2)
+      // から下に 8px、stage 下端より上に STAGE_EDGE_MARGIN 余白。
+      const handBottom = handBaseline + TILE.height / 2
+      const availableW = STAGE_WIDTH - 2 * STAGE_EDGE_MARGIN
+      const meldScale = fitMeldScale(meldList, preferredMeldScale, availableW)
+      const builtRow = createMeldRow(meldList, meldScale)
+      const usedW = meldRowWidth(meldList, meldScale)
+      builtRow.x = STAGE_WIDTH - STAGE_EDGE_MARGIN - usedW
+      builtRow.y = handBottom + 8 + TILE.height * meldScale
+      meldRow.addChild(builtRow)
       break
     }
     case 1: {
-      // 右 (下家): -90° 回転。CPU は別 baseline で外側へ
+      // 右 (下家): -90° 回転
       discardBlock.rotation = -Math.PI / 2
       discardBlock.x = TABLE_CENTER_X + DISCARD_INNER_MARGIN
       discardBlock.y = TABLE_CENTER_Y + DISCARD_BLOCK_WIDTH / 2
       handRow.rotation = -Math.PI / 2
       handRow.x = cpuHandBaseline
       handRow.y = TABLE_CENTER_Y
-      // -90° 回転後、ローカル +x → world -y、ローカル +y → world +x。
-      // handRow の中心 (= handRow.x, handRow.y) からローカル +x 方向に「14 牌幅/2 + gap」
-      // 進めた点が world では (handRow.x + (handRow.y 増分), handRow.y - (handRow.x 増分))。
-      // 簡単のため meldRow にも同じ rotation を適用し、handRow と平行に配置する。
-      meldRow.rotation = -Math.PI / 2
-      const cpuHandHalf = 13 * TILE.cpuHandSpacing * 0.5
-      meldRow.x = handRow.x + TILE.height * TILE.cpuHandScale / 2
-      meldRow.y = handRow.y + cpuHandHalf + meldGap
+      // CPU 1 副露: 手牌の外側 (stage 右端側、x が大きい方) に並べる。
+      // 手牌の右端 (world x): handRow.x + TILE.height * cpuHandScale / 2
+      // 並びの方向: 手牌と平行 (= world y 方向)、scale はその回廊幅 (stage 高さ) に収まる範囲。
+      const handOuter = handRow.x + (TILE.height * TILE.cpuHandScale) / 2
+      const availableW = STAGE_HEIGHT - 2 * STAGE_EDGE_MARGIN
+      const meldScale = fitMeldScale(meldList, preferredMeldScale, availableW)
+      const builtRow = createMeldRow(meldList, meldScale)
+      const usedW = meldRowWidth(meldList, meldScale)
+      builtRow.rotation = -Math.PI / 2
+      // builtRow の local +x は world -y。右端 (= world y 最大) から並べたいので、
+      // builtRow の local 原点を「world (handOuter + tileH*scale + 8, STAGE_HEIGHT - margin)」
+      // 相当に置く。回転後、local x 進行は world -y。
+      builtRow.x = handOuter + 8 + TILE.height * meldScale
+      builtRow.y = STAGE_HEIGHT - STAGE_EDGE_MARGIN
+      // usedW を使い切る場合 stage 上端 STAGE_EDGE_MARGIN を越えないかチェック (越えなければ OK)
+      void usedW
+      meldRow.addChild(builtRow)
       break
     }
     case 2: {
@@ -512,10 +547,19 @@ const addSeatLayout = (
       handRow.rotation = Math.PI
       handRow.x = TABLE_CENTER_X
       handRow.y = STAGE_HEIGHT - cpuHandBaseline
-      meldRow.rotation = Math.PI
-      const cpuHandHalf = 13 * TILE.cpuHandSpacing * 0.5
-      meldRow.x = handRow.x - cpuHandHalf - meldGap
-      meldRow.y = handRow.y - TILE.height * TILE.cpuHandScale / 2
+      // CPU 2 副露: 手牌の上 (stage 上端側) に並べる。
+      // 手牌の上端 (world y): handRow.y - TILE.height * cpuHandScale / 2
+      const handOuter = handRow.y - (TILE.height * TILE.cpuHandScale) / 2
+      const availableW = STAGE_WIDTH - 2 * STAGE_EDGE_MARGIN
+      const meldScale = fitMeldScale(meldList, preferredMeldScale, availableW)
+      const builtRow = createMeldRow(meldList, meldScale)
+      const usedW = meldRowWidth(meldList, meldScale)
+      builtRow.rotation = Math.PI
+      // 180° 回転後、local +x → world -x。左端 (stage 左端 margin) から並べたいので
+      // builtRow の local 原点を「world 右上方向」に置く。
+      builtRow.x = STAGE_EDGE_MARGIN + usedW
+      builtRow.y = handOuter - 8 - TILE.height * meldScale
+      meldRow.addChild(builtRow)
       break
     }
     case 3: {
@@ -526,10 +570,19 @@ const addSeatLayout = (
       handRow.rotation = Math.PI / 2
       handRow.x = STAGE_HEIGHT - cpuHandBaseline
       handRow.y = TABLE_CENTER_Y
-      meldRow.rotation = Math.PI / 2
-      const cpuHandHalf = 13 * TILE.cpuHandSpacing * 0.5
-      meldRow.x = handRow.x - TILE.height * TILE.cpuHandScale / 2
-      meldRow.y = handRow.y - cpuHandHalf - meldGap
+      // CPU 3 副露: 手牌の左 (stage 左端側) に並べる。
+      const handOuter = handRow.x - (TILE.height * TILE.cpuHandScale) / 2
+      const availableW = STAGE_HEIGHT - 2 * STAGE_EDGE_MARGIN
+      const meldScale = fitMeldScale(meldList, preferredMeldScale, availableW)
+      const builtRow = createMeldRow(meldList, meldScale)
+      const usedW = meldRowWidth(meldList, meldScale)
+      builtRow.rotation = Math.PI / 2
+      // 90° 回転後、local +x → world +y。stage 上端 margin から並べたいので
+      // builtRow の local 原点を「world (handOuter - tileH*scale - 8, STAGE_EDGE_MARGIN)」相当に。
+      builtRow.x = handOuter - 8 - TILE.height * meldScale
+      builtRow.y = STAGE_EDGE_MARGIN
+      void usedW
+      meldRow.addChild(builtRow)
       break
     }
   }
