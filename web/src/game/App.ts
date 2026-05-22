@@ -656,16 +656,39 @@ export class App {
     return true
   }
 
+  /**
+   * Issue #63: 同種牌が複数あるとき、タップ対象を「同種牌の中で最も右にある index」に
+   * 寄せる。table.ts のツモ牌分離 UI (直近ツモ牌を右端に切り離して描画) と意図を揃え、
+   * 「タップした牌の正体は右端のツモ分離スロットに出る」と見えるようにする。
+   * 赤ドラ含めて完全一致 (`tileToCuiCode` 比較) なので、5m と 5mr は別物扱い。
+   */
+  private coalesceSelectionIndex(index: number): number {
+    if (!this.gameState) return index
+    const hand = this.gameState.players[this.humanPlayerIndex].hand
+    if (index < 0 || index >= hand.length) return index
+    const key = tileToCuiCode(hand[index])
+    let rightmost = index
+    for (let i = hand.length - 1; i > index; i--) {
+      if (tileToCuiCode(hand[i]) === key) {
+        rightmost = i
+        break
+      }
+    }
+    return rightmost
+  }
+
   private handleHandTileTap(index: number): void {
     if (!this.bridge || !this.gameState) return
     if (!this.bridge.isCurrentPlayerHuman()) return
 
-    if (this.selectedHandIndex === index) {
+    const target = this.coalesceSelectionIndex(index)
+
+    if (this.selectedHandIndex === target) {
       this.confirmSelectedTile()
       return
     }
 
-    this.selectedHandIndex = index
+    this.selectedHandIndex = target
     this.renderTable()
   }
 
@@ -724,6 +747,20 @@ export class App {
         this.confirmSelectedTile()
       },
     })
+
+    // Issue #62: armed リーチ中は「立直やめる」を出してキャンセルできるようにする。
+    // Rust 側はまだ declareRiichi を呼んでいないので TS 側の状態を落とすだけで OK。
+    if (this.riichiArmed) {
+      buttons.push({
+        key: 'riichi-cancel',
+        label: '立直やめる',
+        enabled: true,
+        hotkey: 'Esc',
+        onActivate: () => {
+          this.disarmRiichi()
+        },
+      })
+    }
 
     return buttons
   }
@@ -1136,6 +1173,20 @@ export class App {
     this.renderTable()
   }
 
+  /**
+   * Issue #62: armed リーチ (= モーダルで「リーチ」を選んだが、まだ打牌していない状態)
+   * をキャンセルして通常の打牌 UI に戻す。Rust 側はまだ declareRiichi を呼んでいないので
+   * TS 側の `riichiArmed` / `selectedHandIndex` を落とすだけで充分。
+   * declareRiichi 済み (= 立直成立後) の取り消しは別物で、本メソッドは扱わない。
+   */
+  private disarmRiichi(): void {
+    if (!this.riichiArmed) return
+    this.riichiArmed = false
+    this.selectedHandIndex = null
+    this.appendLog('リーチをキャンセル')
+    this.renderTable()
+  }
+
   // ============================================================================
   // キーボードショートカット
   // ============================================================================
@@ -1212,6 +1263,11 @@ export class App {
     }
     if (this.pendingDecision?.kind === 'self-kan-prompt') {
       this.skipSelfKan()
+      return
+    }
+    // Issue #62: armed リーチ中なら Esc で armed 状態を解除
+    if (this.riichiArmed) {
+      this.disarmRiichi()
       return
     }
   }
@@ -1303,7 +1359,7 @@ export class App {
     if (!this.bridge) return ''
     if (this.bridge.isCurrentPlayerHuman()) {
       if (this.riichiArmed) {
-        return '立直確定。捨てる牌を選んで「立直して打牌」'
+        return '立直確定。捨てる牌を選んで「立直して打牌」 / Esc で取り消し'
       }
       if (this.selectedHandIndex === null) {
         return '手牌の数字キー (1-9) か牌をタップで選択。 ←/→ で移動'

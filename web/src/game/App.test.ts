@@ -12,7 +12,10 @@ import { Container, Text } from 'pixi.js'
 import { App } from './App'
 import { initWithState } from './state'
 import type { Tile } from './types'
+import { tileToCuiCode } from './types'
 import { EVENT_LOG_LIMIT } from './constants'
+
+const tileToCuiCodeForTest = (tile: Tile): string => tileToCuiCode(tile)
 
 const UI_SIDE_HTML = `
   <aside id="ui-side">
@@ -1622,6 +1625,121 @@ Dora indicators: 5p 1p
     nextBtn.emit('pointertap', {} as never)
     expect((stage.children[0] as Container).label).toBe('result-scene')
     expect(app.resultMessage).toBeTruthy()
+  })
+
+  // ============================================================================
+  // Issue #62: armed リーチのキャンセル
+  // ============================================================================
+
+  it('Issue #62: armed リーチ中に Esc 相当のキャンセルを呼ぶと armed 状態を解除する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    const bridge = createBridgeMock({
+      drawTile: () => true,
+      canRiichi: () => true,
+      // declareRiichi が呼ばれてはいけない (まだ「立直して打牌」していない)
+      declareRiichi: () => {
+        throw new Error('declareRiichi must not be called when disarming')
+      },
+    })
+
+    app.startGame(bridge, 0)
+    expect(app.pendingDecision?.kind).toBe('riichi-prompt')
+    clickActionButton('riichi')
+    expect(app.riichiArmed).toBe(true)
+
+    // 牌を 1 つ選んだ状態にしてから取り消し
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    expect(app.selectedHandIndex).not.toBeNull()
+
+    // Esc 相当: handleHotkeyCancel を直接呼ぶ
+    ;(app as unknown as { handleHotkeyCancel: () => void }).handleHotkeyCancel()
+
+    expect(app.riichiArmed).toBe(false)
+    expect(app.selectedHandIndex).toBeNull()
+    expect(app.eventLog).toContain('リーチをキャンセル')
+    // armed が外れたので「立直やめる」ボタンは消えている
+    expect(findActionButton('riichi-cancel')).toBeNull()
+    // 通常の「打牌」ボタンに戻っている
+    expect(findActionButton('discard')).toBeTruthy()
+    expect(findActionButton('riichi-discard')).toBeNull()
+  })
+
+  it('Issue #62: armed リーチ中は「立直やめる」ボタンが出て、クリックすると armed が解除される', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    const bridge = createBridgeMock({
+      drawTile: () => true,
+      canRiichi: () => true,
+      declareRiichi: () => {
+        throw new Error('declareRiichi must not be called when disarming')
+      },
+    })
+
+    app.startGame(bridge, 0)
+    clickActionButton('riichi')
+    expect(app.riichiArmed).toBe(true)
+
+    // ボタンが出ていることを確認
+    expect(findActionButton('riichi-cancel')).toBeTruthy()
+
+    clickActionButton('riichi-cancel')
+
+    expect(app.riichiArmed).toBe(false)
+    expect(app.selectedHandIndex).toBeNull()
+    expect(app.eventLog).toContain('リーチをキャンセル')
+    expect(findActionButton('riichi-cancel')).toBeNull()
+  })
+
+  // ============================================================================
+  // Issue #63: 同種牌タップは rightmost (ツモ牌分離スロット) に寄せる
+  // ============================================================================
+
+  it('Issue #63: 同種牌が複数あるとき、本体側 index タップでも selectedHandIndex は rightmost に寄る', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    // 1m が 3 枚並ぶ手牌
+    const bridge = createBridgeMock({
+      drawTile: () => true,
+      getCurrentHandString: () => '1m 1m 1m 2p 3p 4p 5p 6p 7p 8p 9p 2s 3s 4s',
+    })
+
+    app.startGame(bridge, 0)
+    // 念のため hand の構造を確認
+    const hand = app.gameState!.players[0].hand
+    expect(hand.length).toBeGreaterThanOrEqual(3)
+    expect(tileToCuiCodeForTest(hand[0])).toBe('1m')
+    expect(tileToCuiCodeForTest(hand[1])).toBe('1m')
+    expect(tileToCuiCodeForTest(hand[2])).toBe('1m')
+
+    // 本体側 (index=0) をタップ → rightmost (index=2) が選択される
+    ;(app as unknown as { handleHandTileTap: (i: number) => void }).handleHandTileTap(0)
+    expect(app.selectedHandIndex).toBe(2)
+  })
+
+  it('Issue #63: 異種牌が並んでいるときは coalesce せず、タップした index そのものが選択される', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    const bridge = createBridgeMock({
+      drawTile: () => true,
+      getCurrentHandString: () => '1m 2m 3m 4m 5m 6m 7p 8p 9p 2s 3s 4s 5s 6s',
+    })
+
+    app.startGame(bridge, 0)
+    const hand = app.gameState!.players[0].hand
+    expect(tileToCuiCodeForTest(hand[0])).toBe('1m')
+    expect(tileToCuiCodeForTest(hand[1])).toBe('2m')
+
+    ;(app as unknown as { handleHandTileTap: (i: number) => void }).handleHandTileTap(0)
+    expect(app.selectedHandIndex).toBe(0)
   })
 
   it('eventLog は EVENT_LOG_LIMIT 件を上限に古い順から切り詰める', () => {
