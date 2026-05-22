@@ -81,6 +81,21 @@ const main = async (): Promise<void> => {
 
   const host = document.getElementById('game') ?? document.body
   host.appendChild(pixiApp.canvas)
+  const resizeCanvas = (): void => {
+    const displaySize = Math.max(
+      1,
+      Math.floor(Math.min(host.clientWidth, host.clientHeight))
+    )
+    const scale = displaySize / STAGE_WIDTH
+    pixiApp.renderer.resize(displaySize, displaySize)
+    pixiApp.stage.scale.set(scale)
+    pixiApp.stage.x = 0
+    pixiApp.stage.y = 0
+    pixiApp.canvas.style.width = `${displaySize}px`
+    pixiApp.canvas.style.height = `${displaySize}px`
+  }
+  resizeCanvas()
+  new ResizeObserver(resizeCanvas).observe(host)
 
   setLoadingProgress(0.8)
 

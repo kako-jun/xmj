@@ -280,6 +280,10 @@ xmj/
 
 現在は個人開発中ですが、将来的にコントリビューションを歓迎する予定です。
 
+## Web 表示サイズ
+
+Web 版の卓は 720×720 の正方形を論理解像度にします。canvas は CSS で拡大せず、`web/src/main.ts` の `renderer.resize()` と `stage.scale` でテーブル領域の短辺に収まる実 canvas サイズへ合わせます。
+
 ## ライセンス
 
 MIT License - 詳細は [LICENSE](LICENSE) を参照してください。
