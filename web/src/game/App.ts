@@ -366,15 +366,6 @@ export class App {
   }
 
   /**
-   * `executeCpuTurn` 等が返す CUI コード文字列を人間可読な牌 glyph に整形する。
-   * パース失敗 (= "山牌がありません" 等のエラーメッセージ) はそのまま透過。
-   */
-  private formatDiscardedTile(cui: string): string {
-    const tile = tileFromCuiCode(cui)
-    return tile ? tileToGlyph(tile) : cui
-  }
-
-  /**
    * ツモ通知用。残り山牌数を出すのは「ツモ」「カン (嶺上)」等のドロー系イベントだけ。
    * 打牌ログには使わない (山番号は他家から見て手中の何枚目だったかを示唆してしまい、
    * 開示すべき情報ではない)。
@@ -587,8 +578,17 @@ export class App {
       const playerName = this.getPlayerName(currentPlayer)
       const discardedTile = this.bridge.executeCpuTurn()
       this.refreshFromBridge()
+      const parsedTile = tileFromCuiCode(discardedTile)
+      if (parsedTile === null) {
+        // executeCpuTurn が「山牌がありません」「打牌できません」のようなエラー文字列を
+        // 返したケース。「${playerName} が 山牌がありません を打牌」のような日本語破綻
+        // ログを避けるため、ツモ行は出さず、エラー行を単独で残してループ break。
+        this.appendLog(`${playerName}: ${discardedTile}`)
+        this.finalizeGameIfNeeded()
+        return
+      }
       this.appendLog(`${playerName} がツモ ${this.wallSummary()}`)
-      this.appendLog(`${playerName} が ${this.formatDiscardedTile(discardedTile)} を打牌`)
+      this.appendLog(`${playerName} が ${tileToGlyph(parsedTile)} を打牌`)
       this.finalizeGameIfNeeded()
       if (this.checkMeldChancesAfterDiscard(currentPlayer)) {
         return
@@ -621,8 +621,15 @@ export class App {
       const discardedTile = this.bridge.executeCpuTurn()
       this.refreshFromBridge()
       if (!this.isCpuTurnGenerationCurrent(generation) || !this.bridge) return
+      const parsedTile = tileFromCuiCode(discardedTile)
+      if (parsedTile === null) {
+        // 同期版と同じく、エラー戻り値で打牌ログが破綻しないようガード。
+        this.appendLog(`${playerName}: ${discardedTile}`)
+        this.finalizeGameIfNeeded()
+        return
+      }
       this.appendLog(`${playerName} がツモ ${this.wallSummary()}`)
-      this.appendLog(`${playerName} が ${this.formatDiscardedTile(discardedTile)} を打牌`)
+      this.appendLog(`${playerName} が ${tileToGlyph(parsedTile)} を打牌`)
       this.finalizeGameIfNeeded()
       if (this.checkMeldChancesAfterDiscard(currentPlayer)) {
         return

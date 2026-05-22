@@ -1502,6 +1502,77 @@ Dora indicators: 5p 1p
     expect(app.eventLog.some(entry => entry.includes('思考中'))).toBe(false)
   })
 
+  // Issue #100: executeCpuTurn がエラー文字列を返したケースで、打牌ログが日本語破綻
+  // しないこと (「CPU 南 が 山牌がありません を打牌」のような誤生成を防ぐ)。
+  it('#100 executeCpuTurn がエラー戻り値の場合、打牌ログを出さずエラー行のみ残す', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    let currentPlayerId = 0
+
+    const bridge = createBridgeMock({
+      drawTile: () => true,
+      discardTile: () => {
+        currentPlayerId = 1
+        return true
+      },
+      // CPU 南 のターンが回ってきたら executeCpuTurn が CUI コードではなく
+      // 「山牌がありません」エラー文字列を返すケース。
+      executeCpuTurn: () => '山牌がありません',
+      getCurrentPlayerId: () => currentPlayerId,
+      isCurrentPlayerHuman: () => currentPlayerId === 0,
+      isCurrentPlayerCpu: () => currentPlayerId !== 0,
+    })
+
+    app.startGame(bridge, 0)
+
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    clickActionButton('discard')
+
+    // 推奨ガード後の期待: 「CPU 南: 山牌がありません」が出て、
+    // 「CPU 南 が ... を打牌」「CPU 南 がツモ」は CPU ターンからは出ない。
+    expect(app.eventLog.some(entry => entry === 'CPU 南: 山牌がありません')).toBe(true)
+    expect(
+      app.eventLog.some(entry => entry.includes('CPU 南') && entry.includes('を打牌'))
+    ).toBe(false)
+    expect(app.eventLog.some(entry => entry.includes('CPU 南 がツモ'))).toBe(false)
+    // エラー文字列が「を打牌」と連結された破綻ログは絶対に出ない。
+    expect(app.eventLog.some(entry => entry.includes('山牌がありません を打牌'))).toBe(false)
+  })
+
+  it('#100 runCpuTurnsAsync でも executeCpuTurn エラー戻り値で破綻ログを出さない', async () => {
+    vi.useFakeTimers()
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp, { cpuTurnDelayMs: 10 })
+    let currentPlayerId = 0
+
+    const bridge = createBridgeMock({
+      drawTile: () => true,
+      discardTile: () => {
+        currentPlayerId = 1
+        return true
+      },
+      executeCpuTurn: () => '打牌できません',
+      getCurrentPlayerId: () => currentPlayerId,
+      isCurrentPlayerHuman: () => currentPlayerId === 0,
+      isCurrentPlayerCpu: () => currentPlayerId !== 0,
+    })
+
+    app.startGame(bridge, 0)
+
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    clickActionButton('discard')
+
+    await vi.runAllTimersAsync()
+
+    expect(app.eventLog.some(entry => entry === 'CPU 南: 打牌できません')).toBe(true)
+    expect(
+      app.eventLog.some(entry => entry.includes('CPU 南') && entry.includes('を打牌'))
+    ).toBe(false)
+    expect(app.eventLog.some(entry => entry.includes('打牌できません を打牌'))).toBe(false)
+  })
+
   // ==================== Round loop (Issue #27) ====================
 
   it('山牌切れで対局継続中なら resolveDraw → 中間結果シーン → nextRound で復帰', () => {
