@@ -33,26 +33,32 @@ export const EVENT_LOG_VISIBLE_COUNT = 14
 // 牌の基本サイズ。
 // 720×720 の盤面で 13 牌 + ツモ牌 (合計 14) を中央寄せに収めるため、handSpacing は
 // 牌 width 以下にせず、合計幅 ≦ 卓内幅 (約 640px) になるよう調整する。
+//
+// ピッチは「牌が隙間なく密着する」値 (= width * scale) に揃える。
+// 手牌・CPU 手牌・河でばらつきがあると見た目が散らかるので意図的に統一する。
 export const TILE = {
   width: 40,
   height: 56,
-  // 自家手牌のピッチ
-  handSpacing: 42,
-  // CPU 裏向き手牌のスケールと spacing
+  // 自家手牌: 40 (= width)
+  handSpacing: 40,
+  // CPU 裏向き手牌: 28 (= width * cpuHandScale 0.7)
   cpuHandScale: 0.7,
-  cpuHandSpacing: 26,
-  // 河のグリッドピッチ
-  discardColPitch: 30,
-  discardRowPitch: 42,
-  discardScale: 0.62,
+  cpuHandSpacing: 28,
+  // 河: 25 / 35 (= width * 0.625 / height * 0.625)
+  discardColPitch: 25,
+  discardRowPitch: 35,
+  discardScale: 0.625,
   faceColor: 0xf3ead2,
-  edgeColor: 0x4a4a4a,
   cornerRadius: 5,
   textColor: 0x1a1a1a,
   souColor: 0x2f6b3a,
   pinColor: 0x365a85,
+  // 萬子は黒に寄せたダークレッド (字牌は textColor のまま黒)
+  manColor: 0x4a2020,
   redTextColor: 0xa83a3a,
-  backColor: 0x33445e,
+  // 裏面 = 肌色寄りの竹色ベース + grain で竹の節目を縦に走らせる
+  backColor: 0xd9b083,
+  backGrainColor: 0x7a4a22,
 } as const
 
 // 河 6×3 グリッドの幅・高さ (タイル本体だけ、間隔ピッチで算出)。

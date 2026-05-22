@@ -30,8 +30,8 @@
 ### Issue #4 / PR #12 — 牌の PixiJS Graphics 実装
 
 - `web/src/game/tile.ts`: `createTileGraphics(tile)` / `createTileBackGraphics()` / `enumerateAllTiles()`
-- 角丸長方形 (アイボリー) + 縁取り + 上段グリフ + 下段スート漢字
-- 索子 = 緑 / 筒子 = 青 / 萬子・字牌 = 黒 / 赤ドラ = 赤 (現行値は `TILE.souColor` / `TILE.pinColor` / `TILE.textColor` / `TILE.redTextColor` を参照 — `constants.ts` と `DESIGN.md §2` のパレット表が正本)
+- 角丸長方形 (アイボリー) を「Unicode 透過領域の埋め背景」として描き、外周 stroke は持たない (Unicode 🀇 等が自前で枠を持つので二重描画を避ける)
+- 索子 = 緑 / 筒子 = 青 / 萬子 = ダークレッド (黒寄り) / 字牌 = 黒 / 赤ドラ = 赤 (現行値は `TILE.souColor` / `TILE.pinColor` / `TILE.manColor` / `TILE.textColor` / `TILE.redTextColor` を参照 — `constants.ts` と `DESIGN.md §2` のパレット表が正本)
 - `Container.label` に CUI コードを埋め、テスト・デバッグから参照可
 - 動作確認: `App.showAllTilesDemo()` で 34 種 + 赤ドラ 3 枚を 9 列グリッドで表示
 - テスト 12 件 (列挙数 / 生成 / label / Text 内容 / 文字色)

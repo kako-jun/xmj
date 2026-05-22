@@ -263,7 +263,10 @@ export class App {
         overlay.parent?.removeChild(overlay)
         overlay.destroy({ children: true })
         this.activeScene = 'table'
-        this.renderHtmlOverlay()
+        // 起家が CPU の場合 (人間が南/西/北席) は手番ループを起こさないと
+        // 永遠に CPU が打たず、操作ボタンも出ないまま止まる。
+        // 人間起家ならこの呼び出しは UI 再描画だけで no-op になる。
+        this.advanceTurnLoop()
       },
     })
     this.app.stage.addChild(overlay)

@@ -69,16 +69,15 @@ export const createTileGraphics = (tile: Tile): Container => {
   const container = new Container()
   container.label = tileToCuiCode(tile)
 
-  // 牌の底面 (選択 glow の座標基準 + Unicode 文字の透明領域を埋めるため)
+  // 牌の底面: Unicode タイルの透明領域を埋めるための背景のみ。
+  // 外周の枠線は Unicode 文字 (🀇 など) が自前で持っているので二重に描かない。
+  // 選択 glow の座標基準としても bounding box が必要なので fill は残す。
   const face = new Graphics()
-  face
-    .roundRect(0, 0, TILE.width, TILE.height, TILE.cornerRadius)
-    .fill({ color: TILE.faceColor })
-    .stroke({ color: TILE.edgeColor, width: 1 })
+  face.roundRect(0, 0, TILE.width, TILE.height, TILE.cornerRadius).fill({ color: TILE.faceColor })
   container.addChild(face)
 
   // Unicode 麻雀タイル文字 1 つ
-  // 系統ごとに色分け: 索子=緑 / 筒子=青 / 萬子・字牌=黒 / 赤ドラ=赤 (最優先)
+  // 系統ごとに色分け: 索子=緑 / 筒子=青 / 萬子=ダークレッド / 字牌=黒 / 赤ドラ=赤 (最優先)
   const suitColor = (() => {
     if (tile.isRed) return TILE.redTextColor
     switch (tile.suit) {
@@ -86,6 +85,8 @@ export const createTileGraphics = (tile: Tile): Container => {
         return TILE.souColor
       case 'pin':
         return TILE.pinColor
+      case 'man':
+        return TILE.manColor
       default:
         return TILE.textColor
     }
@@ -115,23 +116,29 @@ export const createTileBackGraphics = (): Container => {
   const container = new Container()
   container.label = 'back'
 
+  // 肌色寄りの竹色ベースに、縦の grain (竹の節目) を重ねて「竹の裏面」風にする。
+  // Unicode 🀫 は OS/フォント差で見た目がブレるうえ大半が暗色なので使わず、
+  // 自前で 2 段重ね (base fill + 縦線群) で描く。
   const back = new Graphics()
-  back
-    .roundRect(0, 0, TILE.width, TILE.height, TILE.cornerRadius)
-    .fill({ color: TILE.backColor })
-    .stroke({ color: 0x0a1e3a, width: 1 })
+  back.roundRect(0, 0, TILE.width, TILE.height, TILE.cornerRadius).fill({ color: TILE.backColor })
   container.addChild(back)
 
-  const style = new TextStyle({
-    fontFamily: TILE_FONT_FAMILY,
-    fontSize: 52,
-    fill: 0xfaf3e0,
-  })
-  const glyph = new Text({ text: '\u{1F02B}', style })
-  glyph.anchor.set(0.5)
-  glyph.x = TILE.width / 2
-  glyph.y = TILE.height / 2
-  container.addChild(glyph)
+  const grain = new Graphics()
+  const grainStep = 6
+  const grainMargin = 4
+  for (let x = grainStep; x < TILE.width; x += grainStep) {
+    grain
+      .rect(x - 0.5, grainMargin, 1, TILE.height - grainMargin * 2)
+      .fill({ color: TILE.backGrainColor, alpha: 0.35 })
+  }
+  // 竹節 (横方向の節目) を 1〜2 本入れて単調な縦縞にならないようにする
+  grain
+    .rect(grainMargin, TILE.height * 0.36, TILE.width - grainMargin * 2, 1)
+    .fill({ color: TILE.backGrainColor, alpha: 0.45 })
+  grain
+    .rect(grainMargin, TILE.height * 0.66, TILE.width - grainMargin * 2, 1)
+    .fill({ color: TILE.backGrainColor, alpha: 0.45 })
+  container.addChild(grain)
 
   return container
 }

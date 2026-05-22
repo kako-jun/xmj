@@ -147,8 +147,8 @@ STAGE = 720×720、中心 (360, 360)、`DISCARD_INNER_MARGIN = 96`。
 
 | Layer | y range | Notes |
 | ----- | ------- | ----- |
-| 自家手牌 (handBaseline = 596) | 568-624 | 13 牌 + ツモ牌 × handSpacing 42px |
-| 自家河 (discards)             | 456-582 | 6 列 × 30px × 3 行 × 42px (scale 0.62) |
+| 自家手牌 (handBaseline = 575) | 547-603 | 13 牌 + ツモ牌 × handSpacing 40px (密着) |
+| 自家河 (discards)             | 456-561 | 6 列 × 25px × 3 行 × 35px (scale 0.625、密着) |
 | Center info panel             | 264-456 | 局・山残・ドラ・直前打牌 |
 
 **CPU 山と自家手牌の交差を避けるため CPU 用は別 baseline** — CPU の手牌は卓中心から
@@ -157,11 +157,14 @@ CPU 山の x 位置が衝突しないよう、`handSpacing` (自家) と `cpuHan
 連動して選定する。レイアウトを変える時は **4 方位 × (手牌 / 河) の 8 ブロックすべて**の
 コーナーが衝突しないか確認する。
 
-**Tile Spacing Rule (重要)** — 手牌の隣接牌中心間ピッチは必ず `TILE.width` 以上にする。
+**Tile Spacing Rule (重要)** — 手牌・CPU 手牌・河の **ピッチは「width × scale」ぴったり** に揃え、
+すべての牌を隙間なく密着させる。手牌・CPU 手牌・河でばらつきがあると見た目が散らかるので
+意図的に統一する (session 2026-05-22 で 42/26/30 → 40/28/25 へ詰めて密着化)。
+
 xmj の現行値:
-- `TILE.handSpacing = 42px` (width 40 + gap 2)
-- `TILE.cpuHandSpacing = 26px` (CPU は scale 0.7 → 実効 width 28、ぎっしり詰める「壁」表現)
-- `TILE.discardColPitch = 30px` / `TILE.discardRowPitch = 42px` (scale 0.62 → 実効 width 25 / height 35)
+- `TILE.handSpacing = 40px` (= width 40、密着)
+- `TILE.cpuHandSpacing = 28px` (= width 40 × cpuHandScale 0.7、密着)
+- `TILE.discardColPitch = 25px` / `TILE.discardRowPitch = 35px` (= width/height × discardScale 0.625、密着)
 
 **牌の重なりはバグとして扱う。**
 
@@ -176,7 +179,8 @@ xmj の現行値:
 | 中央情報帯 (東1局・山牌枚数・ドラ表示) | 影だけ (`SHADOW_COLOR` alpha 0.22 の薄いラウンド矩形)、ストロークなし |
 | 対局ログ | 影だけ (`SHADOW_COLOR` alpha 0.32)、ストロークなし |
 | 操作 UI (行動エリア) 外周 | 影だけ (`SHADOW_COLOR` alpha 0.34)。**個別のボタン**は枠ありで押せると分かる見た目を維持 |
-| 牌 | 縁取りあり (`TILE.edgeColor`) — 牌そのものは物理オブジェクトとして強調 |
+| 牌 (表) | **Pixi 側で外周 stroke は描かない**。Unicode 麻雀タイル文字 (🀇 等) が自前で持つ枠線を生かす (二重枠防止)。背景は `TILE.faceColor` で塗って Unicode の透過領域だけ埋める |
+| 牌 (裏) | 同様に Unicode 🀫 は使わず、`TILE.backColor` (肌色寄りの竹色) + `TILE.backGrainColor` の縦 grain + 横節目で「竹の裏面」を自前描画 |
 
 **Do**: 卓画面 (game-table) の情報表示は卓に直書きされた札のように見せる。操作可能要素 (ボタン) だけ明確な枠で区別する。
 **Don't**: 卓画面の表示要素 (点数・ログ・情報帯) に明るい枠を引いて UI チップ感を出さない。

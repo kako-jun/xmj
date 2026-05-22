@@ -95,13 +95,13 @@ describe('createTileGraphics', () => {
     expect(text?.style.fill).toBe(TILE.redTextColor)
   })
 
-  it('索子は緑、筒子は青、萬子は黒 (赤ドラ以外は系統色で塗り分ける)', () => {
+  it('索子は緑、筒子は青、萬子はダークレッド (赤ドラ以外は系統色で塗り分ける)', () => {
     const sou = createTileGraphics({ suit: 'sou', value: 3 })
     expect((sou.children.find((c): c is Text => c instanceof Text))?.style.fill).toBe(TILE.souColor)
     const pin = createTileGraphics({ suit: 'pin', value: 5 })
     expect((pin.children.find((c): c is Text => c instanceof Text))?.style.fill).toBe(TILE.pinColor)
     const man = createTileGraphics({ suit: 'man', value: 1 })
-    expect((man.children.find((c): c is Text => c instanceof Text))?.style.fill).toBe(TILE.textColor)
+    expect((man.children.find((c): c is Text => c instanceof Text))?.style.fill).toBe(TILE.manColor)
   })
 })
 
@@ -110,10 +110,10 @@ describe('createTileBackGraphics', () => {
     expect(createTileBackGraphics().label).toBe('back')
   })
 
-  it('面 + Unicode 裏牌文字 (🀫) = 2 子', () => {
+  it('面 + grain (竹の節目) = 2 子、テキストは含まない', () => {
     const c = createTileBackGraphics()
     expect(c.children).toHaveLength(2)
     const text = c.children.find((ch): ch is Text => ch instanceof Text)
-    expect(text?.text).toBe('\u{1F02B}')
+    expect(text).toBeUndefined()
   })
 })
