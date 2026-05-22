@@ -16,19 +16,6 @@ import { tileToGlyph } from './types'
 
 const PLAYER_WIND = ['東', '南', '西', '北'] as const
 
-/**
- * 牌を Unicode 麻雀文字 (U+1F000 群) に変換する。CUI コード "1m" 等を
- * そのまま出すと「m って何？」になるので、ブラウザ版では絵文字牌で見せる。
- *
- * mapping:
- *   - 萬子 1-9 → 🀇🀈🀉🀊🀋🀌🀍🀎🀏 (U+1F007 ..)
- *   - 筒子 1-9 → 🀙🀚🀛🀜🀝🀞🀟🀠🀡 (U+1F019 ..)
- *   - 索子 1-9 → 🀐🀑🀒🀓🀔🀕🀖🀗🀘 (U+1F010 ..)
- *   - 風: 東南西北 → 🀀🀁🀂🀃 (U+1F000 ..)
- *   - 三元: 白發中 → 🀆🀅🀄 (順序注意: 白=U+1F006, 發=U+1F005, 中=U+1F004)
- */
-// tileToGlyph は types.ts に集約済 (App.ts のログ整形と共有)。
-
 export interface HtmlUiActionButton {
   /** ボタン識別子。'discard' | 'tsumo' | 'ron' | 'ron-skip' | 'riichi-discard' 等 */
   key: string

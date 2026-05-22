@@ -226,7 +226,16 @@ export const tileToCuiCode = (tile: Tile): string => {
 /**
  * 牌を Unicode 麻雀牌 (U+1F000-1F02B) 1 文字に変換する。
  * ログ表示・ボタンラベル等の人間可読 UI 文字列で使う。
- * 内部状態キーとしては {@link tileToCuiCode} を使うこと。
+ *
+ * **赤ドラは区別しない** (5m と 5mr どちらも 🀋 = U+1F00B)。ハッシュキー・等価比較には
+ * {@link tileToCuiCode} を使うこと。
+ *
+ * mapping:
+ *   - 萬子 1-9 → 🀇🀈🀉🀊🀋🀌🀍🀎🀏 (U+1F007 ..)
+ *   - 筒子 1-9 → 🀙🀚🀛🀜🀝🀞🀟🀠🀡 (U+1F019 ..)
+ *   - 索子 1-9 → 🀐🀑🀒🀓🀔🀕🀖🀗🀘 (U+1F010 ..)
+ *   - 風 東南西北 → 🀀🀁🀂🀃 (U+1F000 ..)
+ *   - 三元 白發中 → 🀆🀅🀄 (順序注意: 白=U+1F006, 發=U+1F005, 中=U+1F004)
  */
 export const tileToGlyph = (tile: Tile): string => {
   const cp = (n: number): string => String.fromCodePoint(n)
