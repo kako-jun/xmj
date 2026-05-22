@@ -9,7 +9,7 @@
 // `DISCARD_INNER_MARGIN` の距離に内縁を持つ。これにより 4 プレイヤーの河が必ず
 // 等距離・対称になり、中央の空き地に被らない。
 
-import { Container, Graphics } from 'pixi.js'
+import { Container, Graphics, Text, TextStyle } from 'pixi.js'
 import {
   DISCARD_BLOCK_HEIGHT,
   DISCARD_BLOCK_WIDTH,
@@ -42,10 +42,10 @@ export interface TableSceneOptions {
    */
   justDrawnTile?: Tile | null
   /**
-   * 卓中央に lastDiscard を表示するかどうか。鳴き判定モーダル中だけ true にして
-   * 「この牌に対して鳴くかどうか」の視覚アンカーにする。それ以外は卓中央を空ける。
+   * 鳴き判定モーダル中に「対象になっている直前打牌」を川の中で強調表示するかどうか。
+   * 中央表示は廃止、河の該当牌位置を黄色いハローで光らせる。
    */
-  showCenterTile?: boolean
+  highlightLastDiscard?: boolean
   onHandTileTap?: (index: number) => void
 }
 
@@ -97,7 +97,10 @@ const getRelativePlayer = (
   offset: number
 ): PlayerState => state.players[((humanPlayerIndex + offset) % 4) as PlayerIndex]
 
-const createDiscardBlock = (player: PlayerState): Container => {
+const createDiscardBlock = (
+  player: PlayerState,
+  highlightLast: boolean = false
+): Container => {
   // ローカル座標は「(0,0) が河ブロックの左上、6 列×3 行 (col×row → x=col*pitch, y=row*pitch)」
   // で、上端の row=0 が中央に最も近い。回転 & 配置は呼び出し側で行う。
   const discards = new Container()
@@ -122,6 +125,7 @@ const createDiscardBlock = (player: PlayerState): Container => {
     discards.addChild(slot)
   }
 
+  const lastIndex = player.discards.length - 1
   player.discards.forEach((tile, index) => {
     const col = index % DISCARD_COLS
     const row = Math.floor(index / DISCARD_COLS)
@@ -129,6 +133,16 @@ const createDiscardBlock = (player: PlayerState): Container => {
     sprite.scale.set(tileScale)
     sprite.x = col * colPitch
     sprite.y = row * rowPitch
+    // 鳴き判定中: 直前打牌 (= 河の末尾) を黄色いハローで光らせて「これに対して
+    // 鳴くか」のアンカーにする。中央に複製を出すよりこちらの方が誤認しにくい。
+    if (highlightLast && index === lastIndex) {
+      const halo = new Graphics()
+      halo
+        .roundRect(-4, -4, TILE.width + 8, TILE.height + 8, TILE.cornerRadius + 2)
+        .fill({ color: TURN_GLOW_COLOR, alpha: 0.22 })
+        .stroke({ color: TURN_GLOW_COLOR, width: 2, alpha: 0.95 })
+      sprite.addChildAt(halo, 0)
+    }
     discards.addChild(sprite)
   })
 
@@ -242,12 +256,23 @@ const addSeatLayout = (
   const player = getRelativePlayer(state, humanPlayerIndex, offset)
 
   // 河ブロックの内縁から卓中心までの距離 = DISCARD_INNER_MARGIN
-  // 自家河は中央から下に DISCARD_INNER_MARGIN ぶん離した位置に上端を置く
-  // CPU の手牌は卓の対称ラインから少し外側 (overlap 回避のため自家より外) に置く
-  const handBaseline = STAGE_HEIGHT / 2 + DISCARD_INNER_MARGIN + DISCARD_BLOCK_HEIGHT + 14
+  // 自家河は中央から下に DISCARD_INNER_MARGIN ぶん離した位置に上端を置く。
+  // 自家手牌は河の下端 + tile 半身 + 余白を確保して川との重なりを防ぐ。
+  // CPU の手牌は卓の対称ラインから少し外側 (overlap 回避のため自家より外) に置く。
+  const handBaseline =
+    STAGE_HEIGHT / 2 + DISCARD_INNER_MARGIN + DISCARD_BLOCK_HEIGHT + TILE.height / 2 + 12
   const cpuHandBaseline = STAGE_HEIGHT / 2 + 304
 
-  const discardBlock = createDiscardBlock(player)
+  // 鳴き対象 (直前打牌) の強調は、最後に lastDiscard を捨てたプレイヤーの河だけで行う。
+  // wasm bridge は lastDiscarder を直接渡してこないので、河の末尾と lastDiscard を
+  // 突き合わせて推定する (普通は唯一の一致点になる)。
+  const highlightLast =
+    options.highlightLastDiscard === true &&
+    state.lastDiscard !== null &&
+    player.discards.length > 0 &&
+    tileToCuiCode(player.discards[player.discards.length - 1]) ===
+      tileToCuiCode(state.lastDiscard)
+  const discardBlock = createDiscardBlock(player, highlightLast)
   const handRow = createHandRow(player, offset === 0 ? options : {})
 
   // 各 offset の配置・回転をまとめて定義。座標は卓中心 (TABLE_CENTER_X, TABLE_CENTER_Y) 基準。
@@ -297,31 +322,6 @@ const addSeatLayout = (
 }
 
 /**
- * 卓中央に「直前打牌」を 1 枚だけ表示する。鳴き判定モーダル中だけ表示し、
- * 「この牌に対して鳴くかどうか」のアンカーにする。それ以外のタイミングでは
- * 中央が常に 1 枚出ていると「ツモ牌？打牌？」と混乱するので非表示にする。
- */
-const addLastDiscardMark = (root: Container, state: GameState): void => {
-  if (!state.lastDiscard) return
-  const sprite = createTileGraphics(state.lastDiscard)
-  const scale = 0.9
-  sprite.scale.set(scale)
-  sprite.x = TABLE_CENTER_X - (TILE.width * scale) / 2
-  sprite.y = TABLE_CENTER_Y - (TILE.height * scale) / 2
-  sprite.label = 'meld-target-tile'
-
-  // 「鳴く対象」を強調する黄色いハロー
-  const halo = new Graphics()
-  halo
-    .roundRect(-6, -6, TILE.width + 12, TILE.height + 12, TILE.cornerRadius + 4)
-    .fill({ color: TURN_GLOW_COLOR, alpha: 0.18 })
-    .stroke({ color: TURN_GLOW_COLOR, width: 2, alpha: 0.95 })
-  sprite.addChildAt(halo, 0)
-
-  root.addChild(sprite)
-}
-
-/**
  * 卓シーンを生成する。
  * 文字描画 (点数・局・本場・ドラ表示・実況ログ・操作ボタン) は htmlUi.ts 側で行う。
  */
@@ -341,9 +341,66 @@ export const createTableScene = (
     addSeatLayout(root, state, humanPlayerIndex, offset, options)
   }
 
-  if (options.showCenterTile) {
-    addLastDiscardMark(root, state)
-  }
+  // 親 (dealer) の前に「東」マーカーを置いて自風が一目で分かるようにする。
+  // 親が東家・他家が南/西/北家の関係は dealer index + 自家からの相対位置で決まる。
+  addDealerWindMarker(root, state, humanPlayerIndex)
 
   return root
+}
+
+/**
+ * 親 (= 東家) の手牌上端付近に小さな「東」マーカーを置く。
+ * 自家からの相対位置で 4 方位どこに出すかを決める。
+ */
+const addDealerWindMarker = (
+  root: Container,
+  state: GameState,
+  humanPlayerIndex: PlayerIndex
+): void => {
+  const dealerOffset = ((state.dealer - humanPlayerIndex + 4) % 4) as 0 | 1 | 2 | 3
+  const marker = new Container()
+  marker.label = 'dealer-marker'
+
+  const W = 30
+  const H = 30
+  const bg = new Graphics()
+  bg.roundRect(0, 0, W, H, 4)
+    .fill({ color: 0xffffff })
+    .stroke({ color: 0x4a4a4a, width: 1 })
+  marker.addChild(bg)
+
+  const style = new TextStyle({
+    fontFamily: '"Hiragino Mincho ProN", "Yu Mincho", "Noto Serif CJK JP", serif',
+    fontSize: 22,
+    fontWeight: '700',
+    fill: 0x1a1a1a,
+  })
+  const text = new Text({ text: '東', style })
+  text.anchor.set(0.5)
+  text.x = W / 2
+  text.y = H / 2 + 1
+  marker.addChild(text)
+
+  // 自家手牌の左外側、上家・下家・対面はそれぞれ手番表示と被らない卓内寄り。
+  // 自家を 0 として時計回りに、(0=下) (1=右) (2=上) (3=左)
+  const inset = 18
+  switch (dealerOffset) {
+    case 0:
+      marker.x = TABLE_CENTER_X - DISCARD_BLOCK_WIDTH / 2 - W - inset
+      marker.y = TABLE_CENTER_Y + DISCARD_INNER_MARGIN + DISCARD_BLOCK_HEIGHT - H
+      break
+    case 1:
+      marker.x = TABLE_CENTER_X + DISCARD_INNER_MARGIN + DISCARD_BLOCK_HEIGHT - W
+      marker.y = TABLE_CENTER_Y - DISCARD_BLOCK_WIDTH / 2 - H - inset
+      break
+    case 2:
+      marker.x = TABLE_CENTER_X + DISCARD_BLOCK_WIDTH / 2 + inset
+      marker.y = TABLE_CENTER_Y - DISCARD_INNER_MARGIN - DISCARD_BLOCK_HEIGHT
+      break
+    case 3:
+      marker.x = TABLE_CENTER_X - DISCARD_INNER_MARGIN - DISCARD_BLOCK_HEIGHT
+      marker.y = TABLE_CENTER_Y + DISCARD_BLOCK_WIDTH / 2 + inset
+      break
+  }
+  root.addChild(marker)
 }

@@ -65,16 +65,32 @@ const TILE_FONT_FAMILY = 'XmjMahjong'
  *   を強制して、Apple Color Emoji 等のカラー絵文字に乗っ取られないようにする。
  * - 系統色は `fill` で適用 (mono glyph なのでそのまま色が乗る)。赤ドラは最優先。
  */
+/**
+ * glyph を bbox いっぱいに拡大する scale を計算する (アスペクト維持)。
+ * Pixi の Text は fontFamily / size から自然サイズが決まるので、`text.width` を
+ * 測ってから TILE.width に揃える倍率を返す。jsdom 等で canvas が無い (= 測定不可)
+ * 環境では 1 を返してテストを通す。
+ */
+const computeFitScale = (text: Text): number => {
+  try {
+    const w = text.width
+    if (!w || w <= 0 || !Number.isFinite(w)) return 1
+    return TILE.width / w
+  } catch {
+    return 1
+  }
+}
+
 export const createTileGraphics = (tile: Tile): Container => {
   const container = new Container()
   container.label = tileToCuiCode(tile)
 
-  // 透明な hit-area / 選択 glow の座標基準。視覚的には何も出ない (alpha 0)。
-  // 「文字＝牌」方針: Unicode 牌が自前で枠と絵柄を持つので、cream 背景は描かず
-  // 緑フェルトに文字を直接置く。
-  const hitArea = new Graphics()
-  hitArea.rect(0, 0, TILE.width, TILE.height).fill({ color: 0x000000, alpha: 0 })
-  container.addChild(hitArea)
+  // 白い角丸面 = 「ユニコード文字の枠の内側」を白で塗る。Unicode 牌の枠線・
+  // 中の絵柄はこの上に重ねる。visible なタイル境界は bbox (TILE.width × TILE.height)
+  // と一致するので、spacing = TILE.width で完全密着する。
+  const face = new Graphics()
+  face.roundRect(0, 0, TILE.width, TILE.height, TILE.cornerRadius).fill({ color: 0xffffff })
+  container.addChild(face)
 
   // Unicode 麻雀タイル文字 1 つ
   // 系統ごとに色分け: 索子=緑 / 筒子=青 / 萬子=ダークレッド / 字牌=黒 / 赤ドラ=赤 (最優先)
@@ -91,18 +107,19 @@ export const createTileGraphics = (tile: Tile): Container => {
         return TILE.textColor
     }
   })()
+  // 自然 fontSize で 1 度作って width を測る → bbox にフィットさせる。
+  // これでフォントの em metrics に依存せず常に TILE.width いっぱいで描画される。
   const style = new TextStyle({
     fontFamily: TILE_FONT_FAMILY,
-    // bbox (40×56) をなるべく埋めるサイズ。font の em に内余白があるので height
-    // より少し大きめを取り、glyph 全体が見える範囲で詰める。
-    fontSize: 60,
+    fontSize: 64,
     fill: suitColor,
   })
   const glyph = new Text({ text: tileToUnicodeChar(tile), style })
   glyph.anchor.set(0.5)
+  container.addChild(glyph)
+  glyph.scale.set(computeFitScale(glyph))
   glyph.x = TILE.width / 2
   glyph.y = TILE.height / 2
-  container.addChild(glyph)
 
   return container
 }
@@ -118,22 +135,22 @@ export const createTileBackGraphics = (): Container => {
   const container = new Container()
   container.label = 'back'
 
-  // 表向き牌と同じ方針: 透明 hit-area + Unicode 🀫 を mono 強制で 1 文字描く。
-  // 🀫 が自前で枠 + 竹の裏面パターン (ハッチング) を持つので、自前描画はしない。
-  const hitArea = new Graphics()
-  hitArea.rect(0, 0, TILE.width, TILE.height).fill({ color: 0x000000, alpha: 0 })
-  container.addChild(hitArea)
+  // 表向き牌と同じ方針: 白の角丸 + Unicode 🀫 (枠の内側を白く)。
+  const face = new Graphics()
+  face.roundRect(0, 0, TILE.width, TILE.height, TILE.cornerRadius).fill({ color: 0xffffff })
+  container.addChild(face)
 
   const style = new TextStyle({
     fontFamily: TILE_FONT_FAMILY,
-    fontSize: 60,
+    fontSize: 64,
     fill: TILE.backColor,
   })
   const glyph = new Text({ text: '\u{1F02B}', style })
   glyph.anchor.set(0.5)
+  container.addChild(glyph)
+  glyph.scale.set(computeFitScale(glyph))
   glyph.x = TILE.width / 2
   glyph.y = TILE.height / 2
-  container.addChild(glyph)
 
   return container
 }

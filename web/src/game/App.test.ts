@@ -184,7 +184,7 @@ describe('App', () => {
     }
   })
 
-  it('通常時は lastDiscard が指定されていても卓中央には描画しない (showCenterTile=false)', () => {
+  it('卓中央には lastDiscard を描画しない (鳴き対象は河で強調する方針)', () => {
     const stage = new Container()
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const app = new App(fakeApp)
@@ -196,9 +196,7 @@ describe('App', () => {
     app.showInitialTable(state)
 
     const table = getTable(stage)
-    // 鳴き判定モーダル中以外は卓中央を空ける (ユーザーが「何の牌？」と混乱しないため)
     expect(table.getChildByLabel('meld-target-tile')).toBeNull()
-    // 旧ラベルは存在しない
     expect(table.getChildByLabel('last-discard')).toBeNull()
   })
 

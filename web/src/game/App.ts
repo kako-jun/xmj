@@ -1319,7 +1319,7 @@ export class App {
       selectedHandIndex: this.selectedHandIndex,
       interactiveHandPlayerId: isInteractive ? this.humanPlayerIndex : null,
       justDrawnTile: this.justDrawnTile,
-      showCenterTile: this.pendingDecision?.kind === 'meld-call',
+      highlightLastDiscard: this.pendingDecision?.kind === 'meld-call',
       onHandTileTap: index => {
         this.handleHandTileTap(index)
       },
