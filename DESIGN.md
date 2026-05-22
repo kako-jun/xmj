@@ -202,7 +202,7 @@ xmj の現行値:
 | 中央情報帯 (東1局・山牌枚数・ドラ表示) | 影だけ (`SHADOW_COLOR` alpha 0.22 の薄いラウンド矩形)、ストロークなし |
 | 対局ログ | 影だけ (`SHADOW_COLOR` alpha 0.32)、ストロークなし |
 | 操作 UI (行動エリア) 外周 | 影だけ (`SHADOW_COLOR` alpha 0.34)。**個別のボタン**は枠ありで押せると分かる見た目を維持 |
-| 牌 (表) | **Pixi 側で外周 stroke も背景塗りも描かない**。`web/public/fonts/noto-sans-symbols2-mahjong.woff2` (Noto Sans Symbols 2 subset, 12KB) を `@font-face: XmjMahjong` として index.html で登録、`fill` 色で mono glyph を直接着色する。透明 (alpha 0) の hit-area 矩形だけ仕込み、Container の bbox と選択 glow の座標基準を維持。fallback フォントは持たない (OS 間で glyph を完全に揃えるため) — `main.ts` で `document.fonts.ready` 待ち |
+| 牌 (表) | **Pixi 側で外周 stroke は描かない**。`web/public/fonts/noto-sans-symbols2-mahjong.woff2` (Noto Sans Symbols 2 subset, 12KB) を `@font-face: XmjMahjong` として index.html で登録、`fill` 色で mono glyph を直接着色する。角丸の白面 (= 牌の bbox 内側) を背景として 1 枚仕込み、Container の bbox と hit-area の座標基準を維持。**選択中の牌は外側に halo を描かず、面色を `TILE.selectedFaceColor` (0xf5d96a 黄) に塗り替えて状態を示す** (#98)。fallback フォントは持たない (OS 間で glyph を完全に揃えるため) — `main.ts` で `document.fonts.ready` 待ち |
 | 牌 (裏) | 同じ `XmjMahjong` で Unicode 🀫 (U+1F02B) を 1 文字描画。`TILE.backColor` で着色して竹の裏面風に |
 
 **Do**: 卓画面 (game-table) の情報表示は卓に直書きされた札のように見せる。操作可能要素 (ボタン) だけ明確な枠で区別する。

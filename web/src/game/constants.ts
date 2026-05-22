@@ -57,6 +57,9 @@ export const TILE = {
   redTextColor: 0xa83a3a,
   // 裏面 (Unicode 🀫) の glyph 色。肌色寄りの竹色で「竹の裏面」風に
   backColor: 0xa07550,
+  // 選択中の牌の面色 (#98)。白 → 黄系で「光ってる」感を出す。
+  // 周囲に glow を描かず、面色だけで状態を表現する方針。
+  selectedFaceColor: 0xf5d96a,
 } as const
 
 // 河 6×3 グリッドの幅・高さ (タイル本体だけ、間隔ピッチで算出)。
