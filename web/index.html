@@ -154,16 +154,23 @@
         color: var(--text-muted);
       }
       #ui-status .dora-tile {
-        background: #f3ead2;
-        color: #1a1a1a;
-        font-size: 22px;
+        /* #96 余白 0 化: tile bbox 比 (40:56 = 1:1.4) を inline-block で固定し、
+           font-size = height、letter-spacing = 0 で glyph が枠いっぱい出る。
+           自前ホスト XmjMahjong (U+1F000-1F02B subset) のみ使用、OS 絵文字優先を排除。 */
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 28px;
+        font-size: 28px;
         line-height: 1;
-        padding: 2px 4px;
-        border-radius: 4px;
-        border: 1px solid #4a4a4a;
-        /* Unicode 麻雀牌 (U+1F000 群) を綺麗に出すため emoji フォントを優先 */
-        font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji",
-          "Noto Sans Symbols2", "DejaVu Sans", "Yu Mincho", "Hiragino Mincho", serif;
+        letter-spacing: 0;
+        padding: 0;
+        background: #ffffff;
+        color: #1a1a1a;
+        border-radius: 3px;
+        overflow: hidden;
+        font-family: "XmjMahjong";
       }
       #ui-scores {
         display: grid;
