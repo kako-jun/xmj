@@ -57,6 +57,8 @@ export const TILE = {
   redTextColor: 0xa83a3a,
   // 裏面 (Unicode 🀫) の glyph 色。肌色寄りの竹色で「竹の裏面」風に
   backColor: 0xa07550,
+  // 裏面の地色 (#99)。実物の麻雀牌の裏は白でなく象牙色なので、表向き牌の白と差別化する。
+  backFaceColor: 0xf0e2c0,
   // 選択中の牌の面色 (#98)。白 → 黄系で「光ってる」感を出す。
   // 周囲に glow を描かず、面色だけで状態を表現する方針。
   selectedFaceColor: 0xf5d96a,
