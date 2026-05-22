@@ -77,8 +77,6 @@ interface RoundResultSceneOptions {
   getPlayerName: (idx: PlayerIndex) => string
   /** 次局へ進む。Apps 側で `bridge.nextRound()` → 再描画する。 */
   onNext: () => void
-  /** タイトルに戻る。途中棄権相当。 */
-  onBackToTitle: () => void
 }
 
 const summarizeWin = (
@@ -176,11 +174,10 @@ export const createRoundResultScene = (
     root.addChild(text)
   })
 
+  // #90: 局終わりはタイトル戻り導線を出さない。半荘/東風は最後まで通して遊ぶ前提で、
+  // 局単位でタイトルへ戻る入口は混乱の元になる。終局時の最終 result 画面のみで残す。
   const buttonY = STAGE_HEIGHT - 130
-  root.addChild(createButton('次局へ', 'round-result-next-button', cx - 210, buttonY, options.onNext))
-  root.addChild(
-    createButton('タイトルへ', 'round-result-title-button', cx + 10, buttonY, options.onBackToTitle)
-  )
+  root.addChild(createButton('次局へ', 'round-result-next-button', cx - 100, buttonY, options.onNext))
 
   const footerText = makeText(
     '次局ボタンで継続。終局時は別画面に切り替わります。',

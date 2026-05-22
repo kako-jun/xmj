@@ -1531,9 +1531,6 @@ export class App {
         onNext: () => {
           this.advanceToNextRound(bridge)
         },
-        onBackToTitle: () => {
-          this.showTitleScene()
-        },
       })
     )
     this.renderHtmlOverlay()
