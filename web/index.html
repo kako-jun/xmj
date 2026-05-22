@@ -170,39 +170,74 @@
         grid-template-columns: 1fr 1fr;
         gap: 6px 12px;
       }
+      /*
+       * 席色 (風固定): 東=赤 / 南=黄 / 西=青 / 北=緑。
+       * 値は web/src/game/seatColors.ts の SEAT_COLORS と一致させること。
+       * row 全体に風色の背景を当て、文字色は背景輝度から黒/白を選んだ値で固定する。
+       * これにより「水色 (西) 背景に白文字、黄色 (南) 背景に白文字」のような可読性
+       * 揺れを根絶する (旧仕様では文字色がデフォルト color から継承され、不整合だった)。
+       * data-self は人間プレイヤーの行マーカーとしてだけ残し、左黄色ラインなどの
+       * 装飾は当てない (色は風で決まる、自分用の追加色は重ねない)。
+       */
       .score-row {
         display: flex;
         align-items: baseline;
         gap: 6px;
         font-size: 13px;
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text-primary);
+      }
+      .score-row[data-wind='east'] {
+        background: #d65a4a;
+        color: #1a1a1a;
+      }
+      .score-row[data-wind='south'] {
+        background: #e8c94a;
+        color: #1a1a1a;
+      }
+      .score-row[data-wind='west'] {
+        background: #3a7ab8;
+        color: #ffffff;
+      }
+      .score-row[data-wind='north'] {
+        background: #3f9a5b;
+        color: #ffffff;
       }
       .score-row.is-turn {
-        color: var(--turn-glow);
+        outline: 2px solid var(--turn-glow);
+        outline-offset: -2px;
         font-weight: 700;
       }
       .score-row .wind {
         font-size: 14px;
         font-weight: 700;
-        color: var(--border-accent);
         min-width: 1.2em;
+        color: inherit;
       }
       .score-row .name {
         flex: 1;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        color: inherit;
       }
       .score-row .points {
         font-weight: 700;
-        color: var(--text-primary);
+        color: inherit;
       }
       .score-row.is-bankrupt .points {
-        color: var(--text-danger);
+        /* 破産は風色を残しつつ、点数だけ目立たせる: 文字をやや透過させない太字 */
+        text-decoration: underline wavy;
       }
       .score-row .riichi {
         font-size: 11px;
-        color: var(--text-danger);
         font-weight: 700;
+        padding: 1px 4px;
+        border-radius: 3px;
+        background: rgba(0, 0, 0, 0.25);
+        color: inherit;
       }
       /* 操作ブロックは右下に固定。ボタン数が増えても領域は広がらず、
        * grid auto-fill で均等分割されるので 1 ボタンあたりが小さくなる。 */
@@ -290,29 +325,39 @@
         flex: 1;
         word-break: break-word;
       }
-      #ui-log .log-entry.spk-self {
-        border-left-color: #ffd75f;
-        background: rgba(255, 215, 95, 0.06);
-      }
-      #ui-log .log-entry.spk-self .log-tag {
-        color: #1a1a1a;
-        background: #ffd75f;
-      }
+      /*
+       * 実況ログ chat の話者タグ色は SEAT_COLORS と完全一致させる。
+       * 旧 spk-self (#ffd75f 黄) は南家 (#e8c94a 黄) と衝突したため廃止し、
+       * 人間プレイヤーは自分の風 (= 起家時は南風) に応じた spk-east 等を htmlUi
+       * 側で当てる。
+       */
       #ui-log .log-entry.spk-east .log-tag {
         color: #1a1a1a;
-        background: #ff8a6b;
+        background: #d65a4a;
+      }
+      #ui-log .log-entry.spk-east {
+        border-left-color: #d65a4a;
       }
       #ui-log .log-entry.spk-south .log-tag {
         color: #1a1a1a;
-        background: #ffd14d;
+        background: #e8c94a;
+      }
+      #ui-log .log-entry.spk-south {
+        border-left-color: #e8c94a;
       }
       #ui-log .log-entry.spk-west .log-tag {
-        color: #fff;
-        background: #6fa8dc;
+        color: #ffffff;
+        background: #3a7ab8;
+      }
+      #ui-log .log-entry.spk-west {
+        border-left-color: #3a7ab8;
       }
       #ui-log .log-entry.spk-north .log-tag {
-        color: #fff;
-        background: #8c6fdc;
+        color: #ffffff;
+        background: #3f9a5b;
+      }
+      #ui-log .log-entry.spk-north {
+        border-left-color: #3f9a5b;
       }
       #ui-log .log-entry.log-system {
         color: var(--text-muted);
