@@ -223,6 +223,29 @@ export const tileToCuiCode = (tile: Tile): string => {
   }
 }
 
+/**
+ * 牌を Unicode 麻雀牌 (U+1F000-1F02B) 1 文字に変換する。
+ * ログ表示・ボタンラベル等の人間可読 UI 文字列で使う。
+ * 内部状態キーとしては {@link tileToCuiCode} を使うこと。
+ */
+export const tileToGlyph = (tile: Tile): string => {
+  const cp = (n: number): string => String.fromCodePoint(n)
+  switch (tile.suit) {
+    case 'man':
+      return cp(0x1f007 + (tile.value - 1))
+    case 'pin':
+      return cp(0x1f019 + (tile.value - 1))
+    case 'sou':
+      return cp(0x1f010 + (tile.value - 1))
+    case 'wind':
+      return cp(0x1f000 + (tile.value - 1))
+    case 'dragon': {
+      const map = [0x1f006, 0x1f005, 0x1f004]
+      return cp(map[tile.value - 1] ?? 0x1f004)
+    }
+  }
+}
+
 export const tileFromCuiCode = (code: string): Tile | null => {
   // 数牌
   const numMatch = /^([1-9])([mps])(r?)$/.exec(code)
