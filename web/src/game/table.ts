@@ -256,7 +256,7 @@ const createHandRow = (player: PlayerState, options: TableSceneOptions = {}): Co
  * @param meld 副露データ
  * @param scale 牌の表示倍率 (自家は 1.0、CPU は TILE.cpuHandScale)
  */
-const createMeldGroup = (meld: MeldGroup, scale: number): Container => {
+export const createMeldGroup = (meld: MeldGroup, scale: number): Container => {
   const root = new Container()
   root.label = `meld-${meld.kind}`
 
@@ -294,45 +294,58 @@ const createMeldGroup = (meld: MeldGroup, scale: number): Container => {
 
   // chi / pon / minkan / kakan: claimed 牌だけ横向き (90° 回転)
   // 横向き牌のローカル bbox は (tileH 横, tileW 縦) — 元の縦長を寝かせる。
-  // 通常牌 4 枚 (or 3 枚) を並べたうち、claimed の位置に応じて横向きにする。
   //
   // 並べる順序:
-  //   - 非 claimed タイルを「鳴き元家 → 自家手牌」順に並べる、と言いたいところだが
-  //     簡易実装として「claimed 以外の tiles 配列順序」で配置する。
-  //   - fromOffset で「sideways position」を決め、その位置に claimed を置く。
+  //   - 非 claimed タイルを「tiles 配列順序」で残し、`sidewaysPos` の位置に claimed を置く。
+  //   - fromOffset で「sideways position」を決める:
+  //       3 (上家から) → 左端 / 2 (対面から) → 中央 / 1 (下家から) → 右端
+  //     fromOffset === 0 は自家からの鳴き = 通常ありえない (加槓の鳴き元は元 Pon の向きを使う)
+  //     ので、安全側で fromOffset === 1 と同じ「右端 sideways」に倒す。
   //
-  // tiles の長さ (chi/pon=3、minkan=4、kakan=4) を考慮する。kakan は minkan と同じ
-  // 「3 枚並び + claimed sideways」に加えて、stacked タイルを上に置く。
+  // tiles の長さ (chi/pon=3、minkan=4、kakan=4) を考慮する:
+  //   - chi/pon: 3 枚並び。claimed 1 枚 sideways + 残り 2 枚 face up。
+  //   - minkan : 4 枚並び。claimed 1 枚 sideways + 残り 3 枚 face up (stacked なし)。
+  //   - kakan  : 3 枚並び + stacked。minkan と同じ並び (claimed sideways) に
+  //              加えて、claimed の上に 4 枚目を横向きで重ねる。
+  //              (= 元 Pon の上に「加えた 1 枚」を乗せる慣習表現)
 
   const claimedIdx = meld.claimedIndex ?? 0
   const fromOffset = meld.fromOffset ?? 1
 
-  // base 3 枚 = pon/chi の場合は tiles 全部 / kan 系の場合は tiles から 1 枚抜く
-  // kakan の場合: minkan の見た目 (= 3 枚並び) + 4 枚目を claimed の上に stack
-  // minkan の場合: 4 枚並び、ただし 4 枚並びだとはみ出すので「3 枚並び + claimed の上に 1 枚 stack」
-  //               にする (慣習的なリーチ麻雀牌譜表記)。
-  const useStack = meld.kind === 'minkan' || meld.kind === 'kakan'
   const claimedTile = meld.tiles[claimedIdx] ?? meld.tiles[0]
   const nonClaimedTiles: Tile[] = []
   meld.tiles.forEach((t, i) => {
     if (i === claimedIdx) return
     nonClaimedTiles.push(t)
   })
-  // minkan / kakan は 4 枚あり non-claimed=3 だが、stacked 枠で 1 枚使うので
-  // 並びには non-claimed の前 2 枚だけ使う想定 (見た目: face / sideways+stack / face)。
-  // ただし「3 枚並びの基本構成 (face / face / face のうち claimed 1 枚を sideways に)」
-  // のため、minkan/kakan の表示は (非claimed 2 枚 + claimed 1 枚) を 3 枚並び + stack 1 枚にする。
+  // minkan は 4 枚並び (face/face/face/sideways 等)、kakan は 3 枚並び + stacked。
+  // useStack は「claimed の上にもう 1 枚重ねるかどうか」(= kakan のみ)。
+  const useStack = meld.kind === 'kakan'
+  const slotCount = meld.kind === 'minkan' ? 4 : 3
+  // kakan の場合: 3 スロット並びに使う non-claimed は 2 枚 (3 枚目は stack 用)
+  // minkan の場合: 4 スロット並びに使う non-claimed は 3 枚すべて
+  // chi/pon の場合: 3 スロット並びに使う non-claimed は 2 枚すべて
   const baseTiles: Tile[] = useStack ? nonClaimedTiles.slice(0, 2) : nonClaimedTiles
 
-  // sideways position index (0 = 左端 / 1 = 中央 / 2 = 右端)
-  const sidewaysPos: 0 | 1 | 2 =
-    fromOffset === 3 ? 0 : fromOffset === 2 ? 1 : 2
+  // sideways position index (0 = 左端 / 1 = 中央 / 2 = 右端 / 3 = 4 スロット最右端)
+  // 3 スロット (chi/pon/kakan) は 0/1/2 のいずれか。
+  // 4 スロット (minkan) も同じく上家=0/対面=1/下家=2 を使い、それ以外 (fromOffset===0等) は最右の 3。
+  // fromOffset === 0 は通常ありえないが、安全側で「下家から鳴いた相当」(= 右端) に倒す。
+  const sidewaysPos: 0 | 1 | 2 | 3 =
+    fromOffset === 3
+      ? 0
+      : fromOffset === 2
+        ? 1
+        : slotCount === 4
+          ? // minkan で fromOffset=1 (下家) は最右端 (= スロット 3)
+            3
+          : 2
 
-  // 並び順を決める。3 スロットに base 2 枚 + claimed 1 枚 (sideways) を配置する。
+  // 並び順を決める。slotCount スロットに base (slotCount-1) 枚 + claimed 1 枚 (sideways) を配置。
   // baseTiles の順序はそのまま (左→右で詰める)。
   const slots: Array<{ kind: 'face' | 'sideways'; tile: Tile }> = []
   let baseCursor = 0
-  for (let pos = 0; pos < 3; pos++) {
+  for (let pos = 0; pos < slotCount; pos++) {
     if (pos === sidewaysPos) {
       slots.push({ kind: 'sideways', tile: claimedTile })
     } else {
@@ -365,6 +378,7 @@ const createMeldGroup = (meld: MeldGroup, scale: number): Container => {
       // 回転後の bbox 中心が (cursorX + tileH/2, -tileW/2) になるよう配置 (底辺合わせ)。
       sprite.x = cursorX + tileH / 2
       sprite.y = -tileW / 2
+      root.addChild(sprite)
       const sidewaysX = cursorX
       cursorX += tileH
       if (useStack) {
@@ -394,13 +408,16 @@ const MELD_GAP = 8
 
 /**
  * 副露 1 グループの占有横幅 (scale 適用済み)。
- *   - chi / pon / minkan / kakan: 横向き 1 枚 (= tileH) + 縦向き 2 枚 (= tileW * 2)
- *   - ankan: 縦向き 4 枚 (= tileW * 4)
+ *   - chi / pon / kakan: 横向き 1 枚 (= tileH) + 縦向き 2 枚 (= tileW * 2)、3 スロット並び。
+ *     kakan は claimed の上に stack するので横幅は増えない (depth が増えるだけ)。
+ *   - minkan: 横向き 1 枚 (= tileH) + 縦向き 3 枚 (= tileW * 3)、4 スロット並び。
+ *   - ankan: 縦向き 4 枚 (= tileW * 4)。
  */
 const meldGroupWidth = (meld: MeldGroup, scale: number): number => {
   const tileW = TILE.width * scale
   const tileH = TILE.height * scale
   if (meld.kind === 'ankan') return tileW * 4
+  if (meld.kind === 'minkan') return tileW * 3 + tileH
   return tileW * 2 + tileH
 }
 
@@ -413,6 +430,7 @@ const meldRowWidth = (melds: MeldGroup[], scale: number): number => {
 /**
  * 副露 row が `maxWidth` に収まる最大 scale を求める。
  * 上限 `preferredScale` を超えない範囲で 0.4 まで段階的に下げる。
+ * 下限 0.4 は「これ以上小さくすると牌の絵柄が判別できない」実用最小値。
  */
 const fitMeldScale = (
   melds: MeldGroup[],
@@ -425,6 +443,32 @@ const fitMeldScale = (
     scale -= 0.05
   }
   return Math.max(scale, 0.4)
+}
+
+/**
+ * 副露 row の **depth (横向き牌 1 枚ぶん高さ + stack)** が `maxDepth` に収まる
+ * 最大 scale を返す。CPU 副露が stage 外側余白に収まるかを担保するために使う。
+ *
+ * depth 必要量は基本 `tileH = TILE.height * scale`、kakan を含むなら `tileW * 2`。
+ * すべて scale に比例するので、最大の depth-per-scale から線形に逆算できる。
+ *
+ * @param melds 対象 meld 群
+ * @param preferredScale 上限 scale
+ * @param maxDepth 許容される depth (px)
+ */
+const fitMeldDepthScale = (
+  melds: MeldGroup[],
+  preferredScale: number,
+  maxDepth: number
+): number => {
+  if (melds.length === 0) return preferredScale
+  // depth = scale * depthPerScale。最大の depthPerScale を取る meld に合わせる。
+  // - 通常 meld: depthPerScale = TILE.height
+  // - kakan を含む: depthPerScale = max(TILE.height, TILE.width * 2)
+  const hasKakan = melds.some(m => m.kind === 'kakan')
+  const depthPerScale = hasKakan ? Math.max(TILE.height, TILE.width * 2) : TILE.height
+  const maxAllowedScale = maxDepth / depthPerScale
+  return Math.max(0.4, Math.min(preferredScale, maxAllowedScale))
 }
 
 /**
@@ -467,7 +511,11 @@ const addSeatLayout = (
   // CPU の手牌は卓の対称ラインから少し外側 (overlap 回避のため自家より外) に置く。
   const handBaseline =
     STAGE_HEIGHT / 2 + DISCARD_INNER_MARGIN + DISCARD_BLOCK_HEIGHT + TILE.height / 2 + 12
-  const cpuHandBaseline = STAGE_HEIGHT / 2 + 304
+  // CPU 手牌の卓中心からの距離 (px)。session505 で 304 → 280 に下げ、CPU 手牌の
+  // 外側に副露 row (sideways 牌の縦寸 = TILE.height * cpuHandScale ≈ 39.2px) が
+  // 安全に収まる余白を作っている (旧 304 では stage 端から ~36px しか取れず、
+  // sideways 牌が約 11px はみ出ていた)。
+  const cpuHandBaseline = STAGE_HEIGHT / 2 + 280
 
   // 鳴き対象 (直前打牌) の強調は、最後に lastDiscard を捨てたプレイヤーの河だけで行う。
   // wasm bridge は lastDiscarder を直接渡してこないので、河の末尾と lastDiscard を
@@ -525,17 +573,17 @@ const addSeatLayout = (
       // 並びの方向: 手牌と平行 (= world y 方向)、scale はその回廊幅 (stage 高さ) に収まる範囲。
       const handOuter = handRow.x + (TILE.height * TILE.cpuHandScale) / 2
       const availableW = STAGE_HEIGHT - 2 * STAGE_EDGE_MARGIN
-      const meldScale = fitMeldScale(meldList, preferredMeldScale, availableW)
+      // depth = sideways 牌の縦寸 + 8px gap が、handOuter から stage 右端の余白に収まる。
+      const outerSpace = STAGE_WIDTH - handOuter - STAGE_EDGE_MARGIN - 8
+      const widthFitted = fitMeldScale(meldList, preferredMeldScale, availableW)
+      const meldScale = fitMeldDepthScale(meldList, widthFitted, outerSpace)
       const builtRow = createMeldRow(meldList, meldScale)
-      const usedW = meldRowWidth(meldList, meldScale)
       builtRow.rotation = -Math.PI / 2
       // builtRow の local +x は world -y。右端 (= world y 最大) から並べたいので、
       // builtRow の local 原点を「world (handOuter + tileH*scale + 8, STAGE_HEIGHT - margin)」
       // 相当に置く。回転後、local x 進行は world -y。
       builtRow.x = handOuter + 8 + TILE.height * meldScale
       builtRow.y = STAGE_HEIGHT - STAGE_EDGE_MARGIN
-      // usedW を使い切る場合 stage 上端 STAGE_EDGE_MARGIN を越えないかチェック (越えなければ OK)
-      void usedW
       meldRow.addChild(builtRow)
       break
     }
@@ -551,7 +599,9 @@ const addSeatLayout = (
       // 手牌の上端 (world y): handRow.y - TILE.height * cpuHandScale / 2
       const handOuter = handRow.y - (TILE.height * TILE.cpuHandScale) / 2
       const availableW = STAGE_WIDTH - 2 * STAGE_EDGE_MARGIN
-      const meldScale = fitMeldScale(meldList, preferredMeldScale, availableW)
+      const outerSpace = handOuter - STAGE_EDGE_MARGIN - 8
+      const widthFitted = fitMeldScale(meldList, preferredMeldScale, availableW)
+      const meldScale = fitMeldDepthScale(meldList, widthFitted, outerSpace)
       const builtRow = createMeldRow(meldList, meldScale)
       const usedW = meldRowWidth(meldList, meldScale)
       builtRow.rotation = Math.PI
@@ -573,15 +623,15 @@ const addSeatLayout = (
       // CPU 3 副露: 手牌の左 (stage 左端側) に並べる。
       const handOuter = handRow.x - (TILE.height * TILE.cpuHandScale) / 2
       const availableW = STAGE_HEIGHT - 2 * STAGE_EDGE_MARGIN
-      const meldScale = fitMeldScale(meldList, preferredMeldScale, availableW)
+      const outerSpace = handOuter - STAGE_EDGE_MARGIN - 8
+      const widthFitted = fitMeldScale(meldList, preferredMeldScale, availableW)
+      const meldScale = fitMeldDepthScale(meldList, widthFitted, outerSpace)
       const builtRow = createMeldRow(meldList, meldScale)
-      const usedW = meldRowWidth(meldList, meldScale)
       builtRow.rotation = Math.PI / 2
       // 90° 回転後、local +x → world +y。stage 上端 margin から並べたいので
       // builtRow の local 原点を「world (handOuter - tileH*scale - 8, STAGE_EDGE_MARGIN)」相当に。
       builtRow.x = handOuter - 8 - TILE.height * meldScale
       builtRow.y = STAGE_EDGE_MARGIN
-      void usedW
       meldRow.addChild(builtRow)
       break
     }

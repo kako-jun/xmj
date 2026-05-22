@@ -123,7 +123,10 @@ export const createGameStateFromBridge = (
 ): GameState => {
   const base = parseFormattedGameState(bridge.getGameStateJson(), humanPlayerIndex)
   const currentPlayerId = bridge.getCurrentPlayerId() as PlayerIndex
-  // #83: 副露を bridge から取得する。getPlayerMelds 未実装の旧 bridge mock では空。
+  // #83: 副露を bridge から取得する。
+  // テスト mock backward compat: 旧 bridge mock では `getPlayerMelds` 未実装の
+  // ことがあるため、関数として存在するときだけ呼び、それ以外は空配列を返す。
+  // 本番 bridge (WasmGameBridge) は必ずこの API を実装する。
   const getMelds = (idx: number): MeldGroup[] => {
     if (typeof bridge.getPlayerMelds === 'function') {
       return bridge.getPlayerMelds(idx as PlayerIndex)

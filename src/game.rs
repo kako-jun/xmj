@@ -769,36 +769,39 @@ impl Game {
         let tile = self.last_discard.unwrap();
 
         if let TileType::Number { suit, value } = tile.tile_type {
-            let (t1, t2) = match pattern {
+            // pattern ごとに「手牌から取り出す 2 枚 (t1, t2)」と、副露表示用に
+            // 昇順で並べた tiles 配列 + claimed_index を組み立てる。
+            // - pattern 0 (n-2, n-1, n): tiles = [t1, t2, tile]、claimed_index = 2 (右端)
+            // - pattern 1 (n-1, n, n+1): tiles = [t1, tile, t2]、claimed_index = 1 (中央)
+            // - pattern 2 (n, n+1, n+2): tiles = [tile, t1, t2]、claimed_index = 0 (左端)
+            // いずれも tiles はチーの自然な並び (昇順)、claimed_index は last_discard の位置。
+            let (t1, t2, tiles_vec, claimed_index_value) = match pattern {
                 0 => {
                     // n-2, n-1, n
                     if value < 3 {
                         return false;
                     }
-                    (
-                        Tile::new_number(suit, value - 2, false),
-                        Tile::new_number(suit, value - 1, false),
-                    )
+                    let a = Tile::new_number(suit, value - 2, false);
+                    let b = Tile::new_number(suit, value - 1, false);
+                    (a, b, vec![a, b, tile], 2usize)
                 }
                 1 => {
                     // n-1, n, n+1
                     if value < 2 || value > 8 {
                         return false;
                     }
-                    (
-                        Tile::new_number(suit, value - 1, false),
-                        Tile::new_number(suit, value + 1, false),
-                    )
+                    let a = Tile::new_number(suit, value - 1, false);
+                    let b = Tile::new_number(suit, value + 1, false);
+                    (a, b, vec![a, tile, b], 1usize)
                 }
                 2 => {
                     // n, n+1, n+2
                     if value > 7 {
                         return false;
                     }
-                    (
-                        Tile::new_number(suit, value + 1, false),
-                        Tile::new_number(suit, value + 2, false),
-                    )
+                    let a = Tile::new_number(suit, value + 1, false);
+                    let b = Tile::new_number(suit, value + 2, false);
+                    (a, b, vec![tile, a, b], 0usize)
                 }
                 _ => return false,
             };
@@ -809,10 +812,8 @@ impl Game {
             }
 
             // #83 副露表示: 鳴き元 (= 直前打牌者) と claimed_index を保存する。
-            // tiles の中で `tile == last_discard` の位置を claimed_index にする。
-            // チーの pattern により tile は 0/1/2 のどこでも来る (n-2 n-1 n / n-1 n n+1 / n n+1 n+2)。
-            let tiles_vec = vec![t1, tile, t2];
-            let claimed_index = tiles_vec.iter().position(|t| *t == tile);
+            // tiles は昇順、claimed_index は pattern から確定的に決める。
+            let claimed_index = Some(claimed_index_value);
             let from_player = self.last_discarder;
             let meld = crate::hand::Meld {
                 meld_type: crate::hand::MeldType::Chi,
