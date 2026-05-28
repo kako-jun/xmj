@@ -94,6 +94,7 @@ const createBridgeMock = (overrides: Partial<import('./wasm').WasmGameBridge> = 
     getLastDiscarder: () => undefined,
     resolveWinTsumo: () => null,
     resolveWinRon: () => null,
+    getLastOutcomeJson: () => null,
     computeTenpaiPlayers: () => [],
     destroy: () => undefined,
     ...overrides,
@@ -1232,6 +1233,77 @@ Dora indicators: 5p 1p
     )
     expect(app.pendingDecision).toBeNull()
     expect(findActionButton('discard')).toBeTruthy()
+  })
+
+  it('加槓時に CPU 候補が返ったら resolveWinChankan を呼び槍槓ロンを自動宣言する (Issue #76)', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    const tile: Tile = { suit: 'pin', value: 3 }
+    let chankanCalled = false
+
+    app.startGame(
+      createBridgeMock({
+        drawTile: () => false,
+        canRiichi: () => false,
+        canAnkan: () => [],
+        canShouminkan: () => [tile],
+        startShouminkan: (_idx, _t) => ({ ok: true, candidates: [1 as PlayerIndex] }),
+        resolveWinChankan: (winnerIdx, fromIdx) => {
+          chankanCalled = true
+          expect(winnerIdx).toBe(1)
+          expect(fromIdx).toBe(0)
+          return {
+            winner: 1 as PlayerIndex,
+            scores: [0, 100, 0, 0],
+            yaku: [],
+            han: 1,
+            fu: 30,
+            honba: 0,
+            method: 'ron',
+            isDealer: false,
+            winningTile: tile,
+          }
+        },
+      }),
+      0
+    )
+
+    expect(app.pendingDecision?.kind).toBe('self-kan-prompt')
+    clickActionButton('self-shouminkan')
+
+    expect(chankanCalled).toBe(true)
+    expect(app.pendingDecision).toBeNull()
+  })
+
+  it('加槓時に candidates が人間だけなら completeShouminkan に進む（見逃し扱い）(Issue #76)', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+
+    const tile: Tile = { suit: 'pin', value: 3 }
+    let completeCalled = false
+
+    app.startGame(
+      createBridgeMock({
+        drawTile: () => false,
+        canRiichi: () => false,
+        canAnkan: () => [],
+        canShouminkan: () => [tile],
+        startShouminkan: (_idx, _t) => ({ ok: true, candidates: [0 as PlayerIndex] }),
+        completeShouminkan: (_idx, _t) => {
+          completeCalled = true
+          return true
+        },
+      }),
+      0
+    )
+
+    expect(app.pendingDecision?.kind).toBe('self-kan-prompt')
+    clickActionButton('self-shouminkan')
+
+    expect(completeCalled).toBe(true)
   })
 
   it('リーチを armed 状態でも declareRiichi が false なら状態を維持して再試行できる', () => {

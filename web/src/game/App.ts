@@ -1138,13 +1138,31 @@ export class App {
       this.appendLog('加槓宣言失敗')
       return
     }
+
+    // #76: 槍槓候補に CPU がいれば自動ロン宣言
     if (start.candidates.length > 0) {
-      // 槍槓宣言の余地あり。本 PR では CPU 自動ロン UI 未実装のため、
-      // ログだけ出して即 complete に進める (Chankan 役は AI ロン側で発火する余地として残す)。
+      const cpuCandidates = start.candidates.filter(idx => idx !== this.humanPlayerIndex)
+      if (cpuCandidates.length > 0) {
+        // CPU が槍槓ロンを宣言（複数いる場合は先着1人）
+        const winnerIdx = cpuCandidates[0]
+        const summary = typeof this.bridge.resolveWinChankan === 'function'
+          ? this.bridge.resolveWinChankan(winnerIdx, this.humanPlayerIndex)
+          : null
+        if (summary) {
+          this.appendLog(
+            `${this.getPlayerName(winnerIdx)} が槍槓ロン ${tileToGlyph(tile)}`
+          )
+          this.refreshFromBridge()
+          this.showRoundResultIfPending()
+          return
+        }
+      }
+      // 人間だけが候補 → 後続で pending を立てて選ばせる（現状は見逃し扱い・将来実装）
       this.appendLog(
-        `加槓 ${tileToGlyph(tile)}: 槍槓候補 ${start.candidates.join(',')} (本実装では見逃し扱い)`
+        `加槓 ${tileToGlyph(tile)}: 人間プレイヤーが槍槓可能（本実装では見逃し扱い）`
       )
     }
+
     const beforeHand = this.gameState
       ? this.gameState.players[this.humanPlayerIndex].hand.slice()
       : []
