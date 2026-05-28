@@ -307,7 +307,7 @@ mod tests {
         assert_eq!(keys.private_key, loaded_keys.private_key);
 
         // クリーンアップ
-        let _ = fs::remove_file(&tmp_path);
+        let _ = fs::remove_dir_all(&tmp_dir);
     }
 
     #[test]

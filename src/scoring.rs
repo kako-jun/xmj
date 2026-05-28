@@ -1128,7 +1128,8 @@ impl ScoringEngine {
         false
     }
 
-    /// 副露 + 手牌内における指定風牌の枚数を返す (winning_tile は含めない)。
+    /// 手牌 (add_meld 時に tiles から除去済みのため副露牌は含まない) における
+    /// 指定風牌の枚数を返す。winning_tile は含めない。
     ///
     /// #73: winning_tile を含めない生カウントを返す。刻子/雀頭の判定は
     /// `wind_is_triplet` / `wind_is_pair` が winning_tile を考慮して行う。
