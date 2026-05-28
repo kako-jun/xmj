@@ -241,6 +241,10 @@ pub struct Game {
     /// および地和判定で「鳴きなしで自分の第 1 ツモ」を確認するために使う。
     /// 親=0, 子1=1, 子2=2, 子3=3 が各プレイヤーの「第 1 ツモ」相当のインデックス。
     pub draws_this_round: u32,
+    /// #89: 嘘リーチ（黙聴での虚偽リーチ）を許可するかどうか。
+    /// true のとき `can_riichi` のテンパイ・点数要件を外し、門前 + 未リーチのみで
+    /// リーチ宣言可能にする。流局時に非テンパイのリーチ者へ罰符を課す。
+    pub uso_riichi_enabled: bool,
 }
 
 impl Game {
@@ -307,6 +311,7 @@ impl Game {
             last_discarder: None,
             any_call_made_this_round: false,
             draws_this_round: 0,
+            uso_riichi_enabled: false,
         };
 
         game.initialize_wall();
@@ -1121,24 +1126,34 @@ impl Game {
     ///
     /// `Player::can_riichi()` の門前 / テンパイ / 持ち点 1000 以上 / 未リーチ
     /// に加え、麻雀標準ルールである **「山牌残り 4 枚以上」** をここで担保する。
-    /// 4 枚未満では (自家が立直しても) 他家全員のツモが回り切らないので、
-    /// 一発・ダブリーの成立条件が物理的に満たせない局面で立直棒だけ供託される
-    /// 不整合を防ぐ。
     ///
-    /// `WasmGame::can_riichi` / `Game::declare_riichi` の両方からここを通すことで、
-    /// 「UI 上は can_riichi=true / 押下時 declare_riichi=false」の食い違い (#91) を防ぐ。
+    /// `uso_riichi_enabled=true` のとき (#89):
+    ///   テンパイ・点数（1000点以上）の要件を外し、門前 + 未リーチ + 山牌 4 枚以上のみで
+    ///   立直宣言可能にする。
     pub fn can_riichi(&self, player_idx: usize) -> bool {
         if player_idx >= self.players.len() {
-            return false;
-        }
-        if !self.players[player_idx].can_riichi() {
             return false;
         }
         // 標準ルール: 山牌 4 枚未満では立直不可
         if self.wall.len() < 4 {
             return false;
         }
-        true
+        if self.uso_riichi_enabled {
+            // 嘘リーチ有効: 門前 + 未リーチのみチェック
+            let p = &self.players[player_idx];
+            if !p.hand.get_melds().is_empty() {
+                return false;
+            }
+            if p.is_riichi {
+                return false;
+            }
+            true
+        } else {
+            if !self.players[player_idx].can_riichi() {
+                return false;
+            }
+            true
+        }
     }
 
     /// 立直を宣言する (#49 / #91)。
@@ -1160,8 +1175,18 @@ impl Game {
             .players
             .iter()
             .all(|p| p.hand.get_melds().is_empty() && p.discards.len() == 0);
+        // #89: 嘘リーチ判定 — 宣言時点で非テンパイ（または 1000 点未満）なら uso_riichi=true
+        let is_uso = self.uso_riichi_enabled && !self.players[player_idx].can_riichi();
         let turn = self.round as usize;
-        if !self.players[player_idx].declare_riichi(turn) {
+        if is_uso {
+            // 嘘リーチ: Player::declare_riichi は can_riichi() をガードするので直接セット
+            let p = &mut self.players[player_idx];
+            p.is_riichi = true;
+            p.riichi_turn = Some(turn);
+            p.ippatsu = true;
+            p.subtract_score(1000);
+            p.uso_riichi = true;
+        } else if !self.players[player_idx].declare_riichi(turn) {
             // Game::can_riichi で通った後に Player::declare_riichi が false を返すのは
             // 想定外 (両者は同じ Player::can_riichi を経由するため)。防御的に false 返却。
             return false;
@@ -1678,6 +1703,16 @@ impl Game {
         // - 1〜3 人テンパイ: 親が tenpai_players に含まれるか否かで分岐
         //   罰符の支払い有無（per_tenpai == 0 のケース）とは独立に連荘判定する。
         self.dealer_won_last = dealer_tenpai;
+
+        // #89: 嘘リーチ罰符 — 流局時に uso_riichi=true のプレイヤーから 1000 点追加徴収
+        if self.uso_riichi_enabled {
+            for i in 0..self.players.len() {
+                if self.players[i].uso_riichi {
+                    // 1000 点罰符（供託済み立直棒とは別に徴収）
+                    self.players[i].pay_unclamped(1000);
+                }
+            }
+        }
 
         // TODO: 流し満貫 / 9 種 9 牌 / 四風連打 / 三家和 / 四開槓 / リーチ後チョンボ等の
         // 特殊流局は未対応。`RoundOutcome::Draw` に種別フィールド (enum) を追加して

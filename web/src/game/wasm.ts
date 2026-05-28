@@ -311,6 +311,37 @@ export class WasmGameBridge {
     this.game.skipRon(playerIdx)
   }
 
+  // ---- 嘘リーチ (Issue #89) ----
+
+  /**
+   * 嘘リーチ（黙聴での虚偽リーチ）を許可するかどうかを設定する。
+   * true のとき canRiichi のテンパイ・点数要件を外し、門前 + 未リーチのみで宣言可能にする。
+   * 流局時に uso_riichi=true のプレイヤーへ 1000 点罰符を課す。
+   */
+  setUsoRiichiEnabled(enabled: boolean): void {
+    if (typeof this.game.setUsoRiichiEnabled === 'function') {
+      this.game.setUsoRiichiEnabled(enabled)
+    }
+  }
+
+  isUsoRiichiEnabled(): boolean {
+    if (typeof this.game.isUsoRiichiEnabled === 'function') {
+      return this.game.isUsoRiichiEnabled() as boolean
+    }
+    return false
+  }
+
+  /**
+   * 指定プレイヤーが嘘リーチ中かどうかを返す。
+   * 流局時の手牌公開判定に使用する。
+   */
+  isUsoRiichi(playerIdx: PlayerIndex): boolean {
+    if (typeof this.game.isUsoRiichi === 'function') {
+      return this.game.isUsoRiichi(playerIdx) as boolean
+    }
+    return false
+  }
+
   // ---- 局結着 / 次局 (Issue #27) ----
 
   /**

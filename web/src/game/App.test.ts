@@ -11,7 +11,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { Container, Text } from 'pixi.js'
 import { App } from './App'
 import { initWithState } from './state'
-import type { Tile } from './types'
+import type { Tile, PlayerIndex } from './types'
 import { tileToCuiCode } from './types'
 import { EVENT_LOG_LIMIT } from './constants'
 
@@ -1264,6 +1264,8 @@ Dora indicators: 5p 1p
             method: 'ron',
             isDealer: false,
             winningTile: tile,
+            winType: 'ron' as const,
+            totalPoints: 1000,
           }
         },
       }),
