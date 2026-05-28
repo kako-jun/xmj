@@ -12,7 +12,9 @@ use crate::scoring::ScoringEngine;
 // extract_agari* / scoring_summary_json は Issue #66 で `agari_extract` モジュールに切り出した。
 // wasm.rs からは re-export で呼び出し側の `crate::wasm::extract_agari` 等を温存する。
 #[cfg(feature = "wasm")]
-pub(crate) use crate::agari_extract::{extract_agari, extract_agari_with_context};
+pub(crate) use crate::agari_extract::{
+    extract_agari, extract_agari_with_context, extract_agari_with_full_context,
+};
 
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
@@ -565,13 +567,14 @@ impl WasmGame {
         if winner_idx >= self.game.players.len() {
             return String::new();
         }
-        let is_dealer = winner_idx == self.game.dealer;
+        let _is_dealer = winner_idx == self.game.dealer;
         let hand_clone = self.game.players[winner_idx].hand.clone();
-        let Some((sub_hand, winning_tile)) = extract_agari_with_context(&hand_clone, true, is_dealer) else {
+        // #74: ctx を先に構築し、ドラ/立直/状況役を考慮した full context で最適 winning_tile を選ぶ
+        let ctx = self.game.build_scoring_context(winner_idx, true);
+        let Some((sub_hand, winning_tile)) = extract_agari_with_full_context(&hand_clone, &ctx) else {
             return String::new();
         };
         // #49/#50/#53/#54: 立直系・状況役・場風自風・ドラを反映した ScoringContext を組む
-        let ctx = self.game.build_scoring_context(winner_idx, true);
         let Some(result) = ScoringEngine::calculate_score_with_context(&sub_hand, &winning_tile, &ctx) else {
             return String::new();
         };

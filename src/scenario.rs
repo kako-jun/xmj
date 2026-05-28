@@ -29,7 +29,7 @@
 //! - 役の追加 (#49-#61) は本モジュールには触らない。シナリオ側は「シナリオを組み立てて
 //!   試行する」インフラだけを提供する。
 
-use crate::agari_extract::extract_agari_with_context;
+use crate::agari_extract::{extract_agari_with_context, extract_agari_with_full_context};
 use crate::game::{Game, GameMode, Length, WinKind};
 use crate::scoring::{ScoringEngine, ScoringResult};
 use crate::tile::Tile;
@@ -278,11 +278,11 @@ impl ScenarioRunner {
     /// `last_outcome` 設定まで一気に進める。
     pub fn try_tsumo(&mut self) -> Option<ScoringResult> {
         let winner = self.game.current_player;
-        let is_dealer = winner == self.game.dealer;
         let hand_clone = self.game.players[winner].hand.clone();
-        let (sub_hand, winning_tile) =
-            extract_agari_with_context(&hand_clone, true, is_dealer)?;
+        // #74: ctx を先に構築し、ドラ/立直/状況役を考慮した full context で最適 winning_tile を選ぶ
         let ctx = self.game.build_scoring_context(winner, true);
+        let (sub_hand, winning_tile) =
+            extract_agari_with_full_context(&hand_clone, &ctx)?;
         let result =
             ScoringEngine::calculate_score_with_context(&sub_hand, &winning_tile, &ctx)?;
         self.push_log(format!(

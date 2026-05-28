@@ -10,7 +10,7 @@
 //! 役の追加 (#49-#61) は本モジュールには触らず `scoring.rs` 側で対応する。
 
 use crate::hand::Hand;
-use crate::scoring::{ScoringEngine, ScoringResult};
+use crate::scoring::{ScoringContext, ScoringEngine, ScoringResult};
 use crate::tile::Tile;
 
 /// `extract_agari_with_context` のツモ・子家デフォルト。
@@ -23,7 +23,7 @@ pub fn extract_agari(hand: &Hand) -> Option<(Hand, Tile)> {
 /// 14 枚手牌から「抜くと残りが winning 形になる 1 枚」を探し、最高得点の解釈を返す。
 ///
 /// ツモ和了直後は `Hand` がソート済で「最後に引いた牌」を末尾から復元できない。
-/// 各ユニークな牌を winning_tile 候補として試し、`ScoringEngine::calculate_score`
+/// 各ユニークな牌を winning_tile 候補として試し、`ScoringEngine::calculate_score_with_context`
 /// に通して最も高得点 (total_points → han → fu の順で比較) の解釈を採用する。
 ///
 /// 返り値: `(13 枚に縮めた Hand, winning_tile)`
@@ -42,10 +42,13 @@ pub fn extract_agari(hand: &Hand) -> Option<(Hand, Tile)> {
 /// `Hand::tile_count()` は副露込みで 14 枚相当をカウントするため、副露ありでも
 /// 残り手牌 (11/8/5/2 枚) から 1 枚抜いて `can_win` を呼べば「副露面子 + 残り手牌」で
 /// 4 面子 1 雀頭が構成されるかが正しく判定される。
-pub fn extract_agari_with_context(
+///
+/// # Issue #74
+/// ドラ・立直・場風・状況役など `ScoringContext` 全体を反映した点数で比較するため、
+/// フル ctx を受け取る版。`extract_agari_with_context` からも本関数に委譲する。
+pub fn extract_agari_with_full_context(
     hand: &Hand,
-    is_tsumo: bool,
-    is_dealer: bool,
+    ctx: &ScoringContext,
 ) -> Option<(Hand, Tile)> {
     let tiles = hand.get_tiles().clone();
     if hand.tile_count() != 14 {
@@ -68,7 +71,7 @@ pub fn extract_agari_with_context(
         if fallback.is_none() {
             fallback = Some((sub.clone(), *tile));
         }
-        if let Some(res) = ScoringEngine::calculate_score(&sub, tile, is_tsumo, is_dealer) {
+        if let Some(res) = ScoringEngine::calculate_score_with_context(&sub, tile, ctx) {
             let cand = (sub.clone(), *tile, res.total_points, res.han, res.fu);
             best = match best {
                 None => Some(cand),
@@ -86,6 +89,24 @@ pub fn extract_agari_with_context(
         return Some((sub, tile));
     }
     fallback
+}
+
+/// `extract_agari_with_full_context` の後方互換ラッパ。
+///
+/// `is_tsumo` / `is_dealer` のみを `ScoringContext` に詰めて委譲する。
+/// ドラ・立直・状況役は考慮されないため、新規コードは
+/// `extract_agari_with_full_context` を直接使うこと。
+pub fn extract_agari_with_context(
+    hand: &Hand,
+    is_tsumo: bool,
+    is_dealer: bool,
+) -> Option<(Hand, Tile)> {
+    let ctx = ScoringContext {
+        is_tsumo,
+        is_dealer,
+        ..ScoringContext::default()
+    };
+    extract_agari_with_full_context(hand, &ctx)
 }
 
 /// `ScoringResult` を `{ han, fu, totalPoints, yaku:[...] }` 形の JSON 文字列に整形。
