@@ -135,6 +135,8 @@ export class App {
   justDrawnTile: Tile | null = null
   selectedGameMode: GameMode = 'tonpuusen'
   selectedHumanSeat: PlayerIndex | null = null
+  /** #89: 嘘リーチ（黙聴でのリーチ）を許可するか。ゲーム開始前に設定する。 */
+  usoRiichiEnabled = false
   private cpuTurnDelayMs: number
   private createBridge: ((humanSeat: PlayerIndex) => WasmGameBridge) | null
   private rollDice: () => DiceRoll
@@ -232,6 +234,7 @@ export class App {
       createModeSelectScene({
         selectedMode: this.selectedGameMode,
         modes: this.buildGameModes(),
+        usoRiichiEnabled: this.usoRiichiEnabled,
         // タップ即確定: 選択 + 場決めシーン遷移を 1 タップで行う
         onSelectMode: mode => {
           this.selectedGameMode = mode
@@ -239,6 +242,10 @@ export class App {
         },
         onBack: () => {
           this.showTitleScene(this.titleNotice)
+        },
+        onToggleUsoRiichi: enabled => {
+          this.usoRiichiEnabled = enabled
+          this.showModeSelectScene()
         },
       })
     )
@@ -287,6 +294,10 @@ export class App {
     try {
       const bridge = this.createBridge(humanSeat)
       this.titleNotice = null
+      // #89: 嘘リーチ設定をブリッジに反映
+      if (this.usoRiichiEnabled && typeof bridge.setUsoRiichiEnabled === 'function') {
+        bridge.setUsoRiichiEnabled(true)
+      }
       this.startGame(bridge, humanSeat)
       return true
     } catch (error) {
@@ -516,6 +527,16 @@ export class App {
       typeof this.bridge.computeTenpaiPlayers === 'function'
         ? this.bridge.computeTenpaiPlayers()
         : []
+    // #89: 流局前に嘘リーチプレイヤーのログを出力（手牌公開相当）
+    if (typeof this.bridge.isUsoRiichi === 'function') {
+      for (let i = 0; i < 4; i++) {
+        if (this.bridge.isUsoRiichi(i as PlayerIndex)) {
+          this.appendLog(
+            `${this.getPlayerName(i as PlayerIndex)} の嘘リーチが発覚！手牌公開 + 1000点罰符`
+          )
+        }
+      }
+    }
     this.bridge.resolveDraw(tenpai)
     this.showRoundResultIfPending()
   }

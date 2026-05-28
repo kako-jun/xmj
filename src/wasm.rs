@@ -609,6 +609,29 @@ impl WasmGame {
         self.game.next_round()
     }
 
+    /// #89: 嘘リーチ（黙聴での虚偽リーチ）を許可するかどうかを設定する。
+    /// true のとき canRiichi のテンパイ・点数要件を外し、門前 + 未リーチのみで宣言可能にする。
+    /// 流局時に uso_riichi=true のプレイヤーへ 1000 点罰符を課す。
+    #[wasm_bindgen(js_name = setUsoRiichiEnabled)]
+    pub fn set_uso_riichi_enabled(&mut self, enabled: bool) {
+        self.game.uso_riichi_enabled = enabled;
+    }
+
+    /// #89: 嘘リーチ設定の現在値を返す。
+    #[wasm_bindgen(js_name = isUsoRiichiEnabled)]
+    pub fn is_uso_riichi_enabled(&self) -> bool {
+        self.game.uso_riichi_enabled
+    }
+
+    /// #89: 指定プレイヤーが嘘リーチ中かどうかを返す（流局時の手牌公開判定に使用）。
+    #[wasm_bindgen(js_name = isUsoRiichi)]
+    pub fn is_uso_riichi(&self, player_idx: usize) -> bool {
+        if player_idx >= self.game.players.len() {
+            return false;
+        }
+        self.game.players[player_idx].uso_riichi
+    }
+
     #[wasm_bindgen(js_name = getRound)]
     pub fn get_round(&self) -> u32 {
         self.game.round
@@ -1601,5 +1624,64 @@ mod tests {
         // winning_tile 未指定 (後方互換) → pending_chankan.is_some() なので is_chankan=true
         let ctx3 = g.game.build_scoring_context(0, false);
         assert!(ctx3.is_chankan, "後方互換: pending_chankan.is_some() なら is_chankan=true");
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn uso_riichi_disabled_by_default() {
+        // #89: デフォルトでは嘘リーチ無効
+        let g = make_game();
+        assert!(!g.is_uso_riichi_enabled());
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn uso_riichi_can_riichi_without_tenpai() {
+        // #89: uso_riichi_enabled=true のとき非テンパイでも can_riichi=true
+        // Game::can_riichi を直接呼び、uso_riichi_enabled の有無による差を検証する
+        use crate::tile::{Tile, Suit};
+        let mut g = make_game();
+        // 手牌を 0 枚にしてテンパイ不成立を確実にする（shanten 簡易実装の影響を避ける）
+        g.game.players[0].hand = crate::hand::Hand::new();
+        // uso_riichi_enabled=false のときは can_riichi=false（手牌なし=非テンパイ）
+        assert!(!g.game.can_riichi(0), "uso_riichi_disabled: 手牌なしは can_riichi=false");
+        // uso_riichi_enabled=true のときは門前+未リーチなら can_riichi=true
+        g.set_uso_riichi_enabled(true);
+        assert!(g.can_riichi(), "#89: uso_riichi_enabled=true なら空手牌でも可");
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn uso_riichi_sets_uso_flag_on_declare() {
+        // #89: テンパイ不成立で declare_riichi すると uso_riichi=true になる
+        let mut g = make_game();
+        g.set_uso_riichi_enabled(true);
+        // 手牌を空にして確実に非テンパイ（uso ルートを通る）
+        g.game.players[0].hand = crate::hand::Hand::new();
+        let ok = g.game.declare_riichi(0);
+        assert!(ok, "宣言成功前提");
+        assert!(g.game.players[0].is_riichi, "is_riichi=true");
+        assert!(g.game.players[0].uso_riichi, "#89: uso_riichi=true");
+        assert!(g.is_uso_riichi(0), "isUsoRiichi API");
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn uso_riichi_penalty_on_draw() {
+        // #89: 流局時に uso_riichi=true のプレイヤーから 1000 点罰符
+        let mut g = make_game();
+        g.set_uso_riichi_enabled(true);
+        // 手牌を空にして確実に uso ルートを通す
+        g.game.players[0].hand = crate::hand::Hand::new();
+        let before = g.game.players[0].score;
+        g.game.declare_riichi(0); // 1000 点供託（立直棒）→ before - 1000
+        // 流局: 全員ノーテン
+        g.game.resolve_draw(vec![]);
+        // 嘘リーチ罰符 1000 点が追加徴収されているはず
+        assert_eq!(
+            g.game.players[0].score,
+            before - 1000 - 1000, // 立直棒供託 + 罰符
+            "#89: 流局時に uso_riichi 者から追加 1000 点罰符"
+        );
     }
 }

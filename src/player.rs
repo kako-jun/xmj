@@ -35,6 +35,9 @@ pub struct Player {
     /// 立直後フリテン: 立直済みの状態でロンを見逃すと永続的にフリテン状態になる。
     /// 局が終わるまで解除されない (`reset_for_next_round` で false に戻る) (Issue #56)。
     pub permanent_furiten: bool,
+    /// 嘘リーチフラグ (#89): 宣言時点で非テンパイ（または形が不正）だったリーチ。
+    /// 流局時に手牌公開 + 罰符が発生する。和了者がいれば手牌は非公開のまま。
+    pub uso_riichi: bool,
 }
 
 impl Player {
@@ -52,6 +55,7 @@ impl Player {
             double_riichi: false,
             skipped_ron_this_turn: false,
             permanent_furiten: false,
+            uso_riichi: false,
         }
     }
 
@@ -184,6 +188,7 @@ impl Player {
         // フリテン関係のフラグも局スコープなので忘れず戻す (Issue #56)
         self.skipped_ron_this_turn = false;
         self.permanent_furiten = false;
+        self.uso_riichi = false;
     }
 
     /// リーチ可能かチェック
