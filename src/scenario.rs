@@ -29,7 +29,7 @@
 //! - 役の追加 (#49-#61) は本モジュールには触らない。シナリオ側は「シナリオを組み立てて
 //!   試行する」インフラだけを提供する。
 
-use crate::agari_extract::extract_agari_with_context;
+use crate::agari_extract::{extract_agari_with_context, extract_agari_with_full_context};
 use crate::game::{Game, GameMode, Length, WinKind};
 use crate::scoring::{ScoringEngine, ScoringResult};
 use crate::tile::Tile;
@@ -203,6 +203,10 @@ impl ScenarioRunner {
 
         let can_tsumo = {
             let hand = &self.game.players[cur].hand;
+            // is_dealer は点数計算にのみ影響し winning_tile 候補集合は変わらないため、
+            // ここでは安価な `extract_agari_with_context` (ScoringContext::default) で
+            // 「和了形が存在するか」だけを確認する。実際の点数算出は try_tsumo 内で
+            // extract_agari_with_full_context + build_scoring_context が行う。
             hand.tile_count() == 14
                 && extract_agari_with_context(hand, true, cur == self.game.dealer).is_some()
         };
@@ -271,18 +275,19 @@ impl ScenarioRunner {
 
     /// `current_player` のツモ和了を試みる。
     ///
-    /// `extract_agari_with_context` で和了形を抽出し、`ScoringEngine::calculate_score`
+    /// `extract_agari_with_full_context` で ScoringContext（ドラ・立直・状況役含む）を
+    /// 反映した最適 winning_tile を選択し、`ScoringEngine::calculate_score_with_context`
     /// を回した結果を返す。和了形でなければ `None`。
     ///
     /// 成功時は `Game::resolve_win(winner, WinKind::Tsumo, ...)` を呼んで点数移動・
     /// `last_outcome` 設定まで一気に進める。
     pub fn try_tsumo(&mut self) -> Option<ScoringResult> {
         let winner = self.game.current_player;
-        let is_dealer = winner == self.game.dealer;
         let hand_clone = self.game.players[winner].hand.clone();
-        let (sub_hand, winning_tile) =
-            extract_agari_with_context(&hand_clone, true, is_dealer)?;
+        // #74: ctx を先に構築し、ドラ/立直/状況役を考慮した full context で最適 winning_tile を選ぶ
         let ctx = self.game.build_scoring_context(winner, true);
+        let (sub_hand, winning_tile) =
+            extract_agari_with_full_context(&hand_clone, &ctx)?;
         let result =
             ScoringEngine::calculate_score_with_context(&sub_hand, &winning_tile, &ctx)?;
         self.push_log(format!(
