@@ -152,6 +152,11 @@ export class App {
     this.cpuTurnDelayMs = options.cpuTurnDelayMs ?? 0
     this.createBridge = options.createBridge ?? null
     this.rollDice = options.rollDice ?? defaultRollDice
+    // #79: ?reveal=1 クエリでデバッグモード有効化
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('reveal') === '1') this.debugReveal = true
+    }
     this.htmlUiRoot =
       options.htmlUiRoot ??
       (typeof document !== 'undefined' ? document.getElementById('ui-side') : null)
@@ -166,6 +171,7 @@ export class App {
         onConfirm: () => this.handleHotkeyConfirm(),
         onBackTile: () => this.handleHotkeyShift(-1),
         onNextTile: () => this.handleHotkeyShift(1),
+        onSortHand: () => this.handleHotkeySortHand(),
       })
     }
   }
@@ -235,6 +241,8 @@ export class App {
         selectedMode: this.selectedGameMode,
         modes: this.buildGameModes(),
         usoRiichiEnabled: this.usoRiichiEnabled,
+        autoDrawEnabled: this.autoDraw,
+        autoSortEnabled: this.autoSort,
         // タップ即確定: 選択 + 場決めシーン遷移を 1 タップで行う
         onSelectMode: mode => {
           this.selectedGameMode = mode
@@ -245,6 +253,14 @@ export class App {
         },
         onToggleUsoRiichi: enabled => {
           this.usoRiichiEnabled = enabled
+          this.showModeSelectScene()
+        },
+        onToggleAutoDraw: enabled => {
+          this.autoDraw = enabled
+          this.showModeSelectScene()
+        },
+        onToggleAutoSort: enabled => {
+          this.autoSort = enabled
           this.showModeSelectScene()
         },
       })
@@ -297,6 +313,14 @@ export class App {
       // #89: 嘘リーチ設定をブリッジに反映
       if (this.usoRiichiEnabled && typeof bridge.setUsoRiichiEnabled === 'function') {
         bridge.setUsoRiichiEnabled(true)
+      }
+      // #80: 理牌設定をブリッジに反映
+      if (typeof bridge.setAutoSort === 'function') {
+        bridge.setAutoSort(this.autoSort)
+      }
+      // #81: 自動ツモ設定をブリッジに反映
+      if (typeof bridge.setAutoDraw === 'function') {
+        bridge.setAutoDraw(this.autoDraw)
       }
       this.startGame(bridge, humanSeat)
       return true
@@ -354,9 +378,17 @@ export class App {
     this.renderTable()
   }
 
+  /** #81: 自動ツモ設定。false のとき shouldDrawHumanTile が false を返す。 */
+  autoDraw = true
+  /** #80: 自動理牌設定。false のときツモ後に sort しない。 */
+  autoSort = true
+  /** #79: デバッグモード。true のとき CPU 手牌を表向き表示する。 */
+  debugReveal = false
+
   private shouldDrawHumanTile(): boolean {
     if (!this.bridge || !this.gameState) return false
     if (!this.bridge.isCurrentPlayerHuman() || this.bridge.isGameOver()) return false
+    if (!this.autoDraw) return false  // #81: 手動ツモ設定
     return this.gameState.players[this.humanPlayerIndex].hand.length % 3 === 1
   }
 
@@ -414,6 +446,15 @@ export class App {
 
   private isCpuTurnGenerationCurrent(generation: number): boolean {
     return generation === this.cpuTurnGeneration
+  }
+
+  /** #81: 手動ツモ。autoDraw=false のときボタン/T キーから呼ばれる。 */
+  private doManualDraw(): void {
+    if (!this.bridge || !this.gameState) return
+    const hand = this.gameState.players[this.humanPlayerIndex].hand
+    if (hand.length % 3 !== 1) return  // ツモ前でないなら何もしない
+    this.drawHumanTileAndRefresh()
+    this.renderHtmlOverlay()
   }
 
   private drawHumanTileAndRefresh(): boolean {
@@ -791,7 +832,25 @@ export class App {
     if (!isHumanTurn) return []
 
     const canTsumo = this.bridge.canTsumo(this.humanPlayerIndex)
+    const hand = this.gameState.players[this.humanPlayerIndex].hand
+    // 手牌が 13 枚（打牌待ち枚数でなく、ツモ前の枚数）かつ autoDraw=false のとき手動ツモ
+    const needsManualDraw = !this.autoDraw && hand.length % 3 === 1
     const buttons: HtmlUiActionButton[] = []
+
+    // #81: 手動ツモボタン（autoDraw=false のとき && 手牌がツモ前の状態）
+    if (needsManualDraw) {
+      buttons.push({
+        key: 'manual-draw',
+        label: 'ツモる',
+        enabled: true,
+        hotkey: 'T',
+        onActivate: () => {
+          this.doManualDraw()
+        },
+      })
+      // 手動ツモ待ち中は他のボタン不要
+      return buttons
+    }
 
     if (canTsumo) {
       buttons.push({
@@ -828,6 +887,18 @@ export class App {
         },
       })
     }
+
+    // #80: 理牌ボタン（常に表示）
+    buttons.push({
+      key: 'sort-hand',
+      label: '理牌',
+      enabled: true,
+      hotkey: 'S',
+      onActivate: () => {
+        this.bridge?.sortCurrentHand()
+        this.refreshFromBridge()
+      },
+    })
 
     return buttons
   }
@@ -1311,6 +1382,14 @@ export class App {
   private handleHotkeyTsumo(): void {
     if (this.activeScene !== 'table') return
     if (!this.bridge?.isCurrentPlayerHuman()) return
+    // #81: 手動ツモ待ち状態（autoDraw=false かつ手牌がツモ前）
+    if (!this.autoDraw && this.gameState) {
+      const hand = this.gameState.players[this.humanPlayerIndex].hand
+      if (hand.length % 3 === 1) {
+        this.doManualDraw()
+        return
+      }
+    }
     if (!this.bridge.canTsumo(this.humanPlayerIndex)) return
     this.confirmTsumo()
   }
@@ -1364,6 +1443,14 @@ export class App {
     }
   }
 
+  /** #80: S キーで手牌を即時ソートする。 */
+  private handleHotkeySortHand(): void {
+    if (this.activeScene !== 'table') return
+    if (!this.bridge?.isCurrentPlayerHuman()) return
+    this.bridge.sortCurrentHand()
+    this.refreshFromBridge()
+  }
+
   // ============================================================================
   // 描画
   // ============================================================================
@@ -1401,12 +1488,23 @@ export class App {
     const actions = this.activeScene === 'table' ? this.buildActionButtons() : []
     const hint = this.computeHint()
     const visibleLog = this.eventLog.slice(-EVENT_LOG_VISIBLE_COUNT)
+    // #79: デバッグモードのとき CPU 手牌文字列を収集
+    const cpuHandStrings: Record<number, string> | undefined =
+      this.debugReveal && this.bridge && this.gameState
+        ? Object.fromEntries(
+            this.gameState.players
+              .map((_, i) => [i, this.bridge!.getPlayerHandString(i as PlayerIndex)])
+              .filter(([i]) => i !== this.humanPlayerIndex)
+          )
+        : undefined
     const state: HtmlUiState = {
       game: this.activeScene === 'table' ? this.gameState : null,
       humanPlayerIndex: this.humanPlayerIndex,
       eventLog: visibleLog,
       actions,
       hint,
+      debugReveal: this.debugReveal,
+      cpuHandStrings,
     }
     renderHtmlUi(this.htmlUiRoot, state)
   }

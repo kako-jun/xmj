@@ -342,6 +342,56 @@ export class WasmGameBridge {
     return false
   }
 
+  // ---- 理牌 / 自動ツモ (Issue #80 / #81) ----
+
+  /** #80: 手牌自動ソート（理牌）ON/OFF を設定する。 */
+  setAutoSort(enabled: boolean): void {
+    if (typeof this.game.setAutoSort === 'function') {
+      this.game.setAutoSort(enabled)
+    }
+  }
+
+  isAutoSortEnabled(): boolean {
+    if (typeof this.game.isAutoSortEnabled === 'function') {
+      return this.game.isAutoSortEnabled() as boolean
+    }
+    return true
+  }
+
+  /** #80: 現在の手番プレイヤーの手牌を即時ソートする。 */
+  sortCurrentHand(): void {
+    if (typeof this.game.sortCurrentHand === 'function') {
+      this.game.sortCurrentHand()
+    }
+  }
+
+  /** #81: 人間プレイヤーターン開始時の自動ツモ ON/OFF を設定する。 */
+  setAutoDraw(enabled: boolean): void {
+    if (typeof this.game.setAutoDraw === 'function') {
+      this.game.setAutoDraw(enabled)
+    }
+  }
+
+  isAutoDrawEnabled(): boolean {
+    if (typeof this.game.isAutoDrawEnabled === 'function') {
+      return this.game.isAutoDrawEnabled() as boolean
+    }
+    return true
+  }
+
+  // ---- デバッグ (Issue #79) ----
+
+  /**
+   * #79: 指定プレイヤーの手牌を文字列で返す（デバッグ用）。
+   * CPU 手牌を表向き表示するために使用する。
+   */
+  getPlayerHandString(playerIdx: PlayerIndex): string {
+    if (typeof this.game.getPlayerHandString === 'function') {
+      return this.game.getPlayerHandString(playerIdx) as string
+    }
+    return ''
+  }
+
   // ---- 局結着 / 次局 (Issue #27) ----
 
   /**

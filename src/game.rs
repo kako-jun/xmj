@@ -245,6 +245,14 @@ pub struct Game {
     /// true のとき `can_riichi` のテンパイ・点数要件を外し、門前 + 未リーチのみで
     /// リーチ宣言可能にする。流局時に非テンパイのリーチ者へ罰符を課す。
     pub uso_riichi_enabled: bool,
+    /// #80: ツモ後に手牌を自動ソート（理牌）するかどうか。
+    /// true（デフォルト）のとき draw_tile 後に自動で sort_hand() を呼ぶ。
+    /// false のとき手牌はツモ順のまま保持される。
+    pub auto_sort: bool,
+    /// #81: 人間プレイヤーのターン開始時に自動でツモを行うかどうか。
+    /// true（デフォルト）のとき TS 側 shouldDrawHumanTile で自動ツモが走る。
+    /// false のとき手動ツモが必要（T キーまたは山牌タップ）。
+    pub auto_draw: bool,
 }
 
 impl Game {
@@ -312,6 +320,8 @@ impl Game {
             any_call_made_this_round: false,
             draws_this_round: 0,
             uso_riichi_enabled: false,
+            auto_sort: true,
+            auto_draw: true,
         };
 
         game.initialize_wall();
@@ -379,8 +389,8 @@ impl Game {
         }
         let first = self.wall.pop()?;
         let second = self.wall.pop()?;
-        self.players[self.current_player].draw_tile(first);
-        self.players[self.current_player].draw_tile(second);
+        self.draw_tile_to(self.current_player, first);
+        self.draw_tile_to(self.current_player, second);
         Some((first, second))
     }
 
@@ -466,13 +476,13 @@ impl Game {
             for player_idx in 0..4 {
                 for _ in 0..5 {
                     if let Some(tile) = self.wall.pop() {
-                        self.players[player_idx].draw_tile(tile);
+                        self.draw_tile_to(player_idx, tile);
                     }
                 }
             }
             // 親に追加の 1 枚
             if let Some(tile) = self.wall.pop() {
-                self.players[self.dealer].draw_tile(tile);
+                self.draw_tile_to(self.dealer, tile);
             }
             return;
         }
@@ -482,7 +492,7 @@ impl Game {
             for player_idx in 0..4 {
                 for _ in 0..4 {
                     if let Some(tile) = self.wall.pop() {
-                        self.players[player_idx].draw_tile(tile);
+                        self.draw_tile_to(player_idx, tile);
                     }
                 }
             }
@@ -491,13 +501,22 @@ impl Game {
         // 最後の1枚ずつ
         for player_idx in 0..4 {
             if let Some(tile) = self.wall.pop() {
-                self.players[player_idx].draw_tile(tile);
+                self.draw_tile_to(player_idx, tile);
             }
         }
 
         // 親に追加の1枚
         if let Some(tile) = self.wall.pop() {
-            self.players[self.dealer].draw_tile(tile);
+            self.draw_tile_to(self.dealer, tile);
+        }
+    }
+
+    /// #80: プレイヤーに牌をツモらせる。auto_sort=true なら直後に sort_hand() を呼ぶ。
+    /// game.rs 内で `player.draw_tile(tile)` を呼ぶ代わりにこれを使う。
+    fn draw_tile_to(&mut self, player_idx: usize, tile: Tile) {
+        self.players[player_idx].draw_tile(tile);
+        if self.auto_sort {
+            self.players[player_idx].hand.sort_hand();
         }
     }
 
@@ -517,7 +536,7 @@ impl Game {
 
     pub fn current_player_draw(&mut self) -> bool {
         if let Some(tile) = self.draw_tile() {
-            self.players[self.current_player].draw_tile(tile);
+            self.draw_tile_to(self.current_player, tile);
             true
         } else {
             false
@@ -914,7 +933,7 @@ impl Game {
 
         // 嶺上牌をツモ
         if let Some(rinshan_tile) = self.wall.pop() {
-            self.players[player_idx].draw_tile(rinshan_tile);
+            self.draw_tile_to(player_idx, rinshan_tile);
         }
 
         // #50 嶺上開花候補
@@ -958,7 +977,7 @@ impl Game {
 
         // 嶺上牌をツモ
         if let Some(rinshan_tile) = self.wall.pop() {
-            self.players[player_idx].draw_tile(rinshan_tile);
+            self.draw_tile_to(player_idx, rinshan_tile);
         }
 
         // #50 嶺上開花候補 (暗槓も対象)
@@ -1087,7 +1106,7 @@ impl Game {
         }
         // 嶺上ツモ
         if let Some(rinshan_tile) = self.wall.pop() {
-            self.players[player_idx].draw_tile(rinshan_tile);
+            self.draw_tile_to(player_idx, rinshan_tile);
         }
         self.last_was_rinshan = true;
         // 他家の一発を消す

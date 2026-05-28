@@ -59,6 +59,11 @@ impl Hand {
 
     pub fn add_tile(&mut self, tile: Tile) {
         self.tiles.push(tile);
+        // #80: 自動ソートは行わない。sort_hand() を明示的に呼ぶこと。
+    }
+
+    /// #80: 手牌を理牌（ソート）する。
+    pub fn sort_hand(&mut self) {
         self.sort();
     }
 
@@ -724,6 +729,7 @@ mod tests {
         hand.add_tile(Tile::new_number(Suit::Man, 9, false));
         hand.add_tile(Tile::new_number(Suit::Man, 1, false));
         hand.add_tile(Tile::new_number(Suit::Pin, 5, false));
+        hand.sort_hand(); // #80: 明示的ソート
 
         let tiles = hand.get_tiles();
         assert_eq!(tiles[0].to_string(), "1m");
