@@ -264,6 +264,7 @@ export type HotkeyIntent =
   | { kind: 'confirm' }
   | { kind: 'back-tile' }
   | { kind: 'next-tile' }
+  | { kind: 'sort-hand' }  // #80: 理牌
 
 /**
  * KeyboardEvent を HotkeyIntent に変換する。
@@ -301,6 +302,8 @@ export const keyEventToIntent = (event: KeyboardEvent): HotkeyIntent | null => {
     case 'arrowright':
     case 'n':
       return { kind: 'next-tile' }
+    case 's':
+      return { kind: 'sort-hand' }  // #80: 理牌
     default:
       return null
   }
@@ -321,6 +324,8 @@ export interface KeyboardBindingOptions {
   onConfirm?: () => void
   onBackTile?: () => void
   onNextTile?: () => void
+  /** #80: 理牌 (S キー) */
+  onSortHand?: () => void
 }
 
 /**
@@ -376,6 +381,10 @@ export const installKeyboardShortcuts = (options: KeyboardBindingOptions): (() =
         break
       case 'next-tile':
         options.onNextTile?.()
+        event.preventDefault()
+        break
+      case 'sort-hand':
+        options.onSortHand?.()
         event.preventDefault()
         break
     }

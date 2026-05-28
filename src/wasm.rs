@@ -632,6 +632,51 @@ impl WasmGame {
         self.game.players[player_idx].uso_riichi
     }
 
+    /// #80: 手牌自動ソート（理牌）の ON/OFF を設定する。
+    /// true（デフォルト）のとき ツモ後に自動で手牌を整列する。
+    #[wasm_bindgen(js_name = setAutoSort)]
+    pub fn set_auto_sort(&mut self, enabled: bool) {
+        self.game.auto_sort = enabled;
+    }
+
+    /// #80: 手牌自動ソート設定の現在値。
+    #[wasm_bindgen(js_name = isAutoSortEnabled)]
+    pub fn is_auto_sort_enabled(&self) -> bool {
+        self.game.auto_sort
+    }
+
+    /// #80: 現在の手番プレイヤーの手牌を即時ソートする。
+    #[wasm_bindgen(js_name = sortCurrentHand)]
+    pub fn sort_current_hand(&mut self) {
+        let idx = self.game.current_player;
+        if idx < self.game.players.len() {
+            self.game.players[idx].hand.sort_hand();
+        }
+    }
+
+    /// #81: 人間プレイヤーのターン開始時に自動ツモを行うかどうかを設定する。
+    /// true（デフォルト）= 現状動作。false = 手動ツモが必要。
+    #[wasm_bindgen(js_name = setAutoDraw)]
+    pub fn set_auto_draw(&mut self, enabled: bool) {
+        self.game.auto_draw = enabled;
+    }
+
+    /// #81: 自動ツモ設定の現在値。
+    #[wasm_bindgen(js_name = isAutoDrawEnabled)]
+    pub fn is_auto_draw_enabled(&self) -> bool {
+        self.game.auto_draw
+    }
+
+    /// #79: 指定プレイヤーの手牌を文字列（CUI コード）で返す。
+    /// デバッグモードで CPU 手牌を表向き表示するために使用する。
+    #[wasm_bindgen(js_name = getPlayerHandString)]
+    pub fn get_player_hand_string(&self, player_idx: usize) -> String {
+        if player_idx >= self.game.players.len() {
+            return String::new();
+        }
+        self.game.players[player_idx].hand.to_string()
+    }
+
     #[wasm_bindgen(js_name = getRound)]
     pub fn get_round(&self) -> u32 {
         self.game.round

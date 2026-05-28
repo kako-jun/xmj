@@ -35,11 +35,19 @@ interface ModeSelectSceneOptions {
   modes: GameModeOption[]
   /** #89: 嘘リーチ設定の現在値 */
   usoRiichiEnabled?: boolean
+  /** #81: 自動ツモ設定の現在値 */
+  autoDrawEnabled?: boolean
+  /** #80: 自動理牌設定の現在値 */
+  autoSortEnabled?: boolean
   /** カードタップで「選択 + 確定」を一括で行うコールバック。 */
   onSelectMode: (mode: GameMode) => void
   onBack: () => void
   /** #89: 嘘リーチトグルのコールバック */
   onToggleUsoRiichi?: (enabled: boolean) => void
+  /** #81: 自動ツモトグルのコールバック */
+  onToggleAutoDraw?: (enabled: boolean) => void
+  /** #80: 自動理牌トグルのコールバック */
+  onToggleAutoSort?: (enabled: boolean) => void
 }
 
 const CARD_WIDTH = 260
@@ -211,6 +219,70 @@ export const createModeSelectScene = (options: ModeSelectSceneOptions): Containe
     toggleContainer.cursor = 'pointer'
     toggleContainer.on('pointertap', () => {
       options.onToggleUsoRiichi!(!enabled)
+    })
+    root.addChild(toggleContainer)
+  }
+
+  // #81: 自動ツモトグル
+  if (options.onToggleAutoDraw !== undefined) {
+    const toggleY = 160 + totalHeight + 115
+    const toggleContainer = new Container()
+    toggleContainer.label = 'auto-draw-toggle'
+    toggleContainer.x = cx - 100
+    toggleContainer.y = toggleY
+
+    const enabled = options.autoDrawEnabled ?? true
+    const toggleBg = new Graphics()
+    toggleBg.roundRect(0, 0, 200, 36, 8).fill({ color: enabled ? 0x4caf50 : 0x444444, alpha: 0.85 })
+    toggleContainer.addChild(toggleBg)
+
+    const toggleLabel = makeText(
+      `自動ツモ: ${enabled ? 'ON' : 'OFF'}`,
+      15,
+      0xffffff,
+      'center'
+    )
+    toggleLabel.anchor.set(0.5)
+    toggleLabel.x = 100
+    toggleLabel.y = 18
+    toggleContainer.addChild(toggleLabel)
+
+    toggleContainer.eventMode = 'static'
+    toggleContainer.cursor = 'pointer'
+    toggleContainer.on('pointertap', () => {
+      options.onToggleAutoDraw!(!enabled)
+    })
+    root.addChild(toggleContainer)
+  }
+
+  // #80: 自動理牌トグル
+  if (options.onToggleAutoSort !== undefined) {
+    const toggleY = 160 + totalHeight + 160
+    const toggleContainer = new Container()
+    toggleContainer.label = 'auto-sort-toggle'
+    toggleContainer.x = cx - 100
+    toggleContainer.y = toggleY
+
+    const enabled = options.autoSortEnabled ?? true
+    const toggleBg = new Graphics()
+    toggleBg.roundRect(0, 0, 200, 36, 8).fill({ color: enabled ? 0x4caf50 : 0x444444, alpha: 0.85 })
+    toggleContainer.addChild(toggleBg)
+
+    const toggleLabel = makeText(
+      `自動理牌: ${enabled ? 'ON' : 'OFF'}`,
+      15,
+      0xffffff,
+      'center'
+    )
+    toggleLabel.anchor.set(0.5)
+    toggleLabel.x = 100
+    toggleLabel.y = 18
+    toggleContainer.addChild(toggleLabel)
+
+    toggleContainer.eventMode = 'static'
+    toggleContainer.cursor = 'pointer'
+    toggleContainer.on('pointertap', () => {
+      options.onToggleAutoSort!(!enabled)
     })
     root.addChild(toggleContainer)
   }
