@@ -1032,55 +1032,114 @@ impl ScoringEngine {
     /// 副露 (Pon/Kan) と手牌中の暗刻 (winning_tile を含めて 3 枚以上) の合計で
     /// 4 種すべてを抑えていれば成立。雀頭が風牌になっている場合は小四喜になり、
     /// 大四喜は不成立。
+    ///
+    /// #73: `wind_count_raw` + winning_tile の組み合わせで刻子判定を行う。
+    /// タンキ待ち (手牌 1 枚 + winning_tile) は count_raw=1 のため刻子に算入されない。
     fn check_daisuushii(hand: &Hand, winning_tile: &Tile) -> bool {
         let winds = [Honor::Ton, Honor::Nan, Honor::Shaa, Honor::Pei];
         winds
             .iter()
-            .all(|h| Self::wind_triplet_count(hand, winning_tile, *h) >= 3)
+            .all(|h| Self::wind_is_triplet(hand, winning_tile, *h))
     }
 
     /// #52: 小四喜。4 種の風牌のうち 3 種が刻子 / 槓子、残り 1 種が雀頭 (役満)。
+    ///
+    /// #73: 雀頭判定は「count_raw == 2 かつ winning_tile がその風でない」または
+    /// 「count_raw == 1 かつ winning_tile がその風 (タンキ)」とする。
     fn check_shousuushii(hand: &Hand, winning_tile: &Tile) -> bool {
         let winds = [Honor::Ton, Honor::Nan, Honor::Shaa, Honor::Pei];
         let mut triplet = 0;
         let mut pair = 0;
         for h in &winds {
-            let count = Self::wind_triplet_count(hand, winning_tile, *h);
-            if count >= 3 {
+            if Self::wind_is_triplet(hand, winning_tile, *h) {
                 triplet += 1;
-            } else if count == 2 {
+            } else if Self::wind_is_pair(hand, winning_tile, *h) {
                 pair += 1;
             }
         }
         triplet == 3 && pair == 1
     }
 
-    /// 風牌の刻子相当の枚数 (副露 Pon/Kan は 3 として、手牌中は実枚数を返す)。
+    /// 指定風牌が刻子 / 槓子として成立するか判定する。
     ///
-    /// `winning_tile` が当該風牌なら +1 する (シャンポン / 単騎で組み込まれる前提)。
-    fn wind_triplet_count(hand: &Hand, winning_tile: &Tile, honor: Honor) -> u32 {
-        let mut count: u32 = 0;
+    /// 以下のいずれかを満たせば刻子とみなす:
+    /// - 副露 Pon/Kan がある (= それだけで刻子/槓子確定)
+    /// - 手牌内に 3 枚以上ある (暗刻)
+    /// - 手牌内に 2 枚あり、かつ winning_tile が同じ風 (シャンポン和了で刻子完成)
+    ///
+    /// #73: タンキ待ち (手牌 1 枚 + winning_tile) は count_raw=1 のため刻子不成立。
+    fn wind_is_triplet(hand: &Hand, winning_tile: &Tile, honor: Honor) -> bool {
+        // 副露 Pon/Kan があれば刻子/槓子確定
         for meld in hand.get_melds() {
             if matches!(meld.meld_type, MeldType::Pon | MeldType::Kan) {
                 if let Some(t) = meld.tiles.first() {
                     if let TileType::Honor(h) = t.tile_type {
                         if h == honor {
-                            count += 3;
+                            return true;
                         }
                     }
                 }
             }
         }
+        let raw = Self::wind_count_raw(hand, honor);
+        // 手牌 3 枚以上 → 暗刻
+        if raw >= 3 {
+            return true;
+        }
+        // 手牌 2 枚 + winning_tile が同じ風 → シャンポン和了で刻子完成
+        if raw >= 2 {
+            if let TileType::Honor(h) = winning_tile.tile_type {
+                if h == honor {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// 指定風牌が雀頭として成立するか判定する。
+    ///
+    /// 以下のいずれかを満たせば雀頭とみなす:
+    /// - 手牌内に 2 枚あり、winning_tile がこの風でない (手牌 2 枚で雀頭完成)
+    /// - 手牌内に 1 枚あり、winning_tile が同じ風 (タンキ和了で雀頭完成)
+    fn wind_is_pair(hand: &Hand, winning_tile: &Tile, honor: Honor) -> bool {
+        // 副露 Pon/Kan があれば雀頭ではなく刻子/槓子
+        for meld in hand.get_melds() {
+            if matches!(meld.meld_type, MeldType::Pon | MeldType::Kan) {
+                if let Some(t) = meld.tiles.first() {
+                    if let TileType::Honor(h) = t.tile_type {
+                        if h == honor {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        let raw = Self::wind_count_raw(hand, honor);
+        let is_winning = matches!(winning_tile.tile_type, TileType::Honor(h) if h == honor);
+        // 手牌 2 枚で winning_tile がこの風でない → 手牌のみで雀頭完成
+        if raw == 2 && !is_winning {
+            return true;
+        }
+        // 手牌 1 枚 + winning_tile がこの風 → タンキ和了で雀頭完成
+        if raw == 1 && is_winning {
+            return true;
+        }
+        false
+    }
+
+    /// 手牌 (add_meld 時に tiles から除去済みのため副露牌は含まない) における
+    /// 指定風牌の枚数を返す。winning_tile は含めない。
+    ///
+    /// #73: winning_tile を含めない生カウントを返す。刻子/雀頭の判定は
+    /// `wind_is_triplet` / `wind_is_pair` が winning_tile を考慮して行う。
+    fn wind_count_raw(hand: &Hand, honor: Honor) -> u32 {
+        let mut count: u32 = 0;
         for t in hand.get_tiles() {
             if let TileType::Honor(h) = t.tile_type {
                 if h == honor {
                     count += 1;
                 }
-            }
-        }
-        if let TileType::Honor(h) = winning_tile.tile_type {
-            if h == honor {
-                count += 1;
             }
         }
         count

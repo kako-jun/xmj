@@ -428,3 +428,73 @@ fn test_honroutou() {
         result.yakuman_count
     );
 }
+
+// =============================================================================
+// #73 大四喜タンキ偽陽性 リグレッションテスト
+// =============================================================================
+
+/// #73 小四喜タンキ和了で大四喜に誤判定されないことを確認。
+///
+/// 副露: 東ポン + 南ポン + 西ポン (副露3個)
+/// 手牌4枚: 北×1 (タンキ待ち) + 2m×3 (暗刻)
+/// winning_tile = 北 (タンキ和了: wind_is_pair → count_raw=1 + is_winning → pair)
+/// → 大四喜不成立、小四喜成立が正しい。
+#[test]
+fn test_shousuushii_tanki_not_daisuushii() {
+    // 手牌4枚: 北タンキ + 2m暗刻
+    let result = score_with_melds(
+        vec![tile!(pei), tile!(2m), tile!(2m), tile!(2m)],
+        vec![
+            pon_meld(tile!(ton)),
+            pon_meld(tile!(nan)),
+            pon_meld(tile!(shaa)),
+        ],
+        tile!(pei), // winning = 北 (タンキ)
+    );
+    // count_raw(北)=1, is_winning=true → wind_is_triplet: raw<2 → false
+    // wind_is_pair: raw=1 && is_winning → true → pair=1
+    let r = result.expect("#73 小四喜タンキで和了成立");
+    assert!(
+        !r.yaku.contains(&Yaku::Daisuushii),
+        "#73 北タンキ和了で大四喜は不成立のはず: {:?}", r.yaku
+    );
+    assert!(
+        r.yaku.contains(&Yaku::Shousuushii),
+        "#73 北タンキ和了で小四喜成立のはず: {:?}", r.yaku
+    );
+}
+
+/// #73 シャンポン和了で大四喜/小四喜が正しく判定されることを確認。
+///
+/// 手牌13枚 (副露なし): 東×3 + 南×3 + 西×3 + 北×2 + 1m×2
+/// - winning=北 → 北刻子+1m雀頭 → 大四喜成立
+/// - winning=1m → 1m刻子+北雀頭 → 小四喜成立 (大四喜不成立)
+#[test]
+fn test_issue73_regression() {
+    let base_tiles = vec![
+        tile!(ton), tile!(ton), tile!(ton),
+        tile!(nan), tile!(nan), tile!(nan),
+        tile!(shaa), tile!(shaa), tile!(shaa),
+        tile!(pei), tile!(pei),
+        tile!(1m), tile!(1m),
+    ];
+
+    // シナリオA: winning=北 → 北×3刻子+1m雀頭 → 大四喜成立 (正しい動作)
+    let result_a = score_default(base_tiles.clone(), tile!(pei));
+    assert!(
+        result_a.as_ref().map_or(false, |r| r.yaku.contains(&Yaku::Daisuushii)),
+        "#73 シナリオA: 北×3(手牌2+winning1)+東南西刻子 → 大四喜成立が正しい: {:?}",
+        result_a
+    );
+
+    // シナリオB: winning=1m → 1m刻子+北雀頭 → 小四喜成立(大四喜不成立) (正しい動作)
+    let r_b = score_default(base_tiles, tile!(1m)).expect("#73 シナリオB: 小四喜で和了成立");
+    assert!(
+        r_b.yaku.contains(&Yaku::Shousuushii),
+        "#73 シナリオB: 小四喜成立が正しい: {:?}", r_b.yaku
+    );
+    assert!(
+        !r_b.yaku.contains(&Yaku::Daisuushii),
+        "#73 シナリオB: 大四喜は不成立が正しい: {:?}", r_b.yaku
+    );
+}
