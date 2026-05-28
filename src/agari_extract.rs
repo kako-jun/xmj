@@ -112,7 +112,7 @@ pub fn extract_agari_with_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tile::{Suit, TileType, Honor};
+    use crate::tile::Suit;
 
     /// `extract_agari_with_full_context` がドラを反映した最適 winning_tile を選ぶことを確認。
     ///
