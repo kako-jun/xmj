@@ -539,16 +539,10 @@ impl WasmGame {
     /// `last_discard` が存在しない場合は `None`（JS 側は `undefined`）。
     #[wasm_bindgen(js_name = getLastDiscarder)]
     pub fn get_last_discarder(&self) -> Option<usize> {
-        // 打牌が成功すると `next_player()` が呼ばれて current_player が次の手番に移っている。
-        // よって直前打牌者は (current_player + 3) % 4。ただし `last_discard` が無いなら None。
-        //
-        // TODO(#33 副露): 鳴き対応後は last_discarder フィールドを Game に持たせて
-        // (current_player+3)%4 計算を廃止する。鳴きで current_player が任意席に飛ぶと
-        // 座席ずれが発生するため、現状の計算式は門前進行前提の暫定実装。
-        if self.game.last_discard.is_none() {
-            return None;
-        }
-        Some((self.game.current_player + 3) % 4)
+        // #77: last_discarder フィールドを直接返す。
+        // 旧実装の (current_player + 3) % 4 計算式は門前進行前提の暫定実装で、
+        // 鳴きで current_player が任意席に飛ぶと誤判定が発生していた。
+        self.game.last_discarder
     }
 
     /// ツモ和了を確定する。`ScoringResult` は本関数内で `ScoringEngine` に計算させる。
@@ -593,7 +587,9 @@ impl WasmGame {
         let Some(winning_tile) = self.game.last_discard else {
             return String::new();
         };
-        let ctx = self.game.build_scoring_context(winner_idx, false);
+        // #75: pending_chankan と winning_tile が一致するときだけ is_chankan=true になるよう
+        // winning_tile を渡す版で ScoringContext を構築する。
+        let ctx = self.game.build_scoring_context_with_tile(winner_idx, false, Some(&winning_tile));
         let hand = &self.game.players[winner_idx].hand;
         if !hand.can_win(&winning_tile) {
             return String::new();
@@ -1554,5 +1550,56 @@ mod tests {
         assert!(cont);
         assert_eq!(g.get_round(), 2);
         assert_eq!(g.get_dealer(), 1);
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn get_last_discarder_uses_last_discarder_field() {
+        // #77 regression: last_discarder フィールドを使うこと（計算式ではなく）
+        let mut g = make_game();
+        use crate::tile::{Tile, Suit};
+        let tiles = vec![
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 2, false),
+            Tile::new_number(Suit::Man, 3, false),
+            Tile::new_number(Suit::Man, 4, false),
+            Tile::new_number(Suit::Man, 5, false),
+            Tile::new_number(Suit::Man, 6, false),
+            Tile::new_number(Suit::Man, 7, false),
+            Tile::new_number(Suit::Man, 8, false),
+            Tile::new_number(Suit::Man, 9, false),
+            Tile::new_number(Suit::Pin, 1, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Pin, 5, false),
+        ];
+        for t in tiles {
+            g.game.players[0].hand.add_tile(t);
+        }
+        g.game.current_player = 0;
+        let ok = g.discard_tile("1m");
+        assert!(ok, "打牌成功前提");
+        assert_eq!(g.get_last_discarder(), Some(0), "#77: last_discarder フィールドを返すこと");
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn build_scoring_context_chankan_requires_matching_tile() {
+        // #75 regression: pending_chankan != winning_tile のとき is_chankan=false
+        use crate::tile::{Tile, Suit};
+        let mut g = make_game();
+        let winning_tile = Tile::new_number(Suit::Pin, 1, false);
+        let different_tile = Tile::new_number(Suit::Pin, 5, false);
+        g.game.pending_chankan = Some(different_tile);
+        // winning_tile != pending_chankan → is_chankan=false
+        let ctx = g.game.build_scoring_context_with_tile(0, false, Some(&winning_tile));
+        assert!(!ctx.is_chankan, "#75: pending_chankan != winning_tile のとき is_chankan=false");
+        // winning_tile == pending_chankan → is_chankan=true
+        let ctx2 = g.game.build_scoring_context_with_tile(0, false, Some(&different_tile));
+        assert!(ctx2.is_chankan, "#75: pending_chankan == winning_tile のとき is_chankan=true");
+        // winning_tile 未指定 (後方互換) → pending_chankan.is_some() なので is_chankan=true
+        let ctx3 = g.game.build_scoring_context(0, false);
+        assert!(ctx3.is_chankan, "後方互換: pending_chankan.is_some() なら is_chankan=true");
     }
 }

@@ -316,7 +316,7 @@ impl ScenarioRunner {
             .game
             .last_discarder
             .unwrap_or((self.game.current_player + 3) % 4);
-        let ctx = self.game.build_scoring_context(player, false);
+        let ctx = self.game.build_scoring_context_with_tile(player, false, Some(&winning_tile));
         let hand = &self.game.players[player].hand;
         if !hand.can_win(&winning_tile) {
             return None;
