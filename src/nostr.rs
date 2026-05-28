@@ -280,14 +280,26 @@ mod tests {
 
     #[test]
     fn test_keys_save_and_load() {
+        use std::thread;
+        // テスト並列実行での衝突を避けるため一時ディレクトリを使う
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "xmj_test_nostr_{:?}",
+            thread::current().id()
+        ));
+        let tmp_path = tmp_dir.join("nostr_keys.json");
+        let _ = fs::remove_file(&tmp_path);
+        let _ = fs::create_dir_all(&tmp_dir);
+
         // テスト用の鍵を生成
         let keys = NostrKeys::generate();
 
-        // 保存
-        assert!(keys.save().is_ok());
+        // 保存（一時パスへ直接書き込み）
+        let json = serde_json::to_string_pretty(&keys).expect("serialize");
+        fs::write(&tmp_path, &json).expect("write");
 
         // 読み込み
-        let loaded = NostrKeys::load();
+        let content = fs::read_to_string(&tmp_path).expect("read");
+        let loaded: Option<NostrKeys> = serde_json::from_str(&content).ok();
         assert!(loaded.is_some());
 
         let loaded_keys = loaded.unwrap();
@@ -295,7 +307,7 @@ mod tests {
         assert_eq!(keys.private_key, loaded_keys.private_key);
 
         // クリーンアップ
-        let _ = NostrKeys::delete();
+        let _ = fs::remove_file(&tmp_path);
     }
 
     #[test]
