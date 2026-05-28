@@ -567,7 +567,6 @@ impl WasmGame {
         if winner_idx >= self.game.players.len() {
             return String::new();
         }
-        let _is_dealer = winner_idx == self.game.dealer;
         let hand_clone = self.game.players[winner_idx].hand.clone();
         // #74: ctx を先に構築し、ドラ/立直/状況役を考慮した full context で最適 winning_tile を選ぶ
         let ctx = self.game.build_scoring_context(winner_idx, true);
@@ -594,7 +593,6 @@ impl WasmGame {
         let Some(winning_tile) = self.game.last_discard else {
             return String::new();
         };
-        let _is_dealer = winner_idx == self.game.dealer;
         let ctx = self.game.build_scoring_context(winner_idx, false);
         let hand = &self.game.players[winner_idx].hand;
         if !hand.can_win(&winning_tile) {
