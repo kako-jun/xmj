@@ -1208,7 +1208,21 @@ impl Game {
     /// `is_tsumo` フラグの解釈:
     /// - true: ツモ和了経路 → 海底 (`is_last_draw`) / 嶺上 (`last_was_rinshan`) を有効化
     /// - false: ロン和了経路 → 河底 (`is_last_discard`) / 槍槓 (`pending_chankan`) を有効化
+    ///
+    /// `winning_tile`: ロン経路では `is_chankan` の判定に使用。
+    ///   `pending_chankan == Some(winning_tile)` のときだけ `is_chankan=true` を立てる (#75)。
+    ///   `None` を渡した場合は従来互換で `pending_chankan.is_some()` で判定する。
     pub fn build_scoring_context(&self, player_idx: usize, is_tsumo: bool) -> crate::scoring::ScoringContext {
+        self.build_scoring_context_with_tile(player_idx, is_tsumo, None)
+    }
+
+    /// `winning_tile` を指定する版。`build_scoring_context` の内部実装。
+    pub fn build_scoring_context_with_tile(
+        &self,
+        player_idx: usize,
+        is_tsumo: bool,
+        winning_tile: Option<&crate::tile::Tile>,
+    ) -> crate::scoring::ScoringContext {
         use crate::scoring::ScoringContext;
         if player_idx >= self.players.len() {
             return ScoringContext::default();
@@ -1249,7 +1263,12 @@ impl Game {
             is_haitei: is_tsumo && self.is_last_draw,
             is_houtei: !is_tsumo && self.is_last_discard,
             is_rinshan: is_tsumo && self.last_was_rinshan,
-            is_chankan: !is_tsumo && self.pending_chankan.is_some(),
+            is_chankan: !is_tsumo && match winning_tile {
+                // #75: winning_tile 指定あり → pending_chankan と一致するときだけ is_chankan=true
+                Some(wt) => self.pending_chankan == Some(*wt),
+                // winning_tile 未指定 → 後方互換で pending_chankan.is_some() で判定
+                None => self.pending_chankan.is_some(),
+            },
             round_wind: self.round_wind(),
             seat_wind: self.seat_wind(player_idx),
             dora_indicators: self.dora_indicators.clone(),
