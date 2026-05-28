@@ -41,6 +41,10 @@ export interface HtmlUiState {
   actions: HtmlUiActionButton[]
   /** ヒント表示 (例: 「手牌の数字キーで牌を選び、D で打牌」)。 */
   hint?: string | null
+  /** #79: デバッグモード。true のとき CPU 手牌を表示する。 */
+  debugReveal?: boolean
+  /** #79: CPU 手牌文字列。playerIndex → 手牌文字列のマップ。 */
+  cpuHandStrings?: Record<number, string>
 }
 
 const formatTileText = (tile: Tile): string => tileToGlyph(tile)
@@ -239,6 +243,21 @@ export const renderHtmlUi = (root: HTMLElement, state: HtmlUiState): void => {
   renderScores(root, state)
   renderActions(root, state)
   renderLog(root, state)
+  // #79: デバッグモード — CPU 手牌を右サイドバーに表示
+  if (state.debugReveal && state.cpuHandStrings) {
+    let debugEl = root.querySelector<HTMLElement>('#debug-cpu-hands')
+    if (!debugEl) {
+      debugEl = document.createElement('div')
+      debugEl.id = 'debug-cpu-hands'
+      debugEl.style.cssText =
+        'margin-top:12px;padding:8px;background:#222;color:#0f0;font-family:monospace;font-size:12px;border-radius:4px;'
+      root.appendChild(debugEl)
+    }
+    const lines = Object.entries(state.cpuHandStrings)
+      .map(([idx, hand]) => `P${Number(idx) + 1}: ${hand}`)
+      .join('\n')
+    if (debugEl.textContent !== lines) debugEl.textContent = lines
+  }
 }
 
 /**

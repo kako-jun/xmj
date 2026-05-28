@@ -152,6 +152,11 @@ export class App {
     this.cpuTurnDelayMs = options.cpuTurnDelayMs ?? 0
     this.createBridge = options.createBridge ?? null
     this.rollDice = options.rollDice ?? defaultRollDice
+    // #79: ?reveal=1 クエリでデバッグモード有効化
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('reveal') === '1') this.debugReveal = true
+    }
     this.htmlUiRoot =
       options.htmlUiRoot ??
       (typeof document !== 'undefined' ? document.getElementById('ui-side') : null)
@@ -1438,6 +1443,14 @@ export class App {
     }
   }
 
+  /** #80: S キーで手牌を即時ソートする。 */
+  private handleHotkeySortHand(): void {
+    if (this.activeScene !== 'table') return
+    if (!this.bridge?.isCurrentPlayerHuman()) return
+    this.bridge.sortCurrentHand()
+    this.refreshFromBridge()
+  }
+
   // ============================================================================
   // 描画
   // ============================================================================
@@ -1475,12 +1488,23 @@ export class App {
     const actions = this.activeScene === 'table' ? this.buildActionButtons() : []
     const hint = this.computeHint()
     const visibleLog = this.eventLog.slice(-EVENT_LOG_VISIBLE_COUNT)
+    // #79: デバッグモードのとき CPU 手牌文字列を収集
+    const cpuHandStrings: Record<number, string> | undefined =
+      this.debugReveal && this.bridge && this.gameState
+        ? Object.fromEntries(
+            this.gameState.players
+              .map((_, i) => [i, this.bridge!.getPlayerHandString(i as PlayerIndex)])
+              .filter(([i]) => i !== this.humanPlayerIndex)
+          )
+        : undefined
     const state: HtmlUiState = {
       game: this.activeScene === 'table' ? this.gameState : null,
       humanPlayerIndex: this.humanPlayerIndex,
       eventLog: visibleLog,
       actions,
       hint,
+      debugReveal: this.debugReveal,
+      cpuHandStrings,
     }
     renderHtmlUi(this.htmlUiRoot, state)
   }
