@@ -5,6 +5,7 @@ pub mod player;
 pub mod scoring;
 pub mod agari;
 pub mod agari_extract;
+pub mod yaku_struct;
 pub mod ai;
 pub mod nostr;
 pub mod realtime;

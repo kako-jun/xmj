@@ -373,15 +373,15 @@ fn test_suukantsu() {
 /// 三槓子: 3 つの槓子 → Yaku::Sankantsu + han +2 (役満ではない)。
 #[test]
 fn test_sankantsu() {
-    // 3 つの暗槓 + 残り手牌 4 枚 (1 面子 + 雀頭) + 和了牌
-    // 残り: 2m 3m 4m (順子) + 5p 5p (雀頭)、和了牌 = 4m
+    // 3 つの暗槓 + 残り手牌 4 枚 (テンパイ形: 2m3m リャンメン + 5p5p 雀頭) + 和了牌 4m
+    // 和了牌 4m を加えて 234m 順子 + 5p5p 雀頭が完成する。
     let melds = vec![
         kan_meld(tile!(1s), false),
         kan_meld(tile!(2s), false),
         kan_meld(tile!(haku), false),
     ];
     let tiles = vec![
-        tile!(2m), tile!(3m), tile!(4m),
+        tile!(2m), tile!(3m),
         tile!(5p), tile!(5p),
     ];
     let result = score_with_melds(tiles, melds, tile!(4m))
