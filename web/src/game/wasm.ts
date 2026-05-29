@@ -380,6 +380,20 @@ export class WasmGameBridge {
     return true
   }
 
+  /** #59: 食い替え禁止の強制 ON/OFF を設定する。 */
+  setEnforceKuikae(enabled: boolean): void {
+    if (typeof this.game.setEnforceKuikae === 'function') {
+      this.game.setEnforceKuikae(enabled)
+    }
+  }
+
+  isEnforceKuikae(): boolean {
+    if (typeof this.game.isEnforceKuikae === 'function') {
+      return this.game.isEnforceKuikae() as boolean
+    }
+    return true
+  }
+
   // ---- デバッグ (Issue #79) ----
 
   /**

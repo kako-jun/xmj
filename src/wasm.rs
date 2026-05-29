@@ -668,6 +668,19 @@ impl WasmGame {
         self.game.auto_draw
     }
 
+    /// #59: 食い替え禁止を強制するかどうかを設定する。
+    /// true（デフォルト）= 鳴き直後に現物 / 筋を切れない。false = ローカルルールで許可。
+    #[wasm_bindgen(js_name = setEnforceKuikae)]
+    pub fn set_enforce_kuikae(&mut self, enabled: bool) {
+        self.game.enforce_kuikae = enabled;
+    }
+
+    /// #59: 食い替え禁止設定の現在値。
+    #[wasm_bindgen(js_name = isEnforceKuikae)]
+    pub fn is_enforce_kuikae(&self) -> bool {
+        self.game.enforce_kuikae
+    }
+
     /// #79: 指定プレイヤーの手牌を文字列（CUI コード）で返す。
     /// デバッグモードで CPU 手牌を表向き表示するために使用する。
     #[wasm_bindgen(js_name = getPlayerHandString)]
