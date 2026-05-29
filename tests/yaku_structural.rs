@@ -4,7 +4,7 @@
 //! 検証する。これらの役は「役成立を assert するテストが存在しない」ことが #108 監査で
 //! 判明したため新規追加した。
 
-use xmj_core::hand::Hand;
+use xmj_core::hand::{Hand, Meld, MeldType};
 use xmj_core::scoring::{ScoringContext, ScoringEngine, ScoringResult, Yaku};
 use xmj_core::tile;
 use xmj_core::tile::{Honor, Tile};
@@ -260,6 +260,36 @@ fn fu_pinfu_tsumo_is_20() {
     let r = score_menzen(hand, tile!(8s), tsumo_ctx());
     assert!(r.yaku.contains(&Yaku::Pinfu));
     assert_eq!(r.fu, 20, "平和ツモ = 20 符");
+}
+
+// ============ 暗槓は門前を崩さない (#108 is_menzen 修正) ============
+
+#[test]
+fn ankan_keeps_menzen_tsumo() {
+    // 暗槓 5555s + 234m 234p 678m + 9p9p、ツモ 9p。
+    // 暗槓は門前を保つので門前ツモが付く (旧実装では非門前扱いで役が消えていた)。
+    let mut hand = Hand::new();
+    for t in [
+        tile!(2m), tile!(3m), tile!(4m),
+        tile!(2p), tile!(3p), tile!(4p),
+        tile!(6m), tile!(7m), tile!(8m),
+        tile!(9p),
+    ] {
+        hand.add_tile(t);
+    }
+    hand.add_meld(Meld {
+        meld_type: MeldType::Kan,
+        tiles: vec![tile!(5s), tile!(5s), tile!(5s), tile!(5s)],
+        is_open: false, // 暗槓
+        ..Default::default()
+    });
+    let r = ScoringEngine::calculate_score_with_context(&hand, &tile!(9p), &tsumo_ctx())
+        .expect("暗槓ありでも門前ツモで和了");
+    assert!(
+        r.yaku.contains(&Yaku::Tsumo),
+        "暗槓は門前を崩さないので門前ツモが付く: {:?}",
+        r.yaku
+    );
 }
 
 #[test]

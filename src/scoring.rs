@@ -194,8 +194,10 @@ impl ScoringEngine {
         // #42 #51 #52: 役満の倍率カウンタ。単役満で +1、ダブル役満で +2 ずつ加算する。
         // 役満の有無は `yakuman_count > 0` で判定し、base_points は `8000 * yakuman_count`。
         let mut yakuman_count: u32 = 0;
-        // TODO: 暗カン (Meld where !is_open) は門前扱いが正解。立直・平和・ツモ・一盃口・二盃口・九蓮宝燈の判定に影響。別 Issue 化
-        let is_menzen = hand.get_melds().is_empty();
+        // 門前判定: 暗槓 (is_open=false) は門前を崩さない。チー / ポン / 大明槓 / 加槓
+        // (is_open=true) のいずれかがあれば非門前。暗槓のみの手は立直・門前ツモ・
+        // 一盃口・二盃口・平和 (槓があると形上不成立だが) などの門前役の対象になる。
+        let is_menzen = hand.get_melds().iter().all(|m| !m.is_open);
 
         // 手牌情報の取得
         // Issue #33: 副露がある場合、手牌 (`hand.get_tiles()`) は 11/8/5/2 枚しかない。

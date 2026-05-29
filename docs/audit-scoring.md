@@ -18,7 +18,9 @@
 - ✅ #4 満貫頭打ち (1-4 飜で base>2000 を 2000 に)
 - ✅ #5 平和の雀頭役牌判定に場風・自風を反映
 - ✅ #6.1 Honroutou enum コメントの stale 修正
+- ✅ 追加: 暗槓 (is_open=false) が門前を崩さないよう `is_menzen` 判定を修正 (旧 `melds.is_empty()` だと暗槓ありの立直・門前ツモ・一盃口・面前加符が全て消えていた)
 - ⏸ #6.2 喰いタン toggle は ruleset 選択として follow-up Issue へ
+- ⏸ 追加 follow-up: 四暗刻の暗槓対応 (`check_suuankou` が `melds.is_empty()` で弾くため、暗槓を含む四暗刻が役満にならない)
 - 回帰テスト: `tests/yaku_structural.rs` (14 件) + `scoring.rs` 満貫頭打ち unit test を新規追加
 
 以下は監査時点の記録 (修正前の状態)。
