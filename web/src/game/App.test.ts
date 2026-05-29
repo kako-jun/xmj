@@ -96,6 +96,16 @@ const createBridgeMock = (overrides: Partial<import('./wasm').WasmGameBridge> = 
     resolveWinRon: () => null,
     getLastOutcomeJson: () => null,
     computeTenpaiPlayers: () => [],
+    // #80/#81/#79/#89 トグル系。デフォルトは無害な値。
+    setAutoSort: () => undefined,
+    isAutoSortEnabled: () => true,
+    sortCurrentHand: () => undefined,
+    setAutoDraw: () => undefined,
+    isAutoDrawEnabled: () => true,
+    setUsoRiichiEnabled: () => undefined,
+    isUsoRiichiEnabled: () => false,
+    isUsoRiichi: () => false,
+    getPlayerHandString: (idx: number) => `hand-of-${idx}`,
     destroy: () => undefined,
     ...overrides,
   }) as unknown as import('./wasm').WasmGameBridge
@@ -1306,6 +1316,78 @@ Dora indicators: 5p 1p
     clickActionButton('self-shouminkan')
 
     expect(completeCalled).toBe(true)
+  })
+
+  it('#80: 理牌ボタンを押すと sortCurrentHand を呼んで再描画する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    let sortCalled = 0
+
+    app.startGame(
+      createBridgeMock({
+        drawTile: () => false,
+        sortCurrentHand: () => {
+          sortCalled += 1
+        },
+      }),
+      0
+    )
+
+    clickActionButton('sort-hand')
+    expect(sortCalled).toBe(1)
+  })
+
+  it('#81: autoDraw=false のとき手動ツモ待ちで manual-draw が drawTile を呼び、打牌ボタンは出ない', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    app.autoDraw = false // 自動ツモ OFF
+    let drawCalled = 0
+
+    app.startGame(
+      createBridgeMock({
+        // ツモ前 = 13 枚 (hand.length % 3 === 1) にして手動ツモ待ち状態を作る
+        getCurrentHandString: () => '1m 2m 3m 4m 5mr 6m 7p 8p 9p 2s 3s 4s to',
+        drawTile: () => {
+          drawCalled += 1
+          return true
+        },
+      }),
+      0
+    )
+
+    // 手動ツモ待ちでは manual-draw のみ。打牌・理牌ボタンは出さない (buildActionButtons が早期 return)。
+    expect(findActionButton('manual-draw')).not.toBeNull()
+    expect(findActionButton('discard')).toBeNull()
+    expect(findActionButton('sort-hand')).toBeNull()
+
+    clickActionButton('manual-draw')
+    expect(drawCalled).toBe(1)
+  })
+
+  it('#79: debugReveal=true のとき他家の手牌を getPlayerHandString で収集する', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp)
+    app.debugReveal = true
+    const revealed: number[] = []
+
+    app.startGame(
+      createBridgeMock({
+        drawTile: () => false,
+        getPlayerHandString: (idx: number) => {
+          revealed.push(idx)
+          return `hand-of-${idx}`
+        },
+      }),
+      0
+    )
+
+    // 他家 1/2/3 の手牌が公開対象として収集される (cpuHandStrings からは自家 0 が除外される)
+    expect(revealed).toContain(1)
+    expect(revealed).toContain(2)
+    expect(revealed).toContain(3)
   })
 
   it('リーチを armed 状態でも declareRiichi が false なら状態を維持して再試行できる', () => {
