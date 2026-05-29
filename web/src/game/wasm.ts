@@ -316,7 +316,8 @@ export class WasmGameBridge {
   /**
    * 嘘リーチ（黙聴での虚偽リーチ）を許可するかどうかを設定する。
    * true のとき canRiichi のテンパイ・点数要件を外し、門前 + 未リーチのみで宣言可能にする。
-   * 流局時に uso_riichi=true のプレイヤーへ 1000 点罰符を課す。
+   * 嘘リーチに追加の罰符は無く、流局で露見した場合の損失は普通の不成立リーチと同じ
+   * （リーチ棒 1000 点の供託没収 + テンパイ外なのでノーテン罰符）。
    */
   setUsoRiichiEnabled(enabled: boolean): void {
     if (typeof this.game.setUsoRiichiEnabled === 'function') {

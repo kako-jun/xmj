@@ -611,7 +611,8 @@ impl WasmGame {
 
     /// #89: 嘘リーチ（黙聴での虚偽リーチ）を許可するかどうかを設定する。
     /// true のとき canRiichi のテンパイ・点数要件を外し、門前 + 未リーチのみで宣言可能にする。
-    /// 流局時に uso_riichi=true のプレイヤーへ 1000 点罰符を課す。
+    /// 嘘リーチに追加の罰符は無く、流局で露見した場合の損失は普通の不成立リーチと同じ
+    /// （リーチ棒 1000 点の供託没収 + テンパイ外なのでノーテン罰符）。
     #[wasm_bindgen(js_name = setUsoRiichiEnabled)]
     pub fn set_uso_riichi_enabled(&mut self, enabled: bool) {
         self.game.uso_riichi_enabled = enabled;
@@ -1712,21 +1713,39 @@ mod tests {
 
     #[test]
     #[cfg(feature = "wasm")]
-    fn uso_riichi_penalty_on_draw() {
-        // #89: 流局時に uso_riichi=true のプレイヤーから 1000 点罰符
+    fn uso_riichi_at_draw_loses_only_riichi_stick() {
+        // #89: 嘘リーチに「追加の罰符」は無い。流局時の損失は普通の不成立リーチと同じく
+        // リーチ棒 1000 点の供託没収のみ（テンパイ判定がノーテンなら別途ノーテン罰符も）。
+        // ここでは全員ノーテン（tenpai_count=0 → per_noten=0）なのでノーテン罰符は発生せず、
+        // 嘘リーチ者の損失はリーチ棒 1000 点だけになる。
         let mut g = make_game();
         g.set_uso_riichi_enabled(true);
         // 手牌を空にして確実に uso ルートを通す
         g.game.players[0].hand = crate::hand::Hand::new();
-        let before = g.game.players[0].score;
-        g.game.declare_riichi(0); // 1000 点供託（立直棒）→ before - 1000
+        let before: i32 = g.game.players.iter().map(|p| p.score).sum();
+        let before_p0 = g.game.players[0].score;
+        let sticks_before = g.game.riichi_sticks;
+        g.game.declare_riichi(0); // 1000 点を供託（立直棒）→ riichi_sticks += 1
         // 流局: 全員ノーテン
         g.game.resolve_draw(vec![]);
-        // 嘘リーチ罰符 1000 点が追加徴収されているはず
+        // 嘘リーチ者はリーチ棒 1000 点を失うだけ（追加罰符なし）
         assert_eq!(
             g.game.players[0].score,
-            before - 1000 - 1000, // 立直棒供託 + 罰符
-            "#89: 流局時に uso_riichi 者から追加 1000 点罰符"
+            before_p0 - 1000,
+            "#89: 嘘リーチ者の損失はリーチ棒 1000 点のみ（追加罰符は無い）"
+        );
+        // リーチ棒は供託へ積まれている（次局の和了者が回収）
+        assert_eq!(
+            g.game.riichi_sticks,
+            sticks_before + 1,
+            "#89: リーチ棒は供託 (riichi_sticks) に積まれる"
+        );
+        // ゼロサム保存: 全員の score 合計 + 供託リーチ棒(1000×本数) は不変
+        let after: i32 = g.game.players.iter().map(|p| p.score).sum();
+        assert_eq!(
+            after + (g.game.riichi_sticks as i32) * 1000,
+            before + (sticks_before as i32) * 1000,
+            "#89: 点棒総和 (scores + riichi_sticks) はゼロサムで保存される"
         );
     }
 }

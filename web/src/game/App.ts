@@ -568,12 +568,17 @@ export class App {
       typeof this.bridge.computeTenpaiPlayers === 'function'
         ? this.bridge.computeTenpaiPlayers()
         : []
-    // #89: 流局前に嘘リーチプレイヤーのログを出力（手牌公開相当）
-    if (typeof this.bridge.isUsoRiichi === 'function') {
+    // #89: 流局時に嘘リーチプレイヤーの手牌を公開する。
+    // 追加の罰符は無い（損失はリーチ棒供託没収 + テンパイ外ならノーテン罰符のみ）。
+    if (
+      typeof this.bridge.isUsoRiichi === 'function' &&
+      typeof this.bridge.getPlayerHandString === 'function'
+    ) {
       for (let i = 0; i < 4; i++) {
         if (this.bridge.isUsoRiichi(i as PlayerIndex)) {
+          const hand = this.bridge.getPlayerHandString(i as PlayerIndex)
           this.appendLog(
-            `${this.getPlayerName(i as PlayerIndex)} の嘘リーチが発覚！手牌公開 + 1000点罰符`
+            `${this.getPlayerName(i as PlayerIndex)} の嘘リーチが発覚！手牌公開: ${hand}（リーチ棒は没収）`
           )
         }
       }

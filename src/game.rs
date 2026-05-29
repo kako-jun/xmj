@@ -1723,15 +1723,16 @@ impl Game {
         //   罰符の支払い有無（per_tenpai == 0 のケース）とは独立に連荘判定する。
         self.dealer_won_last = dealer_tenpai;
 
-        // #89: 嘘リーチ罰符 — 流局時に uso_riichi=true のプレイヤーから 1000 点追加徴収
-        if self.uso_riichi_enabled {
-            for i in 0..self.players.len() {
-                if self.players[i].uso_riichi {
-                    // 1000 点罰符（供託済み立直棒とは別に徴収）
-                    self.players[i].pay_unclamped(1000);
-                }
-            }
-        }
+        // #89: 嘘リーチに「追加の罰符」は無い。嘘リーチとは「テンパイしていないのに
+        // リーチを宣言してしまい、和了できず流局で露見した状態」であり、その損失は
+        // 普通の不成立リーチと同じく
+        //   (1) 宣言時に供託したリーチ棒 1000 点の没収（declare_riichi で riichi_sticks へ
+        //       積み済み。次局の和了者が回収する）
+        //   (2) テンパイしていないので上の per_noten によるノーテン罰符の支払い
+        // の 2 つで完結する。両方とも標準処理 (riichi_sticks / per_noten) でゼロサムが
+        // 保たれており、ここで別途 pay_unclamped する必要はない（旧実装は二重徴収かつ
+        // 徴収先が無く点棒が消滅していた）。uso_riichi フラグは can_riichi の緩和と、
+        // 流局時の手牌公開判定 (#89 要件 3: 和了者がいれば非公開) のためだけに保持する。
 
         // TODO: 流し満貫 / 9 種 9 牌 / 四風連打 / 三家和 / 四開槓 / リーチ後チョンボ等の
         // 特殊流局は未対応。`RoundOutcome::Draw` に種別フィールド (enum) を追加して
