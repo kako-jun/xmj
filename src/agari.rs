@@ -53,10 +53,45 @@ pub fn enumerate_decompositions_with_wait(
     tiles: &[Tile],
     winning_tile: &Tile,
 ) -> Vec<(Decomposition, MachiKind)> {
-    let mut results: Vec<(Decomposition, MachiKind)> = Vec::new();
     if tiles.len() != 14 {
+        return Vec::new();
+    }
+    // 4 面子 1 雀頭 (副露なし) として一般版に委譲し、固定 4 面子配列に詰め直す。
+    enumerate_concealed_decomps(tiles, winning_tile, 4)
+        .into_iter()
+        .map(|(pair, ml, kind)| {
+            (
+                Decomposition {
+                    pair,
+                    mentsu: [ml[0], ml[1], ml[2], ml[3]],
+                },
+                kind,
+            )
+        })
+        .collect()
+}
+
+/// 手牌部分 (winning_tile を含む) を `(雀頭, melds_needed 個の面子, 待ち形)` に全分解する。
+///
+/// 副露あり手では `melds_needed = 4 - melds.len()` を渡す。手牌枚数は
+/// `3 * melds_needed + 2` であることを前提とする (雀頭 2 + 面子 3×N)。
+/// 副露牌は含めない。winning_tile は必ず手牌部分にツモ / ロンで合流するため
+/// concealed 側に含まれる。
+pub fn enumerate_concealed_decomps(
+    tiles: &[Tile],
+    winning_tile: &Tile,
+    melds_needed: usize,
+) -> Vec<(Tile, Vec<Mentsu>, MachiKind)> {
+    let mut results: Vec<(Tile, Vec<Mentsu>, MachiKind)> = Vec::new();
+    if tiles.len() != melds_needed * 3 + 2 {
         return results;
     }
+    // 赤ドラは is_red が PartialEq に含まれるため、分解前に通常牌へ正規化する。
+    // 正規化しないと「赤5 + 通常5」が別牌扱いになり雀頭/刻子が組めず和了形を取り逃す。
+    // 赤ドラの枚数は scoring 側で別途カウントするので、構造判定では色を落としてよい。
+    let tiles: Vec<Tile> = tiles.iter().map(|t| strip_red(t)).collect();
+    let winning_norm = strip_red(winning_tile);
+    let winning_tile = &winning_norm;
     if !tiles.contains(winning_tile) {
         return results;
     }
@@ -75,6 +110,7 @@ pub fn enumerate_decompositions_with_wait(
         v
     };
 
+    let mut raw: Vec<(Tile, Vec<Mentsu>, MachiKind)> = Vec::new();
     for &pair_tile in &unique {
         let cnt = sorted.iter().filter(|t| **t == pair_tile).count();
         if cnt < 2 {
@@ -84,116 +120,40 @@ pub fn enumerate_decompositions_with_wait(
         let mut rest = sorted.clone();
         remove_n(&mut rest, &pair_tile, 2);
 
-        // rest から 4 面子を取り出す全パターン
+        // rest から melds_needed 個の面子を取り出す全パターン
         let mut acc: Vec<Mentsu> = Vec::new();
         let mut mentsu_lists: Vec<Vec<Mentsu>> = Vec::new();
-        collect_mentsu(&rest, &mut acc, &mut mentsu_lists);
+        collect_mentsu_n(&rest, melds_needed, &mut acc, &mut mentsu_lists);
 
         for ml in mentsu_lists {
-            let dec = Decomposition {
-                pair: pair_tile,
-                mentsu: [ml[0], ml[1], ml[2], ml[3]],
-            };
-            // この分解で winning_tile がどう使われるかを判定。
-            // 単騎: winning_tile == pair_tile かつ pair の 2 枚目として使われた
-            // シャンポン: winning_tile が刻子の 3 枚目として使われた (かつ別の刻子に同種牌がある必要はない、刻子の 3 枚目という解釈)
-            // 順子待ち: winning_tile が順子の一部
-            //
-            // 「winning_tile を取り除いた 13 枚 + 戻す」という考え方ではなく、
-            // 分解結果上、winning_tile の出現位置から判定する。
-            let kinds = classify_machi(&dec, winning_tile);
+            let kinds = classify_machi_list(&ml, &pair_tile, winning_tile);
             for k in kinds {
-                results.push((dec.clone(), k));
+                raw.push((pair_tile, ml.clone(), k));
             }
         }
     }
 
-    // 同一 (分解, 待ち形) の重複を除く
-    let mut dedup: Vec<(Decomposition, MachiKind)> = Vec::new();
-    for r in results {
-        if !dedup.iter().any(|(d, k)| decomp_eq(d, &r.0) && *k == r.1) {
-            dedup.push(r);
+    // 同一 (雀頭, 面子集合, 待ち形) の重複を除く
+    for r in raw {
+        if !results
+            .iter()
+            .any(|(p, m, k)| *p == r.0 && mentsu_set_eq(m, &r.1) && *k == r.2)
+        {
+            results.push(r);
         }
     }
-    dedup
+    results
 }
 
-fn decomp_eq(a: &Decomposition, b: &Decomposition) -> bool {
-    if a.pair != b.pair {
-        return false;
-    }
-    // 面子の集合として一致するか。bm を clone (to_vec) しているのは順序非依存比較のため
-    // remove(pos) で破壊的に消費する必要があるから。最大 4 要素なので性能影響は軽微。
-    let mut bm: Vec<Mentsu> = b.mentsu.to_vec();
-    for m in a.mentsu.iter() {
-        if let Some(pos) = bm.iter().position(|x| x == m) {
-            bm.remove(pos);
-        } else {
-            return false;
-        }
-    }
-    bm.is_empty()
-}
-
-/// 分解上、winning_tile がどの待ち形に該当するかの候補を返す。
-///
-/// 1 つの分解でも winning_tile の用途が複数解釈できる場合があるため Vec で返す。
-/// 例: 1m 1m 1m + winning 1m の刻子は、ペアを 1m1m とすればシャンポン、
-///     刻子に組み込めばツモった 1m が「刻子の 3 枚目」となるが、形上は刻子完成。
-///     ここでは「刻子の最後の 1 枚」はシャンポンとは扱わない (刻子としては既に完成しており、
-///     待ちはペア側の 1m である) — 分解列挙時にペアと刻子の組み合わせは別分解として出る。
-fn classify_machi(dec: &Decomposition, winning_tile: &Tile) -> Vec<MachiKind> {
+/// 面子リスト + 雀頭から winning_tile の待ち形候補を返す (面子数が 4 未満でも動く)。
+fn classify_machi_list(mentsu: &[Mentsu], pair: &Tile, winning_tile: &Tile) -> Vec<MachiKind> {
     let mut kinds: Vec<MachiKind> = Vec::new();
-
-    // 単騎: pair == winning_tile
-    if dec.pair == *winning_tile {
+    if *pair == *winning_tile {
         kinds.push(MachiKind::Tanki);
     }
-
-    for m in dec.mentsu.iter() {
-        match m {
-            Mentsu::Koutsu(t) => {
-                if t == winning_tile {
-                    // 刻子に winning が含まれる = シャンポン候補。
-                    kinds.push(MachiKind::Shanpon);
-                }
-            }
-            Mentsu::Shuntsu(start) => {
-                if let TileType::Number { suit, value } = start.tile_type {
-                    let t1 = *start;
-                    let t2 = Tile::new_number(suit, value + 1, false);
-                    let t3 = Tile::new_number(suit, value + 2, false);
-                    if winning_tile == &t1 {
-                        // 順子の最小牌 — 12_3 待ちなど。
-                        // 完成順子 (a,a+1,a+2) で winning=a。
-                        // value == 7 のとき (7,8,9) → 辺張 (789 の 7 待ち)
-                        // value >= 1 で v-1 が無い場合 (今ここでは順子は完成しているので情報不足)
-                        // 簡略化: value == 7 → 辺張、それ以外 → 両面 (両面・嵌張の区別は他の解釈でカバー)
-                        if value == 7 {
-                            kinds.push(MachiKind::Penchan);
-                        } else {
-                            kinds.push(MachiKind::Ryanmen);
-                        }
-                    } else if winning_tile == &t3 {
-                        // 順子の最大牌 — _12 3 待ちなど。
-                        // value == 1 → (1,2,3) で winning=3 は辺張 (123 の 3 待ち)
-                        if value == 1 {
-                            kinds.push(MachiKind::Penchan);
-                        } else {
-                            kinds.push(MachiKind::Ryanmen);
-                        }
-                    } else if winning_tile == &t2 {
-                        // 順子の真ん中 — 嵌張。
-                        kinds.push(MachiKind::Kanchan);
-                    }
-                }
-            }
-        }
+    for m in mentsu.iter() {
+        classify_one_mentsu(m, winning_tile, &mut kinds);
     }
-
-    // 同分解内で同 MachiKind が複数 push される可能性
-    // (例: 同色順子が二つあり winning が両方の端にハマる) があるため重複除去。
-    // 並び順を保ったまま dedup したいので Vec のまま処理。
     let mut uniq: Vec<MachiKind> = Vec::new();
     for k in kinds.into_iter() {
         if !uniq.contains(&k) {
@@ -203,16 +163,73 @@ fn classify_machi(dec: &Decomposition, winning_tile: &Tile) -> Vec<MachiKind> {
     uniq
 }
 
-/// `rest` 牌列 (12 枚 = 4 面子) から面子 4 つを取り出す全パターン。
-fn collect_mentsu(
+/// 面子集合の順序非依存比較。
+fn mentsu_set_eq(a: &[Mentsu], b: &[Mentsu]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut bm: Vec<Mentsu> = b.to_vec();
+    for m in a {
+        if let Some(pos) = bm.iter().position(|x| x == m) {
+            bm.remove(pos);
+        } else {
+            return false;
+        }
+    }
+    bm.is_empty()
+}
+
+/// 1 つの面子に対し、winning_tile がどの待ち形に該当するかを `kinds` に push する。
+fn classify_one_mentsu(m: &Mentsu, winning_tile: &Tile, kinds: &mut Vec<MachiKind>) {
+    match m {
+        Mentsu::Koutsu(t) => {
+            if t == winning_tile {
+                // 刻子に winning が含まれる = シャンポン候補。
+                kinds.push(MachiKind::Shanpon);
+            }
+        }
+        Mentsu::Shuntsu(start) => {
+            if let TileType::Number { suit, value } = start.tile_type {
+                let t1 = *start;
+                let t2 = Tile::new_number(suit, value + 1, false);
+                let t3 = Tile::new_number(suit, value + 2, false);
+                if winning_tile == &t1 {
+                    // 順子の最小牌。value == 7 → 辺張 (789 の 7)、それ以外 → 両面。
+                    if value == 7 {
+                        kinds.push(MachiKind::Penchan);
+                    } else {
+                        kinds.push(MachiKind::Ryanmen);
+                    }
+                } else if winning_tile == &t3 {
+                    // 順子の最大牌。value == 1 → 辺張 (123 の 3)、それ以外 → 両面。
+                    if value == 1 {
+                        kinds.push(MachiKind::Penchan);
+                    } else {
+                        kinds.push(MachiKind::Ryanmen);
+                    }
+                } else if winning_tile == &t2 {
+                    // 順子の真ん中 — 嵌張。
+                    kinds.push(MachiKind::Kanchan);
+                }
+            }
+        }
+    }
+}
+
+/// `rest` 牌列から面子 `n` 個を取り出す全パターン。
+fn collect_mentsu_n(
     rest: &[Tile],
+    n: usize,
     acc: &mut Vec<Mentsu>,
     out: &mut Vec<Vec<Mentsu>>,
 ) {
-    if rest.is_empty() {
-        if acc.len() == 4 {
+    if acc.len() == n {
+        if rest.is_empty() {
             out.push(acc.clone());
         }
+        return;
+    }
+    if rest.is_empty() {
         return;
     }
     let head = rest[0];
@@ -223,7 +240,7 @@ fn collect_mentsu(
         let mut next = rest.to_vec();
         remove_n(&mut next, &head, 3);
         acc.push(Mentsu::Koutsu(head));
-        collect_mentsu(&next, acc, out);
+        collect_mentsu_n(&next, n, acc, out);
         acc.pop();
     }
 
@@ -238,10 +255,18 @@ fn collect_mentsu(
                 remove_n(&mut next, &t2, 1);
                 remove_n(&mut next, &t3, 1);
                 acc.push(Mentsu::Shuntsu(head));
-                collect_mentsu(&next, acc, out);
+                collect_mentsu_n(&next, n, acc, out);
                 acc.pop();
             }
         }
+    }
+}
+
+/// 赤ドラ牌を通常牌に正規化する (is_red を落とす)。数牌のみ影響。
+fn strip_red(t: &Tile) -> Tile {
+    match t.tile_type {
+        TileType::Number { suit, value } => Tile::new_number(suit, value, false),
+        TileType::Honor(_) => *t,
     }
 }
 

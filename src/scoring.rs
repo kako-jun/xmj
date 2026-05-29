@@ -110,8 +110,7 @@ pub enum Yaku {
     Sankantsu,
     Chiitoitsu,
     Shousangen,
-    // TODO(#19 follow-up): Honroutou は detector 未実装。東西戦 (EastWest) のクリア対象 5 役
-    // に含まれるためバリアントだけ追加してある。calculate_yaku から push される配線は別 Issue。
+    // 混老頭。`check_honroutou` で判定し `calculate_score_with_context` から push 済み。
     Honroutou,
 
     // 三飜役
@@ -300,7 +299,9 @@ impl ScoringEngine {
 
         // 役満がある場合は他の役をチェックしない
         if yakuman_count > 0 {
-            let fu = Self::calculate_fu(hand, winning_tile, is_tsumo);
+            // 役満は符を点数計算に使わない。表示用に標準的な 20/30 符を入れておく
+            // (ツモ +2 → 切り上げ 30、ロン 20)。
+            let fu = if is_tsumo { 30 } else { 20 };
             let base_points = 8000 * yakuman_count;
             let total_points = Self::calculate_total_points(base_points, is_dealer, is_tsumo);
 
@@ -352,49 +353,25 @@ impl ScoringEngine {
             han += 1;
         }
 
-        // 七対子チェック（特殊形）
-        if is_menzen && Self::check_chiitoitsu(&all_tiles) {
-            yaku.push(Yaku::Chiitoitsu);
-            han += 2;
-        }
+        // ===== 共通役 (分解非依存: 牌集合 / 副露ベース) =====
+        // 七対子・通常形いずれの解釈でも同じく成立し得る役。これらをまず `yaku`/`han`
+        // に積んだあと、構造依存役 (一盃口/三色/一通/チャンタ/三暗刻/平和 など) を
+        // `yaku_struct::evaluate_best` で通常形分解から、または七対子分岐で計上し、
+        // 高得点の解釈を採用する。
 
-        // 通常役のチェック
+        // タンヤオ
         if Self::check_tanyao(&all_tiles) {
             yaku.push(Yaku::Tanyao);
             han += 1;
         }
 
-        if is_menzen && Self::check_pinfu(hand, winning_tile) {
-            yaku.push(Yaku::Pinfu);
-            han += 1;
-        }
-
+        // 門前ツモ
         if is_tsumo && is_menzen {
             yaku.push(Yaku::Tsumo);
             han += 1;
         }
 
-        if is_menzen {
-            if Self::check_iipeikou(&all_tiles) {
-                yaku.push(Yaku::Iipeikou);
-                han += 1;
-            }
-
-            if Self::check_ryanpeikou(&all_tiles) {
-                // 二盃口は一盃口を含むので、一盃口を削除
-                yaku.retain(|y| y != &Yaku::Iipeikou);
-                yaku.push(Yaku::Ryanpeikou);
-                han = han.saturating_sub(1) + 3; // 一盃口を引いて二盃口を足す
-            }
-        }
-
-        // 役牌チェック (#53)
-        // 三元牌 + 場風 + 自風 を対象に評価する。
-        // 場風 == 自風 (ダブル東等) は同じ Honor を 2 回 push して 2 han 計上する。
-        //
-        // 暗刻三元 (手牌内に同種 honor が 3 枚以上) も役牌扱いとして包括する。
-        // 厳密には agari パターン分解後の暗刻判定が必要だが、ここでは簡易判定とする。
-        // TODO(#53 follow-up): agari 完全分解版に置き換え
+        // 役牌 (#53): 三元牌 + 場風 + 自風。場風 == 自風 (連風) は 2 回計上。
         let honor_yakuhai_targets: Vec<Honor> = vec![
             Honor::Haku,
             Honor::Hatsu,
@@ -409,106 +386,81 @@ impl ScoringEngine {
             }
         }
 
-        // 三色同順
-        if let Some(h) = Self::check_sanshoku_doujun(&all_tiles, hand) {
-            yaku.push(Yaku::SanshokuDoujun);
-            han += if is_menzen { 2 } else { 1 };
-        }
-
-        // 一気通貫
-        if Self::check_ittsu(&all_tiles, hand) {
-            yaku.push(Yaku::Ittsu);
-            han += if is_menzen { 2 } else { 1 };
-        }
-
-        // 混全帯么九
-        if Self::check_chanta(&all_tiles, hand) {
-            yaku.push(Yaku::Chanta);
-            han += if is_menzen { 2 } else { 1 };
-        }
-
-        // 純全帯么九
-        if Self::check_junchan(&all_tiles, hand) {
-            // 純チャンがあればチャンタを削除
-            yaku.retain(|y| y != &Yaku::Chanta);
-            yaku.push(Yaku::Junchan);
-            han = han.saturating_sub(if is_menzen { 2 } else { 1 }) + if is_menzen { 3 } else { 2 };
-        }
-
         // 対々和
         if Self::check_toitoi(hand, winning_tile) {
             yaku.push(Yaku::Toitoi);
             han += 2;
         }
 
-        // 三暗刻
-        if Self::check_sanankou(hand, winning_tile, is_tsumo) {
-            yaku.push(Yaku::Sanankou);
-            han += 2;
-        }
-
-        // 三色同刻
-        if Self::check_sanshoku_doukou(hand) {
-            yaku.push(Yaku::SanshokuDoukou);
-            han += 2;
-        }
-
-        // 小三元
-        if Self::check_shousangen(hand) {
-            yaku.push(Yaku::Shousangen);
-            han += 2;
-        }
-
-        // #52: 三槓子 (二飜)。手牌内暗槓 + 副露 Kan の合計が 3 のときに成立。
-        // 四槓子は前段で役満として確定済みのためここには来ない。
+        // 三槓子 (#52)
         if Self::check_sankantsu(hand) {
             yaku.push(Yaku::Sankantsu);
             han += 2;
         }
 
-        // #52: 混老頭 (二飜)。すべての構成牌が么九 (1/9/字) かつ字牌を含む。
-        // 清老頭 (役満) は前段で確定済みなのでここには来ない (字牌を含む条件で区別)。
+        // 混老頭 (#52)
         if Self::check_honroutou(&all_tiles) {
             yaku.push(Yaku::Honroutou);
             han += 2;
         }
 
-        // 混一色
+        // 混一色 / 清一色
         if Self::check_honitsu(&all_tiles) {
             yaku.push(Yaku::Honitsu);
             han += if is_menzen { 3 } else { 2 };
         }
-
-        // 清一色
         if Self::check_chinitsu(&all_tiles) {
-            // 清一色があれば混一色を削除
             yaku.retain(|y| y != &Yaku::Honitsu);
             yaku.push(Yaku::Chinitsu);
             han = han.saturating_sub(if is_menzen { 3 } else { 2 }) + if is_menzen { 6 } else { 5 };
         }
+
+        // ===== 構造依存役: 通常形 vs 七対子 で高得点の解釈を採用 =====
+        // 候補ごとに (yaku, yaku_han, fu) を作り、(han, fu) が最大のものを選ぶ。
+        let mut candidates: Vec<(Vec<Yaku>, u32, u32)> = Vec::new();
+
+        // 通常形 (4 面子 1 雀頭): 構造役 + 符を分解から算出。
+        if let Some(s) = crate::yaku_struct::evaluate_best(hand, winning_tile, ctx, is_menzen) {
+            let mut y = yaku.clone();
+            y.extend(s.yaku.iter().cloned());
+            candidates.push((y, han + s.han, s.fu));
+        }
+
+        // 七対子 (門前のみ): 固定 2 飜・25 符。構造役は付かない。
+        if is_menzen && Self::check_chiitoitsu(&all_tiles) {
+            let mut y = yaku.clone();
+            y.push(Yaku::Chiitoitsu);
+            candidates.push((y, han + 2, 25));
+        }
+
+        // どの和了形も取れない場合 (理論上 caller が和了を保証するため稀)。
+        let (final_yaku, mut final_han, fu) = match candidates
+            .into_iter()
+            .max_by_key(|(_, h, f)| (*h, *f))
+        {
+            Some(best) => best,
+            None => return None,
+        };
+        yaku = final_yaku;
+        han = final_han;
 
         if han == 0 {
             // 役なし。ドラのみでは和了不可なので None を返す。
             return None;
         }
 
-        // #54: ドラ / 裏ドラ / 赤ドラ / 槓ドラ を計算して han に加算する。
-        // ドラは「役ではない」ため Yaku enum には push しない。`ScoringResult` に
-        // 枚数を保持して UI 側で別表示できるようにする。
+        // #54: ドラ / 裏ドラ / 赤ドラ を計算して han に加算する。
         let dora = Self::count_dora(hand, winning_tile, &ctx.dora_indicators);
-        // 裏ドラは立直成立時のみ (`is_riichi` または `is_double_riichi`)
         let uradora = if ctx.is_riichi || ctx.is_double_riichi {
             Self::count_dora(hand, winning_tile, &ctx.uradora_indicators)
         } else {
             0
         };
         let akadora = Self::count_akadora(hand, winning_tile);
-        // 槓ドラは Game 側で `dora_indicators` に追加されている運用なので、
-        // 上記 `dora` カウントに既に含まれる。本フィールドは情報保持用に 0 で残す。
         let kandora = 0;
-        han += dora + uradora + akadora;
+        final_han += dora + uradora + akadora;
+        han = final_han;
 
-        let fu = Self::calculate_fu(hand, winning_tile, is_tsumo);
         let base_points = Self::calculate_base_points(han, fu);
         let total_points = Self::calculate_total_points(base_points, is_dealer, is_tsumo);
 
@@ -532,20 +484,6 @@ impl ScoringEngine {
             TileType::Number { value, .. } => value >= 2 && value <= 8,
             TileType::Honor(_) => false,
         })
-    }
-
-    // ピンフ（平和）
-    //
-    // Issue #34: 副露なし・全順子・雀頭が三元牌でない・両面待ちで取り込める分解が
-    // 存在する場合に成立する。場風 / 自風の役牌雀頭判定は本関数では未対応
-    // (ScoringEngine が場風 / 自風を持たないため簡略化)。
-    fn check_pinfu(hand: &Hand, winning_tile: &Tile) -> bool {
-        if !hand.get_melds().is_empty() {
-            return false;
-        }
-        let mut all_tiles = hand.get_tiles().clone();
-        all_tiles.push(*winning_tile);
-        crate::agari::is_pinfu_shape(&all_tiles, winning_tile)
     }
 
     // 役牌
@@ -660,48 +598,6 @@ impl ScoringEngine {
         pairs.len() == 7
     }
 
-    // 一盃口
-    fn check_iipeikou(tiles: &[Tile]) -> bool {
-        // 同じ順子が2組
-        // 簡易実装: 省略（複雑なので後で実装）
-        false
-    }
-
-    // 二盃口
-    fn check_ryanpeikou(tiles: &[Tile]) -> bool {
-        // 同じ順子が2組x2
-        // 簡易実装: 省略
-        false
-    }
-
-    // 三色同順
-    fn check_sanshoku_doujun(tiles: &[Tile], hand: &Hand) -> Option<u8> {
-        // 萬子・筒子・索子で同じ数の順子
-        // 簡易実装: 省略
-        None
-    }
-
-    // 一気通貫
-    fn check_ittsu(tiles: &[Tile], hand: &Hand) -> bool {
-        // 同じ色で123・456・789の順子
-        // 簡易実装: 省略
-        false
-    }
-
-    // 混全帯么九（チャンタ）
-    fn check_chanta(tiles: &[Tile], hand: &Hand) -> bool {
-        // 全ての面子と雀頭に么九牌が含まれる
-        // 簡易実装: 省略
-        false
-    }
-
-    // 純全帯么九（ジュンチャン）
-    fn check_junchan(tiles: &[Tile], hand: &Hand) -> bool {
-        // 全ての面子と雀頭に老頭牌（1,9）が含まれる（字牌なし）
-        // 簡易実装: 省略
-        false
-    }
-
     // 対々和
     fn check_toitoi(hand: &Hand, winning_tile: &Tile) -> bool {
         // 全面子が刻子（または槓子）。副露があれば Chi が混じった瞬間に不成立。
@@ -750,35 +646,7 @@ impl ScoringEngine {
         false
     }
 
-    // 三暗刻
-    // TODO: ロンで和了した刻子は明刻扱い (四暗刻単騎以外で 1 暗刻減算)。winning_tile 未使用は意図的 (本 Issue 範囲外、別 Issue で対応)
-    // TODO: is_tsumo 未使用も同じ理由 (現状は明暗判定なしの簡易実装)
-    #[allow(unused_variables)]
-    fn check_sanankou(hand: &Hand, _winning_tile: &Tile, is_tsumo: bool) -> bool {
-        // 暗刻が3組
-        // 簡易実装: 副露がない刻子が3組
-        let ankou_count = hand
-            .get_melds()
-            .iter()
-            .filter(|meld| !meld.is_open && matches!(meld.meld_type, MeldType::Pon | MeldType::Kan))
-            .count();
-
-        ankou_count >= 3
-    }
-
-    // 三色同刻
-    fn check_sanshoku_doukou(hand: &Hand) -> bool {
-        // 萬子・筒子・索子で同じ数の刻子
-        // 簡易実装: 省略
-        false
-    }
-
-    // 小三元
-    fn check_shousangen(hand: &Hand) -> bool {
-        // 三元牌の2組が刻子、1組が雀頭
-        // 簡易実装: 省略
-        false
-    }
+    // 三暗刻 / 三色同刻 / 小三元 は `yaku_struct::evaluate_best` (面子分解ベース) で判定する。
 
     // 混一色
     fn check_honitsu(tiles: &[Tile]) -> bool {
@@ -1183,28 +1051,21 @@ impl ScoringEngine {
         has_honor
     }
     
-    fn calculate_fu(_hand: &Hand, _winning_tile: &Tile, is_tsumo: bool) -> u32 {
-        // 簡単な符計算
-        let mut fu = 20; // 基本符
-        
-        if is_tsumo {
-            fu += 2; // ツモ符
-        }
-        
-        // 待ちや面子による符は省略（簡単な実装）
-        
-        // 10の位を切り上げ
-        ((fu + 9) / 10) * 10
-    }
-    
+    /// 基本点 (base points) を算出する。
+    ///
+    /// 1-4 飜は `fu * 2^(han+2)`。ただし満貫 (2000) を超えたら満貫で頭打ち (#108 #4)。
+    /// 5 飜=満貫 / 6-7=跳満 / 8-10=倍満 / 11-12=三倍満 / 13+=数え役満。
     fn calculate_base_points(han: u32, fu: u32) -> u32 {
         match han {
-            1..=4 => fu * (1 << (han + 2)),
-            5 => 2000,  // 満貫
-            6..=7 => 3000, // 跳満
-            8..=10 => 4000, // 倍満
+            1..=4 => {
+                let raw = fu * (1 << (han + 2));
+                raw.min(2000) // 満貫頭打ち (例: 4飜40符=2560 → 2000)
+            }
+            5 => 2000,       // 満貫
+            6..=7 => 3000,   // 跳満
+            8..=10 => 4000,  // 倍満
             11..=12 => 6000, // 三倍満
-            _ => 8000, // 役満
+            _ => 8000,       // 数え役満
         }
     }
     
@@ -1255,6 +1116,23 @@ pub fn score_five_tile(hand: &Hand, _win_tile: &Tile) -> i32 {
 mod tests {
     use super::*;
     use crate::tile::{Tile, Suit};
+
+    // #108 #4: 満貫頭打ちの回帰テスト。
+    #[test]
+    fn test_base_points_mangan_cap() {
+        // 4 飜 40 符 = 40 * 2^6 = 2560 → 満貫 2000 で頭打ち。
+        assert_eq!(ScoringEngine::calculate_base_points(4, 40), 2000);
+        // 3 飜 70 符 = 70 * 32 = 2240 → 2000。
+        assert_eq!(ScoringEngine::calculate_base_points(3, 70), 2000);
+        // 4 飜 30 符 = 30 * 64 = 1920 < 2000 → 頭打ちなし。
+        assert_eq!(ScoringEngine::calculate_base_points(4, 30), 1920);
+        // 3 飜 30 符 = 30 * 32 = 960。
+        assert_eq!(ScoringEngine::calculate_base_points(3, 30), 960);
+        // 5 飜 = 満貫固定 2000。
+        assert_eq!(ScoringEngine::calculate_base_points(5, 20), 2000);
+        // 13 飜以上 = 数え役満 8000。
+        assert_eq!(ScoringEngine::calculate_base_points(13, 20), 8000);
+    }
 
     #[test]
     fn test_tanyao_check() {
