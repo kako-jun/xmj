@@ -253,6 +253,13 @@ pub struct Game {
     /// true（デフォルト）のとき TS 側 shouldDrawHumanTile で自動ツモが走る。
     /// false のとき手動ツモが必要（T キーまたは山牌タップ）。
     pub auto_draw: bool,
+    /// #59 食い替え禁止を強制するか（デフォルト true）。
+    /// false にすると食い替え打牌を許可する（ローカルルール用 toggle）。
+    pub enforce_kuikae: bool,
+    /// #59 直前のチー / ポンによって「次の打牌で切れない牌」の集合。
+    /// 現物（鳴いた牌と同種）と筋（チーのリャンメン反対側）を入れる。
+    /// 打牌が成立した時点でクリアする。チー / ポン以外の操作では空のまま。
+    pub kuikae_forbidden: Vec<Tile>,
 }
 
 impl Game {
@@ -322,6 +329,8 @@ impl Game {
             uso_riichi_enabled: false,
             auto_sort: true,
             auto_draw: true,
+            enforce_kuikae: true,
+            kuikae_forbidden: Vec::new(),
         };
 
         game.initialize_wall();
@@ -555,8 +564,20 @@ impl Game {
     /// 戻すこと。`Standard` 等のターン制モードではタイマーが実質未使用なので呼ばなく
     /// てもよい。
     pub fn discard_tile(&mut self, tile: Tile) -> bool {
+        // #59 食い替え禁止: 鳴いた直後の打牌で現物 / 筋を切るのを拒否する。
+        // tile_type のみ比較する (赤ドラの is_red 違いも同種とみなす)。
+        if self.enforce_kuikae
+            && self
+                .kuikae_forbidden
+                .iter()
+                .any(|f| f.tile_type == tile.tile_type)
+        {
+            return false;
+        }
         let discarder = self.current_player;
         if self.players[discarder].discard_tile(tile) {
+            // 打牌が成立したので食い替え禁止牌をクリアする。
+            self.kuikae_forbidden.clear();
             self.last_discard = Some(tile);
             self.last_discard_hidden = false;
             self.last_discarder = Some(discarder);
@@ -599,6 +620,8 @@ impl Game {
         self.last_discarder = Some(discarder);
         self.is_last_discard = self.wall.is_empty();
         self.last_was_rinshan = false;
+        // #59 闇牌打牌でも食い替え禁止牌はクリアする (鳴き直後の制約は 1 打のみ)
+        self.kuikae_forbidden.clear();
         self.next_player();
         true
     }
@@ -855,6 +878,17 @@ impl Game {
             self.clear_ippatsu_others(player_idx);
             // #51 鳴き発生で地和を不成立にする
             self.any_call_made_this_round = true;
+            // #59 食い替え禁止: 現物 (鳴いた牌 value) と、リャンメンチーの筋を禁止する。
+            // pattern 0 (手 value-2,value-1): 筋 = value-3
+            // pattern 1 (手 value-1,value+1 嵌張): 筋なし
+            // pattern 2 (手 value+1,value+2): 筋 = value+3
+            let mut forbidden = vec![Tile::new_number(suit, value, false)];
+            match pattern {
+                0 if value >= 4 => forbidden.push(Tile::new_number(suit, value - 3, false)),
+                2 if value <= 6 => forbidden.push(Tile::new_number(suit, value + 3, false)),
+                _ => {}
+            }
+            self.kuikae_forbidden = forbidden;
             true
         } else {
             false
@@ -893,6 +927,9 @@ impl Game {
         self.clear_ippatsu_others(player_idx);
         // #51 鳴き発生で地和を不成立にする
         self.any_call_made_this_round = true;
+        // #59 食い替え禁止: ポンは現物 (鳴いた牌と同種) のみ禁止。筋食い替えは無い。
+        // discard_tile 側は tile_type のみ比較するので is_red は無視される。
+        self.kuikae_forbidden = vec![tile];
         true
     }
 
@@ -1802,6 +1839,8 @@ impl Game {
         self.last_was_rinshan = false;
         self.pending_chankan = None;
         self.last_discarder = None;
+        // #59 食い替え禁止牌をリセット
+        self.kuikae_forbidden.clear();
         // #51 鳴き発生フラグをリセット
         self.any_call_made_this_round = false;
         self.draws_this_round = 0;
@@ -3549,5 +3588,118 @@ mod tests {
         assert_eq!(game.current_player, 1, "do_kan 後の手番は宣言者");
         // last_discard はクリアされる
         assert!(game.last_discard.is_none(), "明槓で last_discard はクリアされる");
+    }
+
+    // ==================== #59 食い替え禁止 ====================
+
+    fn kuikae_names() -> Vec<String> {
+        vec!["A".into(), "B".into(), "C".into(), "D".into()]
+    }
+
+    /// ポン直後は現物 (鳴いた牌と同種) を切れない。
+    #[test]
+    fn test_kuikae_pon_genbutsu_forbidden() {
+        let mut game = Game::new(kuikae_names());
+        let five = Tile::new_number(Suit::Man, 5, false);
+        // player 1 に 5m 3 枚 + 別の牌を持たせる (ポンで 2 枚消費しても 1 枚残る)
+        game.players[1].hand = crate::hand::Hand::new();
+        for _ in 0..3 {
+            game.players[1].hand.add_tile(five);
+        }
+        game.players[1].hand.add_tile(Tile::new_number(Suit::Pin, 1, false));
+        game.last_discard = Some(five);
+        game.last_discard_hidden = false;
+        game.last_discarder = Some(0);
+        game.current_player = 0;
+
+        assert!(game.do_pon(1), "ポン成立");
+        assert_eq!(game.current_player, 1);
+        assert_eq!(game.kuikae_forbidden, vec![five], "現物 5m が禁止");
+        // 現物 5m は切れない
+        assert!(!game.discard_tile(five), "ポン直後に現物 5m は打てない");
+        // 別の牌は切れる
+        assert!(
+            game.discard_tile(Tile::new_number(Suit::Pin, 1, false)),
+            "現物以外は打てる"
+        );
+        // 打牌後は禁止が解除される
+        assert!(game.kuikae_forbidden.is_empty(), "打牌で食い替え禁止解除");
+    }
+
+    /// enforce_kuikae=false なら食い替え (筋 7m) を許可する (toggle)。
+    /// チー (456m を 5m6m で鳴き) 後、手牌に残る筋牌 7m を切れることを確認する。
+    #[test]
+    fn test_kuikae_toggle_off_allows_suji() {
+        let mut game = Game::new(kuikae_names());
+        game.enforce_kuikae = false;
+        let four = Tile::new_number(Suit::Man, 4, false);
+        let seven = Tile::new_number(Suit::Man, 7, false);
+        game.players[3].hand = crate::hand::Hand::new();
+        game.players[3].hand.add_tile(Tile::new_number(Suit::Man, 5, false));
+        game.players[3].hand.add_tile(Tile::new_number(Suit::Man, 6, false));
+        game.players[3].hand.add_tile(seven);
+        game.players[3].hand.add_tile(Tile::new_number(Suit::Pin, 1, false));
+        game.last_discard = Some(four);
+        game.last_discard_hidden = false;
+        game.last_discarder = Some(0);
+        game.current_player = 0;
+
+        assert!(game.do_chi(3, 2), "456m チー成立");
+        // toggle off でも禁止牌自体は計算される
+        assert!(game.kuikae_forbidden.contains(&seven));
+        // が、enforce_kuikae=false なので筋 7m を打てる
+        assert!(game.discard_tile(seven), "toggle off なら筋 7m も打てる");
+    }
+
+    /// チー (456m を 5m6m で鳴き) 直後は現物 4m と筋 7m を切れない。
+    #[test]
+    fn test_kuikae_chi_genbutsu_and_suji_forbidden() {
+        let mut game = Game::new(kuikae_names());
+        let four = Tile::new_number(Suit::Man, 4, false);
+        let seven = Tile::new_number(Suit::Man, 7, false);
+        // チーは下家のみ: current_player=0 の下家 = (0+3)%4 = 3。player 3 にチー牌を仕込む。
+        game.players[3].hand = crate::hand::Hand::new();
+        game.players[3].hand.add_tile(Tile::new_number(Suit::Man, 5, false));
+        game.players[3].hand.add_tile(Tile::new_number(Suit::Man, 6, false));
+        game.players[3].hand.add_tile(four); // 切る用 (現物テスト)
+        game.players[3].hand.add_tile(seven); // 切る用 (筋テスト)
+        game.players[3].hand.add_tile(Tile::new_number(Suit::Pin, 1, false)); // 合法打牌用
+        game.last_discard = Some(four);
+        game.last_discard_hidden = false;
+        game.last_discarder = Some(0);
+        game.current_player = 0;
+
+        // pattern 2: n,n+1,n+2 (= 4m,5m,6m)。手牌 5m6m を使う。
+        assert!(game.do_chi(3, 2), "456m チー成立");
+        assert_eq!(game.current_player, 3);
+        assert!(game.kuikae_forbidden.contains(&four), "現物 4m 禁止");
+        assert!(game.kuikae_forbidden.contains(&seven), "筋 7m 禁止");
+        assert!(!game.discard_tile(four), "現物 4m は打てない");
+        assert!(!game.discard_tile(seven), "筋 7m は打てない");
+        assert!(
+            game.discard_tile(Tile::new_number(Suit::Pin, 1, false)),
+            "無関係の牌は打てる"
+        );
+    }
+
+    /// 嵌張チー (3m5m で 4m を鳴き) は筋食い替えが無く、現物 4m のみ禁止。
+    #[test]
+    fn test_kuikae_chi_kanchan_only_genbutsu() {
+        let mut game = Game::new(kuikae_names());
+        let four = Tile::new_number(Suit::Man, 4, false);
+        game.players[3].hand = crate::hand::Hand::new();
+        game.players[3].hand.add_tile(Tile::new_number(Suit::Man, 3, false));
+        game.players[3].hand.add_tile(Tile::new_number(Suit::Man, 5, false));
+        game.players[3].hand.add_tile(four);
+        game.players[3].hand.add_tile(Tile::new_number(Suit::Pin, 1, false));
+        game.last_discard = Some(four);
+        game.last_discard_hidden = false;
+        game.last_discarder = Some(0);
+        game.current_player = 0;
+
+        // pattern 1: n-1,n,n+1 (= 3m,4m,5m) 嵌張。
+        assert!(game.do_chi(3, 1), "345m 嵌張チー成立");
+        assert_eq!(game.kuikae_forbidden, vec![four], "嵌張は現物 4m のみ禁止 (筋なし)");
+        assert!(!game.discard_tile(four), "現物 4m は打てない");
     }
 }
