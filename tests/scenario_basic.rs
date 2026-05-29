@@ -170,6 +170,24 @@ fn availability_can_pon_reflects_other_players_hand() {
         tile!(2s), tile!(3s), tile!(4s),
         tile!(5s), tile!(6s), tile!(haku),
     ]);
+    // p1 / p3 の手牌も明示する。Scenario::build() は未指定の手牌を
+    // Game::new のランダム配牌のまま残すため、余った 4 枚目の nan が p1/p3 に
+    // 配られて can_pon[1] / can_pon[3] が偶発的に true になりうる (フラキー)。
+    // nan を 1 枚も含まない決定論的な手牌で固定する。
+    s.hands[1] = Some(vec![
+        tile!(1s), tile!(2s), tile!(3s),
+        tile!(4s), tile!(5s), tile!(6s),
+        tile!(7s), tile!(8s), tile!(9s),
+        tile!(1p), tile!(2p), tile!(3p),
+        tile!(4p),
+    ]);
+    s.hands[3] = Some(vec![
+        tile!(1m), tile!(2m), tile!(3m),
+        tile!(4m), tile!(5m), tile!(6m),
+        tile!(7m), tile!(8m), tile!(9m),
+        tile!(5p), tile!(6p), tile!(7p),
+        tile!(8p),
+    ]);
 
     let mut r = ScenarioRunner::from_scenario(s);
     // 親が nan を打牌

@@ -3490,6 +3490,15 @@ mod tests {
         game.last_discard_hidden = false;
         game.current_player = 0;
 
+        // 山末尾を決定論的に固定する。do_kan は wall.pop() で
+        // 「槓ドラ表示牌 → 嶺上牌」の順に引くので、最後に push したものが槓ドラ表示、
+        // その手前が嶺上牌になる。嶺上牌に 5m が来ると「手牌から 5m が消えている」
+        // アサーションが偶発的に落ちる (フラキー) ため、5m 以外を明示的に積む。
+        let rinshan = Tile::new_number(Suit::Sou, 9, false);
+        let kan_dora_indicator = Tile::new_number(Suit::Sou, 8, false);
+        game.wall.push(rinshan); // 2 番目に pop → 嶺上牌
+        game.wall.push(kan_dora_indicator); // 最初に pop → 槓ドラ表示牌
+
         let raw_hand_len_before = game.players[1].hand.get_tiles().len();
         let dora_count_before = game.dora_indicators.len();
         let wall_count_before = game.get_wall_count();
