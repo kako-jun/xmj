@@ -262,6 +262,32 @@ fn fu_pinfu_tsumo_is_20() {
     assert_eq!(r.fu, 20, "平和ツモ = 20 符");
 }
 
+// ============ オープンリーチ (#60) ============
+
+#[test]
+fn open_riichi_adds_han() {
+    // 門前平和形 + 立直 + オープンリーチ → Riichi + OpenRiichi の 2 飜分。
+    let hand = vec![
+        tile!(2p), tile!(3p), tile!(4p),
+        tile!(5p), tile!(6p), tile!(7p),
+        tile!(2s), tile!(3s), tile!(4s),
+        tile!(6s), tile!(7s),
+        tile!(5m), tile!(5m),
+    ];
+    let mut hand_obj = Hand::new();
+    for t in hand { hand_obj.add_tile(t); }
+    let ctx = ScoringContext {
+        is_tsumo: false,
+        is_riichi: true,
+        is_open_riichi: true,
+        ..ScoringContext::default()
+    };
+    let r = ScoringEngine::calculate_score_with_context(&hand_obj, &tile!(8s), &ctx)
+        .expect("立直手で和了");
+    assert!(r.yaku.contains(&Yaku::Riichi), "立直: {:?}", r.yaku);
+    assert!(r.yaku.contains(&Yaku::OpenRiichi), "オープンリーチ +1: {:?}", r.yaku);
+}
+
 // ============ 喰いタン toggle (#129) ============
 
 #[test]
