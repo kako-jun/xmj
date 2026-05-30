@@ -789,6 +789,65 @@ impl WasmGame {
         }
     }
 
+    /// #55: 特殊（途中）流局を有効にするかを設定する。デフォルト true。
+    #[wasm_bindgen(js_name = setAllowAbortiveDraws)]
+    pub fn set_allow_abortive_draws(&mut self, allowed: bool) {
+        self.game.allow_abortive_draws = allowed;
+    }
+
+    /// #55: 四風連打が成立しているか。
+    #[wasm_bindgen(js_name = checkSuufonRenda)]
+    pub fn check_suufon_renda(&self) -> bool {
+        self.game.check_suufon_renda()
+    }
+
+    /// #55: 四家立直が成立しているか。
+    #[wasm_bindgen(js_name = checkSuuchaRiichi)]
+    pub fn check_suucha_riichi(&self) -> bool {
+        self.game.check_suucha_riichi()
+    }
+
+    /// #55: 四槓散了が成立しているか。
+    #[wasm_bindgen(js_name = checkSuukanSanra)]
+    pub fn check_suukan_sanra(&self) -> bool {
+        self.game.check_suukan_sanra()
+    }
+
+    /// #55: 現在の手番プレイヤーが九種九牌を宣言できるか。
+    #[wasm_bindgen(js_name = canDeclareKyuushu)]
+    pub fn can_declare_kyuushu(&self) -> bool {
+        self.game.can_declare_kyuushu(self.game.current_player)
+    }
+
+    /// #55: 九種九牌を宣言して途中流局にする。宣言不可なら false。
+    #[wasm_bindgen(js_name = declareKyuushu)]
+    pub fn declare_kyuushu(&mut self) -> bool {
+        use crate::game::AbortiveDrawKind;
+        if !self.game.can_declare_kyuushu(self.game.current_player) {
+            return false;
+        }
+        self.game.apply_abortive_draw(AbortiveDrawKind::KyuushuKyuuhai);
+        true
+    }
+
+    /// #55: 自動検出した途中流局 (四風連打/四家立直/四槓散了) を確定させる。
+    /// 0=四風連打 / 1=四家立直 / 2=四槓散了。条件未成立なら false。
+    #[wasm_bindgen(js_name = applyAbortiveDraw)]
+    pub fn apply_abortive_draw_kind(&mut self, kind: u8) -> bool {
+        use crate::game::AbortiveDrawKind;
+        let (ok, k) = match kind {
+            0 => (self.game.check_suufon_renda(), AbortiveDrawKind::SuufonRenda),
+            1 => (self.game.check_suucha_riichi(), AbortiveDrawKind::SuuchaRiichi),
+            2 => (self.game.check_suukan_sanra(), AbortiveDrawKind::SuukanSanra),
+            _ => return false,
+        };
+        if !ok {
+            return false;
+        }
+        self.game.apply_abortive_draw(k);
+        true
+    }
+
     /// #79: 指定プレイヤーの手牌を文字列（CUI コード）で返す。
     /// デバッグモードで CPU 手牌を表向き表示するために使用する。
     #[wasm_bindgen(js_name = getPlayerHandString)]
@@ -868,6 +927,15 @@ impl WasmGame {
                             .map(|i| serde_json::Value::Number((*i).into()))
                             .collect(),
                     ),
+                );
+                serde_json::Value::Object(obj).to_string()
+            }
+            Some(RoundOutcome::AbortiveDraw { kind }) => {
+                let mut obj = serde_json::Map::new();
+                obj.insert("kind".into(), serde_json::Value::String("abortive".into()));
+                obj.insert(
+                    "abortiveKind".into(),
+                    serde_json::Value::String(format!("{:?}", kind)),
                 );
                 serde_json::Value::Object(obj).to_string()
             }

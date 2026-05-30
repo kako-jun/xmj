@@ -151,6 +151,25 @@ pub enum RoundOutcome {
     Draw {
         tenpai_players: Vec<usize>,
     },
+    /// #55 特殊（途中）流局。親はそのまま連荘、聴牌料は発生しない。
+    AbortiveDraw {
+        kind: AbortiveDrawKind,
+    },
+}
+
+/// #55 特殊（途中）流局の種別。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbortiveDrawKind {
+    /// 四風連打: 第一巡で全員が同じ風牌を打牌。
+    SuufonRenda,
+    /// 四家立直: 4 人全員が立直宣言。
+    SuuchaRiichi,
+    /// 四槓散了: 4 つの槓が複数人で打たれた（1 人 4 槓は継続）。
+    SuukanSanra,
+    /// 九種九牌: 第一ツモ・無鳴きで么九牌 9 種以上を宣言。
+    KyuushuKyuuhai,
+    /// 三家和: 同一打牌に 3 人が同時ロン。
+    SanchaaHou,
 }
 
 /// 闇麻の固定額
@@ -302,6 +321,11 @@ pub struct Game {
     /// #118 割れ目プレイヤー（None なら割れ目ルール無効）。
     /// このプレイヤーが絡む支払い（払う / 受け取る）は 2 倍になる。
     pub warime_player: Option<usize>,
+    /// #55 特殊（途中）流局を有効にするか（デフォルト true、概ね標準ルール）。
+    pub allow_abortive_draws: bool,
+    /// #55 流し満貫判定用: 各プレイヤーの打牌が他家に鳴かれたか。
+    /// 鳴かれていたら流し満貫不成立。局リセットで全 false。
+    pub discard_taken_from: Vec<bool>,
 }
 
 impl Game {
@@ -379,6 +403,8 @@ impl Game {
             enforce_pao: true,
             pao_liabilities: Vec::new(),
             warime_player: None,
+            allow_abortive_draws: true,
+            discard_taken_from: vec![false; 4],
         };
 
         game.initialize_wall();
@@ -926,6 +952,12 @@ impl Game {
             self.clear_ippatsu_others(player_idx);
             // #51 鳴き発生で地和を不成立にする
             self.any_call_made_this_round = true;
+            // #55 流し満貫: 打牌が鳴かれた記録
+            if let Some(f) = from_player {
+                if f < self.discard_taken_from.len() {
+                    self.discard_taken_from[f] = true;
+                }
+            }
             // #59 食い替え禁止: 現物 (鳴いた牌 value) と、リャンメンチーの筋を禁止する。
             // pattern 0 (手 value-2,value-1): 筋 = value-3
             // pattern 1 (手 value-1,value+1 嵌張): 筋なし
@@ -980,6 +1012,12 @@ impl Game {
         self.kuikae_forbidden = vec![tile];
         // #57 包: 大三元/大四喜 がこのポンで確定したか
         self.check_pao_after_call(player_idx, from_player);
+        // #55 流し満貫: 打牌が鳴かれた記録
+        if let Some(f) = from_player {
+            if f < self.discard_taken_from.len() {
+                self.discard_taken_from[f] = true;
+            }
+        }
         true
     }
 
@@ -1031,6 +1069,12 @@ impl Game {
         self.any_call_made_this_round = true;
         // #57 包: 大三元/大四喜/四槓子 がこの大明槓で確定したか
         self.check_pao_after_call(player_idx, from_player);
+        // #55 流し満貫: 打牌が鳴かれた記録
+        if let Some(f) = from_player {
+            if f < self.discard_taken_from.len() {
+                self.discard_taken_from[f] = true;
+            }
+        }
 
         self.current_player = player_idx;
         true
@@ -1963,7 +2007,128 @@ impl Game {
             .collect()
     }
 
+    // ==================== #55 特殊（途中）流局 ====================
+
+    /// 四風連打: 第一巡（各自 1 打のみ・無鳴き）で全員が同じ風牌を打牌したか。
+    pub fn check_suufon_renda(&self) -> bool {
+        if !self.allow_abortive_draws || self.any_call_made_this_round {
+            return false;
+        }
+        // 全員ちょうど 1 打
+        if !self.players.iter().all(|p| p.discards.len() == 1) {
+            return false;
+        }
+        let first = self.players[0].discards[0].tile;
+        let wind = matches!(
+            first.tile_type,
+            TileType::Honor(Honor::Ton | Honor::Nan | Honor::Shaa | Honor::Pei)
+        );
+        if !wind {
+            return false;
+        }
+        self.players
+            .iter()
+            .all(|p| p.discards[0].tile.tile_type == first.tile_type)
+    }
+
+    /// 四家立直: 4 人全員が立直しているか。
+    pub fn check_suucha_riichi(&self) -> bool {
+        self.allow_abortive_draws && self.players.iter().all(|p| p.is_riichi)
+    }
+
+    /// 四槓散了: 槓が合計 4 つあり、かつ 2 人以上で打たれているか（1 人 4 槓は継続）。
+    pub fn check_suukan_sanra(&self) -> bool {
+        if !self.allow_abortive_draws {
+            return false;
+        }
+        let mut total_kan = 0;
+        let mut kan_owners = std::collections::HashSet::new();
+        for (idx, p) in self.players.iter().enumerate() {
+            for m in p.hand.get_melds() {
+                if matches!(m.meld_type, crate::hand::MeldType::Kan) {
+                    total_kan += 1;
+                    kan_owners.insert(idx);
+                }
+            }
+        }
+        total_kan == 4 && kan_owners.len() >= 2
+    }
+
+    /// 九種九牌を宣言できるか。第一ツモ・無鳴き・当該プレイヤー無打牌で、
+    /// 手牌（14 枚）に么九牌が 9 種類以上あること。
+    pub fn can_declare_kyuushu(&self, player_idx: usize) -> bool {
+        if !self.allow_abortive_draws || self.any_call_made_this_round {
+            return false;
+        }
+        if player_idx >= self.players.len() {
+            return false;
+        }
+        let p = &self.players[player_idx];
+        if !p.discards.is_empty() {
+            return false;
+        }
+        let mut yaochu_types = std::collections::HashSet::new();
+        for t in p.hand.get_tiles() {
+            let is_yaochu = match t.tile_type {
+                TileType::Number { value, .. } => value == 1 || value == 9,
+                TileType::Honor(_) => true,
+            };
+            if is_yaochu {
+                yaochu_types.insert(t.tile_type);
+            }
+        }
+        yaochu_types.len() >= 9
+    }
+
+    /// 特殊流局を確定させる。親はそのまま連荘、聴牌料は発生しない、
+    /// 供託リーチ棒は持ち越し。本場は `next_round` 側で +1 される。
+    pub fn apply_abortive_draw(&mut self, kind: AbortiveDrawKind) {
+        // 親流れせず連荘扱い（dealer_won_last=true で next_round が本場を積む）
+        self.dealer_won_last = true;
+        self.last_outcome = Some(RoundOutcome::AbortiveDraw { kind });
+    }
+
+    /// #55 流し満貫の判定: 河がすべて么九牌で、かつ自分の打牌が一度も鳴かれていない
+    /// プレイヤーの座席 index 一覧を返す。
+    pub fn nagashi_mangan_players(&self) -> Vec<usize> {
+        let mut result = Vec::new();
+        for (idx, p) in self.players.iter().enumerate() {
+            if p.discards.is_empty() {
+                continue;
+            }
+            if idx < self.discard_taken_from.len() && self.discard_taken_from[idx] {
+                continue; // 鳴かれていたら不成立
+            }
+            let all_yaochu = p.discards.iter().all(|d| match d.tile.tile_type {
+                TileType::Number { value, .. } => value == 1 || value == 9,
+                TileType::Honor(_) => true,
+            });
+            if all_yaochu {
+                result.push(idx);
+            }
+        }
+        result
+    }
+
     pub fn resolve_draw(&mut self, tenpai_players: Vec<usize>) {
+        // #55 流し満貫: 河が全て么九 + 無鳴きのプレイヤーがいれば満貫和了扱い。
+        // 通常のテンパイ料は発生させず、流し満貫の支払いのみ行う。
+        if self.allow_abortive_draws {
+            let nagashi = self.nagashi_mangan_players();
+            if !nagashi.is_empty() {
+                for winner in &nagashi {
+                    // 親流し満貫 = 12000 (子 4000 ずつ)、子流し満貫 = 8000 (親 4000 + 子 2000)。
+                    // ツモ満貫と同じ分配で apply_payment を使う (base_points=2000)。
+                    let is_dealer_win = *winner == self.dealer;
+                    let total = if is_dealer_win { 12000 } else { 8000 };
+                    self.apply_payment(*winner, WinKind::Tsumo, total, 0, is_dealer_win);
+                }
+                // 親が流し満貫なら連荘
+                self.dealer_won_last = nagashi.contains(&self.dealer);
+                self.last_outcome = Some(RoundOutcome::Draw { tenpai_players });
+                return;
+            }
+        }
         let tenpai_count = tenpai_players.len();
         let dealer_tenpai = tenpai_players.contains(&self.dealer);
 
@@ -2078,6 +2243,10 @@ impl Game {
         self.kuikae_forbidden.clear();
         // #57 包の責任関係をリセット
         self.pao_liabilities.clear();
+        // #55 流し満貫の打牌鳴かれフラグをリセット
+        for f in self.discard_taken_from.iter_mut() {
+            *f = false;
+        }
         // #51 鳴き発生フラグをリセット
         self.any_call_made_this_round = false;
         self.draws_this_round = 0;
@@ -3825,6 +3994,101 @@ mod tests {
         assert_eq!(game.current_player, 1, "do_kan 後の手番は宣言者");
         // last_discard はクリアされる
         assert!(game.last_discard.is_none(), "明槓で last_discard はクリアされる");
+    }
+
+    // ==================== #55 特殊（途中）流局 ====================
+
+    fn abortive_names() -> Vec<String> {
+        vec!["A".into(), "B".into(), "C".into(), "D".into()]
+    }
+
+    fn push_discard(game: &mut Game, player: usize, tile: Tile) {
+        game.players[player]
+            .discards
+            .push(crate::player::Discard { tile, is_hidden: false });
+    }
+
+    #[test]
+    fn test_suufon_renda() {
+        let mut game = Game::new(abortive_names());
+        for i in 0..4 {
+            push_discard(&mut game, i, Tile::new_honor(Honor::Ton));
+        }
+        assert!(game.check_suufon_renda(), "全員東打ちで四風連打");
+        // 1 人だけ違う風 → 不成立
+        game.players[3].discards.clear();
+        push_discard(&mut game, 3, Tile::new_honor(Honor::Nan));
+        assert!(!game.check_suufon_renda(), "風が揃わなければ不成立");
+    }
+
+    #[test]
+    fn test_suucha_riichi() {
+        let mut game = Game::new(abortive_names());
+        for p in game.players.iter_mut() {
+            p.is_riichi = true;
+        }
+        assert!(game.check_suucha_riichi(), "全員立直で四家立直");
+        game.players[2].is_riichi = false;
+        assert!(!game.check_suucha_riichi(), "1 人未立直なら不成立");
+    }
+
+    #[test]
+    fn test_can_declare_kyuushu() {
+        let mut game = Game::new(abortive_names());
+        game.players[0].hand = crate::hand::Hand::new();
+        // 么九 9 種 + 適当な 5 枚
+        for t in [
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 9, false),
+            Tile::new_number(Suit::Pin, 1, false),
+            Tile::new_number(Suit::Pin, 9, false),
+            Tile::new_number(Suit::Sou, 1, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Nan),
+            Tile::new_honor(Honor::Shaa),
+            Tile::new_number(Suit::Man, 3, false),
+            Tile::new_number(Suit::Man, 4, false),
+            Tile::new_number(Suit::Pin, 5, false),
+            Tile::new_number(Suit::Pin, 6, false),
+            Tile::new_number(Suit::Sou, 5, false),
+        ] {
+            game.players[0].hand.add_tile(t);
+        }
+        game.current_player = 0;
+        assert!(game.can_declare_kyuushu(0), "么九 9 種で九種九牌宣言可");
+        // 打牌済みなら不可
+        push_discard(&mut game, 0, Tile::new_number(Suit::Man, 3, false));
+        assert!(!game.can_declare_kyuushu(0), "打牌後は不可");
+    }
+
+    #[test]
+    fn test_nagashi_mangan() {
+        let mut game = Game::new(abortive_names());
+        // player 0 の河が全て么九・鳴かれていない → 流し満貫
+        push_discard(&mut game, 0, Tile::new_number(Suit::Man, 1, false));
+        push_discard(&mut game, 0, Tile::new_honor(Honor::Chun));
+        push_discard(&mut game, 0, Tile::new_number(Suit::Sou, 9, false));
+        // player 1 は中張を含む
+        push_discard(&mut game, 1, Tile::new_number(Suit::Pin, 5, false));
+        let nagashi = game.nagashi_mangan_players();
+        assert_eq!(nagashi, vec![0], "player 0 のみ流し満貫");
+
+        // 鳴かれていたら不成立
+        game.discard_taken_from[0] = true;
+        assert!(game.nagashi_mangan_players().is_empty(), "鳴かれたら不成立");
+    }
+
+    #[test]
+    fn test_nagashi_mangan_payment_in_resolve_draw() {
+        let mut game = Game::new(abortive_names());
+        // player 1 (子) が流し満貫
+        push_discard(&mut game, 1, Tile::new_number(Suit::Man, 1, false));
+        let before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+        game.resolve_draw(vec![]);
+        // 子流し満貫 8000: 親(0) 4000 + 子(2,3) 2000 ずつ
+        assert_eq!(game.players[1].score - before[1], 8000, "流し満貫 +8000");
+        assert_eq!(before[0] - game.players[0].score, 4000, "親 -4000");
     }
 
     // ==================== #118 割れ目 ====================
