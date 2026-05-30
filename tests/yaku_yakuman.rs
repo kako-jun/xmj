@@ -399,6 +399,53 @@ fn test_sankantsu() {
 }
 
 // =============================================================================
+// #130 暗槓込み四暗刻
+// =============================================================================
+
+/// 暗槓 1 + 暗刻 3 + 雀頭 (単騎) → 四暗刻。暗槓を暗刻として数える。
+/// 暗槓 1111m + 222p 333s 444s + 9s9s 雀頭、和了 9s (単騎)。
+#[test]
+fn test_suuankou_with_ankan_tanki() {
+    let melds = vec![kan_meld(tile!(1m), false)]; // 暗槓
+    let tiles = vec![
+        tile!(2p), tile!(2p), tile!(2p),
+        tile!(3s), tile!(3s), tile!(3s),
+        tile!(4s), tile!(4s), tile!(4s),
+        tile!(9s),
+    ];
+    let result = score_with_melds(tiles, melds, tile!(9s)).expect("暗槓込み四暗刻で和了");
+    assert!(
+        result.yaku.contains(&Yaku::Suuankou),
+        "暗槓を暗刻に数えて四暗刻成立: {:?}",
+        result.yaku
+    );
+    assert_eq!(result.yakuman_count, 1, "四暗刻は単役満");
+}
+
+/// 暗槓込みでもシャンポンロンは明刻格下げで四暗刻不成立 (三暗刻)。
+/// 暗槓 1111m + 222p 333s + 4s4s 5s5s シャンポン、和了 4s をロン。
+/// 444s が明刻になり手牌側暗刻は 222p 333s の 2 つ + 暗槓 = 暗刻 3 < 4。
+#[test]
+fn test_suuankou_with_ankan_shanpon_ron_fails() {
+    let melds = vec![kan_meld(tile!(1m), false)];
+    let tiles = vec![
+        tile!(2p), tile!(2p), tile!(2p),
+        tile!(3s), tile!(3s), tile!(3s),
+        tile!(4s), tile!(4s),
+        tile!(5s), tile!(5s),
+    ];
+    // 和了 4s をロン (ctx 既定 = ロン) → 444s 明刻
+    let result = score_with_melds(tiles, melds, tile!(4s));
+    if let Some(r) = result {
+        assert!(
+            !r.yaku.contains(&Yaku::Suuankou),
+            "シャンポンロンは四暗刻不成立: {:?}",
+            r.yaku
+        );
+    }
+}
+
+// =============================================================================
 // #52 混老頭
 // =============================================================================
 

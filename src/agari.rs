@@ -346,18 +346,35 @@ pub fn is_pinfu_shape(tiles14: &[Tile], winning_tile: &Tile) -> bool {
 /// - 単騎和了でない場合 (= シャンポン / 順子待ち) は、ロンだと 1 つの刻子が明刻扱いになる
 /// - 本関数はツモ和了および「単騎」解釈時の四暗刻を判定する
 pub fn is_suuankou(tiles14: &[Tile], winning_tile: &Tile, is_tsumo: bool) -> bool {
-    let decs = enumerate_decompositions_with_wait(tiles14, winning_tile);
-    for (dec, kind) in &decs {
-        if !dec.mentsu.iter().all(|m| matches!(m, Mentsu::Koutsu(_))) {
+    is_suuankou_n(tiles14, winning_tile, is_tsumo, 4)
+}
+
+/// #130 暗槓込みの四暗刻判定。
+///
+/// 暗槓 (ankan) も暗刻として四暗刻に数える。`ankan_count` 個の暗槓がある場合、
+/// 残りの手牌部分 (winning_tile を含む) が `4 - ankan_count` 個の暗刻 + 雀頭で
+/// 構成できれば四暗刻。シャンポンロンでの明刻格下げルールは手牌側の刻子にのみ適用
+/// (暗槓は常に暗刻)。
+///
+/// `concealed_tiles` は副露を除いた手牌 + winning_tile (枚数 = (4-ankan_count)*3 + 2)。
+pub fn is_suuankou_n(
+    concealed_tiles: &[Tile],
+    winning_tile: &Tile,
+    is_tsumo: bool,
+    melds_needed: usize,
+) -> bool {
+    let decs = enumerate_concealed_decomps(concealed_tiles, winning_tile, melds_needed);
+    for (_pair, mentsu, kind) in &decs {
+        if !mentsu.iter().all(|m| matches!(m, Mentsu::Koutsu(_))) {
             continue;
         }
         match kind {
-            MachiKind::Tanki => return true, // 四暗刻単騎 (ロンでも成立)
+            MachiKind::Tanki => return true, // 単騎: 雀頭待ちなので手牌側刻子は全て暗刻 (ロンでも成立)
             MachiKind::Shanpon => {
                 if is_tsumo {
                     return true;
                 }
-                // ロンだと和了牌を含む刻子が明刻になり、暗刻 3 つ + 明刻 1 つ → 三暗刻
+                // ロンだと和了牌を含む刻子が明刻 → 手牌側暗刻が 1 つ減る = 四暗刻不成立
                 continue;
             }
             _ => continue,
