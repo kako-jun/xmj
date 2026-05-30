@@ -262,6 +262,52 @@ fn fu_pinfu_tsumo_is_20() {
     assert_eq!(r.fu, 20, "平和ツモ = 20 符");
 }
 
+// ============ 喰いタン toggle (#129) ============
+
+#[test]
+fn open_tanyao_toggle() {
+    // チー 345m + 2p3p4p 5p6p7p 6s7s8s 2s2s、和了 8s。全牌 2-8 → 喰いタン形。
+    let make = || {
+        let mut hand = Hand::new();
+        for t in [
+            tile!(2p), tile!(3p), tile!(4p),
+            tile!(5p), tile!(6p), tile!(7p),
+            tile!(6s), tile!(7s),
+            tile!(2s), tile!(2s),
+        ] {
+            hand.add_tile(t);
+        }
+        hand.add_meld(Meld {
+            meld_type: MeldType::Chi,
+            tiles: vec![tile!(3m), tile!(4m), tile!(5m)],
+            is_open: true,
+            ..Default::default()
+        });
+        hand
+    };
+
+    // allow_open_tanyao = true (デフォルト) → 喰いタン成立
+    let ctx_on = ScoringContext {
+        allow_open_tanyao: true,
+        ..ScoringContext::default()
+    };
+    let r_on = ScoringEngine::calculate_score_with_context(&make(), &tile!(8s), &ctx_on)
+        .expect("喰いタンありなら和了");
+    assert!(r_on.yaku.contains(&Yaku::Tanyao), "喰いタン有効: {:?}", r_on.yaku);
+
+    // allow_open_tanyao = false → 非門前タンヤオは付かず役なし → None
+    let ctx_off = ScoringContext {
+        allow_open_tanyao: false,
+        ..ScoringContext::default()
+    };
+    let r_off = ScoringEngine::calculate_score_with_context(&make(), &tile!(8s), &ctx_off);
+    assert!(
+        r_off.is_none(),
+        "喰いタン無効なら役なしで和了不可: {:?}",
+        r_off.map(|r| r.yaku)
+    );
+}
+
 // ============ 暗槓は門前を崩さない (#108 is_menzen 修正) ============
 
 #[test]

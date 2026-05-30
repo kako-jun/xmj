@@ -681,6 +681,19 @@ impl WasmGame {
         self.game.enforce_kuikae
     }
 
+    /// #129: 喰いタン (鳴きタンヤオ) を認めるかを設定する。
+    /// true（デフォルト）= 非門前でも断么九有効。false = 非門前は無効。
+    #[wasm_bindgen(js_name = setAllowOpenTanyao)]
+    pub fn set_allow_open_tanyao(&mut self, allowed: bool) {
+        self.game.allow_open_tanyao = allowed;
+    }
+
+    /// #129: 喰いタン設定の現在値。
+    #[wasm_bindgen(js_name = isAllowOpenTanyao)]
+    pub fn is_allow_open_tanyao(&self) -> bool {
+        self.game.allow_open_tanyao
+    }
+
     /// #79: 指定プレイヤーの手牌を文字列（CUI コード）で返す。
     /// デバッグモードで CPU 手牌を表向き表示するために使用する。
     #[wasm_bindgen(js_name = getPlayerHandString)]

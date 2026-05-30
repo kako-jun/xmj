@@ -256,6 +256,9 @@ pub struct Game {
     /// #59 食い替え禁止を強制するか（デフォルト true）。
     /// false にすると食い替え打牌を許可する（ローカルルール用 toggle）。
     pub enforce_kuikae: bool,
+    /// #129 喰いタン (鳴きタンヤオ) を認めるか（デフォルト true）。
+    /// false にすると非門前の断么九を無効化する（ローカルルール用 toggle）。
+    pub allow_open_tanyao: bool,
     /// #59 直前のチー / ポンによって「次の打牌で切れない牌」の集合。
     /// 現物（鳴いた牌と同種）と筋（チーのリャンメン反対側）を入れる。
     /// 打牌が成立した時点でクリアする。チー / ポン以外の操作では空のまま。
@@ -331,6 +334,7 @@ impl Game {
             auto_draw: true,
             enforce_kuikae: true,
             kuikae_forbidden: Vec::new(),
+            allow_open_tanyao: true,
         };
 
         game.initialize_wall();
@@ -1357,6 +1361,7 @@ impl Game {
             uradora_indicators: Vec::new(),
             is_tenhou,
             is_chiihou,
+            allow_open_tanyao: self.allow_open_tanyao,
         }
     }
 
