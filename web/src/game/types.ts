@@ -149,10 +149,16 @@ export interface RoundDrawSummary {
   tenpaiPlayers: PlayerIndex[]
 }
 
+/** #55 特殊（途中）流局の結果。abortiveKind は Rust の AbortiveDrawKind の Debug 文字列。 */
+export interface RoundAbortiveSummary {
+  abortiveKind: string // "SuufonRenda" | "SuuchaRiichi" | "SuukanSanra" | "KyuushuKyuuhai" | "SanchaaHou"
+}
+
 /** 局結果の判別共用体。UI の中間結果シーンが switch で分岐する。 */
 export type RoundOutcome =
   | { kind: 'win'; data: RoundWinSummary }
   | { kind: 'draw'; data: RoundDrawSummary }
+  | { kind: 'abortive'; data: RoundAbortiveSummary }
 
 /**
  * Rust 側の生 JSON を `RoundOutcome` に変換する。
@@ -191,6 +197,13 @@ export const parseRoundOutcome = (json: string): RoundOutcome | null => {
     return {
       kind: 'draw',
       data: { tenpaiPlayers: arr.map(n => n as PlayerIndex) },
+    }
+  }
+  if (obj.kind === 'abortive') {
+    // #55 特殊（途中）流局
+    return {
+      kind: 'abortive',
+      data: { abortiveKind: typeof obj.abortiveKind === 'string' ? obj.abortiveKind : 'Abortive' },
     }
   }
   return null

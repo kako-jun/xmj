@@ -489,6 +489,30 @@ export class WasmGameBridge {
     }
   }
 
+  /** #55: 四風連打が成立しているか。 */
+  checkSuufonRenda(): boolean {
+    if (typeof this.game.checkSuufonRenda === 'function') {
+      return this.game.checkSuufonRenda() as boolean
+    }
+    return false
+  }
+
+  /** #55: 四家立直が成立しているか。 */
+  checkSuuchaRiichi(): boolean {
+    if (typeof this.game.checkSuuchaRiichi === 'function') {
+      return this.game.checkSuuchaRiichi() as boolean
+    }
+    return false
+  }
+
+  /** #55: 四槓散了が成立しているか。 */
+  checkSuukanSanra(): boolean {
+    if (typeof this.game.checkSuukanSanra === 'function') {
+      return this.game.checkSuukanSanra() as boolean
+    }
+    return false
+  }
+
   /** #55: 現在の手番プレイヤーが九種九牌を宣言できるか。 */
   canDeclareKyuushu(): boolean {
     if (typeof this.game.canDeclareKyuushu === 'function') {
@@ -518,6 +542,14 @@ export class WasmGameBridge {
     if (typeof this.game.addSashimaBet === 'function') {
       this.game.addSashimaBet(playerA, playerB, amount)
     }
+  }
+
+  /** #117: 登録済みの差し馬の賭け数。 */
+  sashimaBetCount(): number {
+    if (typeof this.game.sashimaBetCount === 'function') {
+      return this.game.sashimaBetCount() as number
+    }
+    return 0
   }
 
   // ---- デバッグ (Issue #79) ----
