@@ -138,14 +138,14 @@ pub struct Game {
 - 局ループ (`resolve_win` / `resolve_draw` / `next_round`)
 - ゲーム終了判定 (`is_game_over`: 飛び / 規定局終了 / EastWest クリア)
 
-### 5. Scoring Engine (`src/scoring.rs`)
+### 5. Scoring Engine (`src/scoring.rs` + `src/agari.rs` + `src/yaku_struct.rs`)
 
 **責務**: 役判定と点数計算
 
 ```rust
 pub enum Yaku {
     Riichi, Tanyao, Pinfu, Yakuhai(Honor),
-    // ... 他の役
+    // ... 標準役 + 役満 + ローカル役 (OpenRiichi/Renhou/Daisharin/Suurenkou/Hyakumangoku/Sanrenkou)
 }
 
 pub struct ScoringResult {
@@ -154,15 +154,29 @@ pub struct ScoringResult {
     pub yaku: Vec<Yaku>,
     pub base_points: u32,
     pub total_points: u32,
+    pub dora: u32, pub uradora: u32, pub akadora: u32, pub kandora: u32,
+    pub yakuman_count: u32, // 0=非役満、1=単役満、2=ダブル…
 }
 ```
 
+**モジュール構成** (#108 監査で分解ベースに刷新):
+- `scoring.rs` — `ScoringEngine::calculate_score_with_context(hand, winning_tile, ctx)` が live path。役満・牌集合ベース役 (タンヤオ/混一/清一/トイトイ/役牌/混老頭) + ドラ + 点数計算を担う。`ScoringContext` で立直系/状況役/場風自風/ドラ/各種ローカルトグルを受け取る。
+- `agari.rs` — 和了形分解エンジン。`enumerate_concealed_decomps(tiles, winning, melds_needed)` が (雀頭 + N面子 + 待ち形) を全列挙。副露あり手対応に一般化済み。赤ドラは分解前に正規化。平和形 / 四暗刻 (`is_suuankou_n`、暗槓対応) / 九蓮の判定ヘルパーを提供。
+- `yaku_struct.rs` — 面子分解ベースの構造役と符計算。一盃口/二盃口/三色同順/一気通貫/チャンタ/純チャン/三色同刻/小三元/三暗刻/平和/三連刻 + 符 (面子符/待ち符/雀頭役牌符/門前ロン/平和20-30/喰い平和形ロン30) を算出し、通常形と七対子で高得点の解釈を採用。
+
+> ⚠️ 旧実装では構造役8種がスタブ (常に false/None)・符計算がスタブ (基本符20+ツモ2のみ) だった。詳細は `docs/audit-scoring.md`。
+
 **機能**:
-- 役判定（リーチ、タンヤオ、ピンフ、役牌、etc.）
-- 符計算
-- 飜数計算
-- 点数計算（満貫、跳満、倍満、役満対応）
-- 親子・ツモロンの得点差分
+- 役判定（標準役・役満・ローカル役満・状況役）
+- 符計算（面子符・待ち符・雀頭符・門前ロン・平和/七対子特殊符）
+- 点数計算（満貫頭打ち・跳満・倍満・三倍満・数え役満・倍役満対応）
+- 親子・ツモロンの得点差分、本場・供託
+
+**特殊 / ローカルルール** (session547 で実装、`Game` のトグル経由。詳細は `DESIGN.md` §10):
+- 食い替え禁止 (#59) / 喰いタン toggle (#129) / ローカル役満 (#58) / オープンリーチ (#60) /
+  本場縛り (#61) / 包=責任払い (#57) / 割れ目 (#118) / 特殊流局 (#55) / 差し馬 (#117)。
+- 役満確定打牌の責任払い (`Game::check_pao_after_call` → `apply_pao_payment`)、割れ目の支払い 2 倍、
+  流し満貫 (`nagashi_mangan_players` → `resolve_draw`)、途中流局 (`RoundOutcome::AbortiveDraw`) を含む。
 
 ## P2P通信設計
 
