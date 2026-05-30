@@ -60,6 +60,9 @@ pub struct ScoringContext {
     /// #51: 地和 (子の第一ツモで和了)。winner != dealer かつ自家ツモ +
     /// 当該プレイヤーの discards 0 + これまでに誰も鳴いていないときに true。
     pub is_chiihou: bool,
+    /// #129: 喰いタン (鳴きタンヤオ) を認めるか。デフォルト true。
+    /// false のとき、非門前 (鳴きあり) の手では断么九を付与しない。
+    pub allow_open_tanyao: bool,
 }
 
 impl Default for ScoringContext {
@@ -80,6 +83,7 @@ impl Default for ScoringContext {
             uradora_indicators: Vec::new(),
             is_tenhou: false,
             is_chiihou: false,
+            allow_open_tanyao: true,
         }
     }
 }
@@ -361,8 +365,8 @@ impl ScoringEngine {
         // `yaku_struct::evaluate_best` で通常形分解から、または七対子分岐で計上し、
         // 高得点の解釈を採用する。
 
-        // タンヤオ
-        if Self::check_tanyao(&all_tiles) {
+        // タンヤオ (#129: 喰いタン無効時は非門前なら付与しない)
+        if Self::check_tanyao(&all_tiles) && (is_menzen || ctx.allow_open_tanyao) {
             yaku.push(Yaku::Tanyao);
             han += 1;
         }

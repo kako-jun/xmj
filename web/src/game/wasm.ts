@@ -394,6 +394,20 @@ export class WasmGameBridge {
     return true
   }
 
+  /** #129: 喰いタン (鳴きタンヤオ) を認めるかを設定する。 */
+  setAllowOpenTanyao(allowed: boolean): void {
+    if (typeof this.game.setAllowOpenTanyao === 'function') {
+      this.game.setAllowOpenTanyao(allowed)
+    }
+  }
+
+  isAllowOpenTanyao(): boolean {
+    if (typeof this.game.isAllowOpenTanyao === 'function') {
+      return this.game.isAllowOpenTanyao() as boolean
+    }
+    return true
+  }
+
   // ---- デバッグ (Issue #79) ----
 
   /**
