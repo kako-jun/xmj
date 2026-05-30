@@ -795,6 +795,29 @@ impl WasmGame {
         self.game.allow_abortive_draws = allowed;
     }
 
+    /// #117: 差し馬の賭けを追加する。対局終了時に最終点数が高い方が低い方から
+    /// `amount` を受け取る。
+    #[wasm_bindgen(js_name = addSashimaBet)]
+    pub fn add_sashima_bet(&mut self, player_a: usize, player_b: usize, amount: i32) {
+        use crate::game::SashimaBet;
+        if player_a < self.game.players.len()
+            && player_b < self.game.players.len()
+            && player_a != player_b
+        {
+            self.game.sashima_bets.push(SashimaBet {
+                player_a,
+                player_b,
+                amount,
+            });
+        }
+    }
+
+    /// #117: 登録済みの差し馬の賭け数。
+    #[wasm_bindgen(js_name = sashimaBetCount)]
+    pub fn sashima_bet_count(&self) -> usize {
+        self.game.sashima_bets.len()
+    }
+
     /// #55: 四風連打が成立しているか。
     #[wasm_bindgen(js_name = checkSuufonRenda)]
     pub fn check_suufon_renda(&self) -> bool {

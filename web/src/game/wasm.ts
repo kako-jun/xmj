@@ -482,6 +482,44 @@ export class WasmGameBridge {
     return -1
   }
 
+  /** #55: 特殊（途中）流局を有効にするか。 */
+  setAllowAbortiveDraws(allowed: boolean): void {
+    if (typeof this.game.setAllowAbortiveDraws === 'function') {
+      this.game.setAllowAbortiveDraws(allowed)
+    }
+  }
+
+  /** #55: 現在の手番プレイヤーが九種九牌を宣言できるか。 */
+  canDeclareKyuushu(): boolean {
+    if (typeof this.game.canDeclareKyuushu === 'function') {
+      return this.game.canDeclareKyuushu() as boolean
+    }
+    return false
+  }
+
+  /** #55: 九種九牌を宣言して途中流局にする。 */
+  declareKyuushu(): boolean {
+    if (typeof this.game.declareKyuushu === 'function') {
+      return this.game.declareKyuushu() as boolean
+    }
+    return false
+  }
+
+  /** #55: 四風連打/四家立直/四槓散了 (0/1/2) を確定させる。条件未成立なら false。 */
+  applyAbortiveDraw(kind: number): boolean {
+    if (typeof this.game.applyAbortiveDraw === 'function') {
+      return this.game.applyAbortiveDraw(kind) as boolean
+    }
+    return false
+  }
+
+  /** #117: 差し馬の賭けを追加する。 */
+  addSashimaBet(playerA: number, playerB: number, amount: number): void {
+    if (typeof this.game.addSashimaBet === 'function') {
+      this.game.addSashimaBet(playerA, playerB, amount)
+    }
+  }
+
   // ---- デバッグ (Issue #79) ----
 
   /**
