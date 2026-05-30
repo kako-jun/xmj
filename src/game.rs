@@ -98,6 +98,20 @@ pub enum Length {
     Hanchan,
 }
 
+/// #61 本場連動の縛り（最低点数縛り）ルール。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShibariRule {
+    /// 1 飜縛り（常時、= 役ありで和了可）。標準。
+    #[default]
+    Standard,
+    /// 5 本場以降は役 2 飜以上が必要（ドラは縛りに数えない）。
+    TwoHanFromFiveHonba,
+    /// 5 本場以降は満貫以上が必要。
+    ManganFromFiveHonba,
+    /// 7 本場以降は役満のみ和了可（ローカル極北）。
+    YakumanFromSevenHonba,
+}
+
 /// 和了の種類。
 #[derive(Debug, Clone, Copy)]
 pub enum WinKind {
@@ -265,6 +279,8 @@ pub struct Game {
     pub kuikae_forbidden: Vec<Tile>,
     /// #58 ローカル役満 (人和/大車輪/四連刻/百万石/三連刻) を認めるか（デフォルト false）。
     pub allow_local_yakuman: bool,
+    /// #61 本場縛りルール（デフォルト Standard = 1 飜縛り）。
+    pub shibari_rule: ShibariRule,
 }
 
 impl Game {
@@ -338,6 +354,7 @@ impl Game {
             kuikae_forbidden: Vec::new(),
             allow_open_tanyao: true,
             allow_local_yakuman: false,
+            shibari_rule: ShibariRule::Standard,
         };
 
         game.initialize_wall();
@@ -1641,6 +1658,39 @@ impl Game {
     /// **役満ご祝儀**（誠京モードのみ）: `SEIKYO_YAKUMAN_TIP` を放銃者 (ロン) or
     /// 他家全員 (ツモ) から winner に追加で授受する。`Player::pay_yakuman_tip` /
     /// `receive_yakuman_tip` を経由するため 0 クランプせず、ゼロサムが保たれる。
+    /// #61 本場縛り: 現在の honba と縛りルールに照らして、この和了結果が
+    /// 最低点数縛りを満たすか。満たさない和了は無効（呼び出し側で和了拒否する）。
+    ///
+    /// - 2 飜縛り: 役（ドラ除く）が 2 飜以上、または役満。
+    /// - 満貫縛り: base_points >= 2000（満貫以上）、または役満。
+    /// - 役満縛り: 役満のみ。
+    pub fn meets_shibari(&self, result: &crate::scoring::ScoringResult) -> bool {
+        match self.shibari_rule {
+            ShibariRule::Standard => true,
+            ShibariRule::TwoHanFromFiveHonba => {
+                if self.honba < 5 {
+                    return true;
+                }
+                let yaku_han = result
+                    .han
+                    .saturating_sub(result.dora + result.uradora + result.akadora);
+                yaku_han >= 2 || result.yakuman_count > 0
+            }
+            ShibariRule::ManganFromFiveHonba => {
+                if self.honba < 5 {
+                    return true;
+                }
+                result.base_points >= 2000 || result.yakuman_count > 0
+            }
+            ShibariRule::YakumanFromSevenHonba => {
+                if self.honba < 7 {
+                    return true;
+                }
+                result.yakuman_count > 0
+            }
+        }
+    }
+
     pub fn resolve_win(
         &mut self,
         winner: usize,
@@ -3616,6 +3666,56 @@ mod tests {
         assert_eq!(game.current_player, 1, "do_kan 後の手番は宣言者");
         // last_discard はクリアされる
         assert!(game.last_discard.is_none(), "明槓で last_discard はクリアされる");
+    }
+
+    // ==================== #61 本場縛り ====================
+
+    fn result_with(han: u32, dora: u32, base: u32, yakuman: u32) -> crate::scoring::ScoringResult {
+        crate::scoring::ScoringResult {
+            han,
+            fu: 30,
+            yaku: Vec::new(),
+            base_points: base,
+            total_points: 0,
+            dora,
+            uradora: 0,
+            akadora: 0,
+            kandora: 0,
+            yakuman_count: yakuman,
+        }
+    }
+
+    #[test]
+    fn test_shibari_two_han_from_five_honba() {
+        let mut game = Game::new(vec!["A".into(), "B".into(), "C".into(), "D".into()]);
+        game.shibari_rule = ShibariRule::TwoHanFromFiveHonba;
+        // 4 本場まではどんな手でも OK
+        game.honba = 4;
+        assert!(game.meets_shibari(&result_with(1, 0, 480, 0)), "4本場は1飜でも可");
+        // 5 本場以降は役 2 飜以上が必要 (ドラは数えない)
+        game.honba = 5;
+        // 役1飜 + ドラ1 = han 2 だが役は1飜 → 不可
+        assert!(!game.meets_shibari(&result_with(2, 1, 0, 0)), "役1飜+ドラ1は2飜縛り不可");
+        // 役2飜 → 可
+        assert!(game.meets_shibari(&result_with(2, 0, 0, 0)), "役2飜は可");
+        // 役満は常に可
+        assert!(game.meets_shibari(&result_with(13, 0, 8000, 1)), "役満は可");
+    }
+
+    #[test]
+    fn test_shibari_mangan_from_five_honba() {
+        let mut game = Game::new(vec!["A".into(), "B".into(), "C".into(), "D".into()]);
+        game.shibari_rule = ShibariRule::ManganFromFiveHonba;
+        game.honba = 5;
+        assert!(!game.meets_shibari(&result_with(3, 0, 1920, 0)), "満貫未満は不可");
+        assert!(game.meets_shibari(&result_with(5, 0, 2000, 0)), "満貫は可");
+    }
+
+    #[test]
+    fn test_shibari_standard_always_ok() {
+        let mut game = Game::new(vec!["A".into(), "B".into(), "C".into(), "D".into()]);
+        game.honba = 9;
+        assert!(game.meets_shibari(&result_with(1, 0, 480, 0)), "標準は常時可");
     }
 
     // ==================== #132 add_meld 二重除去回避 ====================

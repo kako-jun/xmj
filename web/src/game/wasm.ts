@@ -437,6 +437,23 @@ export class WasmGameBridge {
     return false
   }
 
+  /**
+   * #61: 本場縛りルールを設定する。
+   * 0=Standard / 1=5本場以降2飜縛り / 2=5本場以降満貫縛り / 3=7本場以降役満縛り。
+   */
+  setShibariRule(rule: number): void {
+    if (typeof this.game.setShibariRule === 'function') {
+      this.game.setShibariRule(rule)
+    }
+  }
+
+  getShibariRule(): number {
+    if (typeof this.game.getShibariRule === 'function') {
+      return this.game.getShibariRule() as number
+    }
+    return 0
+  }
+
   // ---- デバッグ (Issue #79) ----
 
   /**

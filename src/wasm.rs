@@ -284,6 +284,10 @@ impl WasmGame {
         let Some(result) = ScoringEngine::calculate_score_with_context(hand, &winning_tile, &ctx) else {
             return String::new();
         };
+        // #61 本場縛り: 最低点数縛りを満たさない和了は無効
+        if !self.game.meets_shibari(&result) {
+            return String::new();
+        }
         let summary = scoring_summary_json(&result);
         self.game
             .resolve_win(winner_idx, WinKind::Ron { from: from_idx }, result);
@@ -584,6 +588,10 @@ impl WasmGame {
         let Some(result) = ScoringEngine::calculate_score_with_context(&sub_hand, &winning_tile, &ctx) else {
             return String::new();
         };
+        // #61 本場縛り: 最低点数縛りを満たさない和了は無効
+        if !self.game.meets_shibari(&result) {
+            return String::new();
+        }
         let summary = scoring_summary_json(&result);
         self.game
             .resolve_win(winner_idx, WinKind::Tsumo, result);
@@ -610,6 +618,10 @@ impl WasmGame {
         let Some(result) = ScoringEngine::calculate_score_with_context(hand, &winning_tile, &ctx) else {
             return String::new();
         };
+        // #61 本場縛り: 最低点数縛りを満たさない和了は無効
+        if !self.game.meets_shibari(&result) {
+            return String::new();
+        }
         let summary = scoring_summary_json(&result);
         self.game
             .resolve_win(winner_idx, WinKind::Ron { from: from_idx }, result);
@@ -718,6 +730,32 @@ impl WasmGame {
     #[wasm_bindgen(js_name = isAllowLocalYakuman)]
     pub fn is_allow_local_yakuman(&self) -> bool {
         self.game.allow_local_yakuman
+    }
+
+    /// #61: 本場縛りルールを設定する。
+    /// 0 = Standard（1飜縛り）/ 1 = 5本場以降2飜縛り / 2 = 5本場以降満貫縛り /
+    /// 3 = 7本場以降役満縛り。不正値は Standard 扱い。
+    #[wasm_bindgen(js_name = setShibariRule)]
+    pub fn set_shibari_rule(&mut self, rule: u8) {
+        use crate::game::ShibariRule;
+        self.game.shibari_rule = match rule {
+            1 => ShibariRule::TwoHanFromFiveHonba,
+            2 => ShibariRule::ManganFromFiveHonba,
+            3 => ShibariRule::YakumanFromSevenHonba,
+            _ => ShibariRule::Standard,
+        };
+    }
+
+    /// #61: 現在の本場縛りルール (上記の数値) を返す。
+    #[wasm_bindgen(js_name = getShibariRule)]
+    pub fn get_shibari_rule(&self) -> u8 {
+        use crate::game::ShibariRule;
+        match self.game.shibari_rule {
+            ShibariRule::Standard => 0,
+            ShibariRule::TwoHanFromFiveHonba => 1,
+            ShibariRule::ManganFromFiveHonba => 2,
+            ShibariRule::YakumanFromSevenHonba => 3,
+        }
     }
 
     /// #79: 指定プレイヤーの手牌を文字列（CUI コード）で返す。
