@@ -265,13 +265,15 @@ impl ScoringEngine {
             }
         }
 
-        if Self::check_suuankou(hand, winning_tile, is_tsumo) {
+        // #147 四暗刻: 単騎和了はダブル役満。check_suuankou は倍率 (0/1/2) を返す。
+        let suuankou_mult = Self::check_suuankou(hand, winning_tile, is_tsumo);
+        if suuankou_mult > 0 {
             yaku.push(Yaku::Suuankou);
             han += 13;
-            yakuman_count += 1;
+            yakuman_count += suuankou_mult;
         }
 
-        if Self::check_daisangen(hand) {
+        if Self::check_daisangen(&all_tiles) {
             yaku.push(Yaku::Daisangen);
             han += 13;
             yakuman_count += 1;
@@ -820,52 +822,48 @@ impl ScoringEngine {
     // #130: 暗槓 (is_open=false の Kan) は暗刻として四暗刻に数える。手牌側は
     // (4 - 暗槓数) 個の暗刻 + 雀頭で構成できればよい。チー/ポン/明槓/加槓
     // (is_open=true) が 1 つでもあれば四暗刻不可。
-    fn check_suuankou(hand: &Hand, winning_tile: &Tile, is_tsumo: bool) -> bool {
+    // #147: 役満倍率を返す (0=不成立 / 1=単役満 / 2=四暗刻単騎ダブル役満)。
+    fn check_suuankou(hand: &Hand, winning_tile: &Tile, is_tsumo: bool) -> u32 {
         let melds = hand.get_melds();
         // 開いた副露があれば四暗刻不可。暗槓以外の副露 (= is_open=true) を弾く。
         if melds.iter().any(|m| m.is_open) {
-            return false;
+            return 0;
         }
         // 暗槓以外の closed meld は存在しない想定だが、念のため Kan のみ許可。
         if melds
             .iter()
             .any(|m| !matches!(m.meld_type, MeldType::Kan))
         {
-            return false;
+            return 0;
         }
         let ankan_count = melds.len();
         let melds_needed = match 4usize.checked_sub(ankan_count) {
             Some(n) => n,
-            None => return false,
+            None => return 0,
         };
         // 暗槓 4 つ (四槓子) は四暗刻の判定対象外 (雀頭のみ残る)。melds_needed=0 のときは
         // 手牌 + winning が雀頭のみで、刻子が手牌側に無いので四暗刻ではない (四槓子側で処理)。
         if melds_needed == 0 {
-            return false;
+            return 0;
         }
         let mut concealed = hand.get_tiles().clone();
         concealed.push(*winning_tile);
-        crate::agari::is_suuankou_n(&concealed, winning_tile, is_tsumo, melds_needed)
+        crate::agari::suuankou_multiplier_n(&concealed, winning_tile, is_tsumo, melds_needed)
     }
 
     // 大三元
-    fn check_daisangen(hand: &Hand) -> bool {
-        // 三元牌（白発中）の3組が全て刻子
-        let mut sangenpai_count = 0;
-
-        for meld in hand.get_melds() {
-            if let MeldType::Pon | MeldType::Kan = meld.meld_type {
-                if !meld.tiles.is_empty() {
-                    if let TileType::Honor(h) = meld.tiles[0].tile_type {
-                        if matches!(h, Honor::Haku | Honor::Hatsu | Honor::Chun) {
-                            sangenpai_count += 1;
-                        }
-                    }
-                }
-            }
-        }
-
-        sangenpai_count == 3
+    //
+    // #147 OSS対比監査で発見: 旧実装は副露 (pon/kan) のみ数えており、手牌内に
+    // 暗刻で揃えた大三元 (白白白 發發發 中中中 を鳴かずに作る形) を取りこぼしていた。
+    // all_tiles (手牌 + 副露 + winning_tile) で各三元牌が 3 枚以上あるかで判定する。
+    fn check_daisangen(all_tiles: &[Tile]) -> bool {
+        [Honor::Haku, Honor::Hatsu, Honor::Chun].iter().all(|sangen| {
+            all_tiles
+                .iter()
+                .filter(|t| t.tile_type == TileType::Honor(*sangen))
+                .count()
+                >= 3
+        })
     }
 
     // 字一色
