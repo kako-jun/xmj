@@ -736,17 +736,38 @@ impl ScoringEngine {
 
     // 四暗刻
     //
-    // Issue #34: 副露なし 14 枚手で 4 つの面子全てが刻子、雀頭 1 つ。
+    // 4 つの面子全てが暗刻 (暗槓を含む)、雀頭 1 つ。
     // - 単騎和了 (winning_tile が雀頭) → ロン / ツモどちらでも成立 (四暗刻単騎)
     // - シャンポン待ち → ツモのみ成立 (ロンだと最後の刻子が明刻扱いで三暗刻に格下げ)
-    // 副露あり手は構造上四暗刻不可なので false。
+    // #130: 暗槓 (is_open=false の Kan) は暗刻として四暗刻に数える。手牌側は
+    // (4 - 暗槓数) 個の暗刻 + 雀頭で構成できればよい。チー/ポン/明槓/加槓
+    // (is_open=true) が 1 つでもあれば四暗刻不可。
     fn check_suuankou(hand: &Hand, winning_tile: &Tile, is_tsumo: bool) -> bool {
-        if !hand.get_melds().is_empty() {
+        let melds = hand.get_melds();
+        // 開いた副露があれば四暗刻不可。暗槓以外の副露 (= is_open=true) を弾く。
+        if melds.iter().any(|m| m.is_open) {
             return false;
         }
-        let mut all_tiles = hand.get_tiles().clone();
-        all_tiles.push(*winning_tile);
-        crate::agari::is_suuankou(&all_tiles, winning_tile, is_tsumo)
+        // 暗槓以外の closed meld は存在しない想定だが、念のため Kan のみ許可。
+        if melds
+            .iter()
+            .any(|m| !matches!(m.meld_type, MeldType::Kan))
+        {
+            return false;
+        }
+        let ankan_count = melds.len();
+        let melds_needed = match 4usize.checked_sub(ankan_count) {
+            Some(n) => n,
+            None => return false,
+        };
+        // 暗槓 4 つ (四槓子) は四暗刻の判定対象外 (雀頭のみ残る)。melds_needed=0 のときは
+        // 手牌 + winning が雀頭のみで、刻子が手牌側に無いので四暗刻ではない (四槓子側で処理)。
+        if melds_needed == 0 {
+            return false;
+        }
+        let mut concealed = hand.get_tiles().clone();
+        concealed.push(*winning_tile);
+        crate::agari::is_suuankou_n(&concealed, winning_tile, is_tsumo, melds_needed)
     }
 
     // 大三元
