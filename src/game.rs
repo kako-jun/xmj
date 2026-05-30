@@ -871,7 +871,7 @@ impl Game {
                 claimed_index,
             };
 
-            player.hand.add_meld(meld);
+            player.hand.push_meld(meld); // #132 二重除去回避 (t1/t2 は明示 remove 済み)
             self.last_discard = None;
             self.current_player = player_idx;
             // #49 鳴きで他家の一発を消す
@@ -920,7 +920,7 @@ impl Game {
             claimed_index: Some(0),
         };
 
-        player.hand.add_meld(meld);
+        player.hand.push_meld(meld); // #132 二重除去回避 (2 枚は明示 remove 済み)
         self.last_discard = None;
         self.current_player = player_idx;
         // #49 鳴きで他家の一発を消す
@@ -960,7 +960,7 @@ impl Game {
             claimed_index: Some(0),
         };
 
-        player.hand.add_meld(meld);
+        player.hand.push_meld(meld); // #132 二重除去回避 (3 枚は明示 remove 済み)
         self.last_discard = None;
 
         // 槓ドラ追加
@@ -1005,7 +1005,7 @@ impl Game {
             claimed_index: None,
         };
 
-        player.hand.add_meld(meld);
+        player.hand.push_meld(meld); // #132 二重除去回避 (4 枚は明示 remove 済み)
 
         // 槓ドラ追加
         if let Some(dora_indicator) = self.wall.pop() {
@@ -3588,6 +3588,33 @@ mod tests {
         assert_eq!(game.current_player, 1, "do_kan 後の手番は宣言者");
         // last_discard はクリアされる
         assert!(game.last_discard.is_none(), "明槓で last_discard はクリアされる");
+    }
+
+    // ==================== #132 add_meld 二重除去回避 ====================
+
+    /// 5m を 3 枚持った状態でポンすると、副露に 3 枚移り手牌に 1 枚残る。
+    /// 旧実装 (明示 remove 2 + add_meld remove 3) では 3 枚全部消えていた。
+    #[test]
+    fn test_pon_with_triple_retains_extra() {
+        let mut game = Game::new(vec!["A".into(), "B".into(), "C".into(), "D".into()]);
+        let five = Tile::new_number(Suit::Man, 5, false);
+        game.players[1].hand = crate::hand::Hand::new();
+        for _ in 0..3 {
+            game.players[1].hand.add_tile(five);
+        }
+        game.players[1].hand.add_tile(Tile::new_number(Suit::Pin, 1, false));
+        game.last_discard = Some(five);
+        game.last_discard_hidden = false;
+        game.last_discarder = Some(0);
+        game.current_player = 0;
+
+        assert!(game.do_pon(1), "ポン成立");
+        let melds = game.players[1].hand.get_melds();
+        assert_eq!(melds.len(), 1);
+        assert_eq!(melds[0].tiles.len(), 3, "副露に 5m が 3 枚");
+        let remaining = game.players[1].hand.get_tiles();
+        let fives = remaining.iter().filter(|t| **t == five).count();
+        assert_eq!(fives, 1, "3 枚持ちポンで 1 枚残る (二重除去されない)");
     }
 
     // ==================== #59 食い替え禁止 ====================
