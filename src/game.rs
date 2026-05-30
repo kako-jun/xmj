@@ -1262,6 +1262,18 @@ impl Game {
         true
     }
 
+    /// #60 オープンリーチを宣言する。通常立直と同じ条件で、手牌公開 + 和了時 +1 飜。
+    /// 通常立直の処理を行ったうえで `open_riichi=true` を立てる。
+    pub fn declare_open_riichi(&mut self, player_idx: usize) -> bool {
+        if !self.declare_riichi(player_idx) {
+            return false;
+        }
+        if player_idx < self.players.len() {
+            self.players[player_idx].open_riichi = true;
+        }
+        true
+    }
+
     /// 場風 (#53)。
     ///
     /// round 1-4 → 東 (Ton)、round 5-8 → 南 (Nan)。半荘戦想定。
@@ -1371,6 +1383,8 @@ impl Game {
                 && !is_dealer
                 && no_calls_yet
                 && winner_no_discards,
+            // #60 オープンリーチ
+            is_open_riichi: p.open_riichi,
         }
     }
 

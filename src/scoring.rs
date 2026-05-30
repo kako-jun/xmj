@@ -68,6 +68,8 @@ pub struct ScoringContext {
     /// #58: 人和 (子の第一巡・無鳴きでのロン和了)。`Game::build_scoring_context` で
     /// winner != dealer + ロン + winner discards 0 + 無鳴き のとき true。
     pub is_renhou: bool,
+    /// #60: オープンリーチ。立直成立時に true なら +1 飜 (Yaku::OpenRiichi)。
+    pub is_open_riichi: bool,
 }
 
 impl Default for ScoringContext {
@@ -91,6 +93,7 @@ impl Default for ScoringContext {
             allow_open_tanyao: true,
             allow_local_yakuman: false,
             is_renhou: false,
+            is_open_riichi: false,
         }
     }
 }
@@ -110,6 +113,8 @@ pub enum Yaku {
     Rinshan,
     Chankan,
     DoubleRiichi,
+    /// オープンリーチ (#60、ローカル)。立直に +1 飜。
+    OpenRiichi,
 
     // 二飜役
     Chanta,
@@ -384,6 +389,11 @@ impl ScoringEngine {
             // 一発は立直 (or ダブル立直) 成立時のみ意味を持つ
             if ctx.is_ippatsu && (ctx.is_riichi || ctx.is_double_riichi) {
                 yaku.push(Yaku::Ippatsu);
+                han += 1;
+            }
+            // #60 オープンリーチ: 立直成立時の追加 +1 飜
+            if ctx.is_open_riichi && (ctx.is_riichi || ctx.is_double_riichi) {
+                yaku.push(Yaku::OpenRiichi);
                 han += 1;
             }
         }

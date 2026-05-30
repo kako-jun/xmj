@@ -441,6 +441,19 @@ impl WasmGame {
         self.game.declare_riichi(current_idx)
     }
 
+    /// #60 オープンリーチを宣言する。通常立直 + 手牌公開 + 和了時 +1 飜。
+    #[wasm_bindgen(js_name = declareOpenRiichi)]
+    pub fn declare_open_riichi(&mut self) -> bool {
+        let current_idx = self.game.current_player;
+        self.game.declare_open_riichi(current_idx)
+    }
+
+    /// #60 指定プレイヤーがオープンリーチしているか。
+    #[wasm_bindgen(js_name = isPlayerOpenRiichi)]
+    pub fn is_player_open_riichi(&self, player_idx: usize) -> bool {
+        player_idx < self.game.players.len() && self.game.players[player_idx].open_riichi
+    }
+
     /// プレイヤーがリーチしているかチェック
     #[wasm_bindgen(js_name = isPlayerRiichi)]
     pub fn is_player_riichi(&self, player_idx: usize) -> bool {

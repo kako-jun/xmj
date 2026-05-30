@@ -39,6 +39,9 @@ pub struct Player {
     /// 流局で露見すると手牌が公開される（和了者がいれば非公開のまま誤魔化せる）。
     /// 追加の罰符は無く、損失は普通の不成立リーチと同じ（リーチ棒供託没収 + ノーテン罰符）。
     pub uso_riichi: bool,
+    /// オープンリーチ (#60): 立直宣言時に手牌を公開する代わりに +1 飜。
+    /// `is_riichi` と併用 (排他ではない)。局スコープで `reset_for_next_round` で戻す。
+    pub open_riichi: bool,
 }
 
 impl Player {
@@ -57,6 +60,7 @@ impl Player {
             skipped_ron_this_turn: false,
             permanent_furiten: false,
             uso_riichi: false,
+            open_riichi: false,
         }
     }
 
@@ -190,6 +194,7 @@ impl Player {
         self.skipped_ron_this_turn = false;
         self.permanent_furiten = false;
         self.uso_riichi = false;
+        self.open_riichi = false;
     }
 
     /// リーチ可能かチェック

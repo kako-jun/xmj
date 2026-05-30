@@ -262,8 +262,23 @@ export class WasmGameBridge {
     return this.game.declareRiichi()
   }
 
+  /** #60: オープンリーチを宣言する (通常立直 + 手牌公開 + 和了時 +1 飜)。 */
+  declareOpenRiichi(): boolean {
+    if (typeof this.game.declareOpenRiichi === 'function') {
+      return this.game.declareOpenRiichi() as boolean
+    }
+    return false
+  }
+
   isPlayerRiichi(playerIdx: number): boolean {
     return this.game.isPlayerRiichi(playerIdx)
+  }
+
+  isPlayerOpenRiichi(playerIdx: number): boolean {
+    if (typeof this.game.isPlayerOpenRiichi === 'function') {
+      return this.game.isPlayerOpenRiichi(playerIdx) as boolean
+    }
+    return false
   }
 
   // ---- 和了宣言 (Issue #35) ----
