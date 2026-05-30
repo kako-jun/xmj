@@ -125,6 +125,16 @@ pub struct PaoLiability {
     pub yaku: Yaku,
 }
 
+/// #117 差し馬（さしうま）: 2 プレイヤー間の対局単位サイドベット。
+/// 対局終了時に最終点数が高い方が低い方から `amount` を受け取る。
+#[derive(Debug, Clone, Copy)]
+pub struct SashimaBet {
+    pub player_a: usize,
+    pub player_b: usize,
+    /// 賭け金額（点）。
+    pub amount: i32,
+}
+
 /// 和了の種類。
 #[derive(Debug, Clone, Copy)]
 pub enum WinKind {
@@ -326,6 +336,10 @@ pub struct Game {
     /// #55 流し満貫判定用: 各プレイヤーの打牌が他家に鳴かれたか。
     /// 鳴かれていたら流し満貫不成立。局リセットで全 false。
     pub discard_taken_from: Vec<bool>,
+    /// #117 差し馬の賭け（対局単位。局リセットでは消さない）。
+    pub sashima_bets: Vec<SashimaBet>,
+    /// #117 差し馬が精算済みか（対局終了時に一度だけ精算する）。
+    pub sashima_settled: bool,
 }
 
 impl Game {
@@ -405,6 +419,8 @@ impl Game {
             warime_player: None,
             allow_abortive_draws: true,
             discard_taken_from: vec![false; 4],
+            sashima_bets: Vec::new(),
+            sashima_settled: false,
         };
 
         game.initialize_wall();
@@ -2007,6 +2023,34 @@ impl Game {
             .collect()
     }
 
+    /// #117 差し馬を精算する（対局終了時に一度だけ）。
+    /// 各賭けについて最終点数が高い方が低い方から `amount` を受け取る。同点は移動なし。
+    /// `sashima_settled` で二重精算を防ぐ。
+    pub fn settle_sashima(&mut self) {
+        if self.sashima_settled {
+            return;
+        }
+        self.sashima_settled = true;
+        let bets = self.sashima_bets.clone();
+        for bet in &bets {
+            if bet.player_a >= self.players.len() || bet.player_b >= self.players.len() {
+                continue;
+            }
+            let sa = self.players[bet.player_a].score;
+            let sb = self.players[bet.player_b].score;
+            if sa == sb {
+                continue;
+            }
+            let (winner, loser) = if sa > sb {
+                (bet.player_a, bet.player_b)
+            } else {
+                (bet.player_b, bet.player_a)
+            };
+            self.players[winner].add_score(bet.amount);
+            self.players[loser].add_score(-bet.amount);
+        }
+    }
+
     // ==================== #55 特殊（途中）流局 ====================
 
     /// 四風連打: 第一巡（各自 1 打のみ・無鳴き）で全員が同じ風牌を打牌したか。
@@ -2193,6 +2237,8 @@ impl Game {
         // ゲーム終了時は last_outcome を保持（UI が直前局の結果を読むため）
         if self.is_game_over() {
             self.game_over = true;
+            // #117 差し馬を最終点数で精算
+            self.settle_sashima();
             return false;
         }
 
@@ -2222,6 +2268,8 @@ impl Game {
             if self.round > max_round {
                 self.round = max_round;
             }
+            // #117 差し馬を最終点数で精算
+            self.settle_sashima();
             return false;
         }
 
@@ -3994,6 +4042,45 @@ mod tests {
         assert_eq!(game.current_player, 1, "do_kan 後の手番は宣言者");
         // last_discard はクリアされる
         assert!(game.last_discard.is_none(), "明槓で last_discard はクリアされる");
+    }
+
+    // ==================== #117 差し馬 ====================
+
+    #[test]
+    fn test_sashima_settlement() {
+        let mut game = Game::new(vec!["A".into(), "B".into(), "C".into(), "D".into()]);
+        // player 0 vs player 1 で 5000 点の差し馬
+        game.sashima_bets.push(SashimaBet {
+            player_a: 0,
+            player_b: 1,
+            amount: 5000,
+        });
+        // 最終点数: player 0 が高い
+        game.players[0].score = 30000;
+        game.players[1].score = 20000;
+        let before2 = game.players[2].score;
+        game.settle_sashima();
+        assert_eq!(game.players[0].score, 35000, "勝者 0 が +5000");
+        assert_eq!(game.players[1].score, 15000, "敗者 1 が -5000");
+        assert_eq!(game.players[2].score, before2, "無関係は変動なし");
+        // 二重精算しない
+        game.settle_sashima();
+        assert_eq!(game.players[0].score, 35000, "二重精算されない");
+    }
+
+    #[test]
+    fn test_sashima_tie_no_transfer() {
+        let mut game = Game::new(vec!["A".into(), "B".into(), "C".into(), "D".into()]);
+        game.sashima_bets.push(SashimaBet {
+            player_a: 0,
+            player_b: 1,
+            amount: 5000,
+        });
+        game.players[0].score = 25000;
+        game.players[1].score = 25000;
+        game.settle_sashima();
+        assert_eq!(game.players[0].score, 25000, "同点は移動なし");
+        assert_eq!(game.players[1].score, 25000, "同点は移動なし");
     }
 
     // ==================== #55 特殊（途中）流局 ====================
