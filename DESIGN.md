@@ -770,3 +770,23 @@ PR #20 時点では Rust core ロジック層 + CLI 起動メッセージまで�
 - API: `WasmGame::getPlayerHandString(idx)`。
 - 本番ビルドでもクエリだけで有効になる（ローカル単独プレイ前提）。対人配信を想定する場合は
   本番無効化ガードを検討（follow-up）。
+
+#### 食い替え禁止（#59）
+
+チー / ポン直後の打牌で、鳴いた牌と同種（現物）およびリャンメンチーの反対側（筋）を
+切れないようにする。標準ルールでは禁止（デフォルト有効）。
+
+- 現物: ポン / チーで鳴いた牌と同じ牌。リャンメンチー（pattern 0 / 2）はさらに筋牌
+  （456 を 56 で鳴いたら 7、234 を 23 で鳴いたら 1）も禁止。嵌張チー（pattern 1）は筋なし。
+- `Game.kuikae_forbidden` に鳴き直後の禁止牌を積み、`discard_tile` 冒頭で `tile_type` 比較
+  （赤ドラ無視）で拒否。打牌成立・闇牌打牌・局リセットでクリア。
+- API: `WasmGame::setEnforceKuikae` / `isEnforceKuikae`（デフォルト true）。
+- follow-up: 打牌拒否時のユーザー向けフィードバック表示 / 設定 UI。
+
+#### 喰いタン（#129）
+
+鳴きありの手で断么九（タンヤオ）を認めるか。ruleset 依存（デフォルト有効）。
+
+- `allow_open_tanyao=false` のとき、非門前（鳴きあり）の手では断么九を付与しない。門前手は影響なし。
+- `ScoringContext.allow_open_tanyao` 経由で `calculate_score_with_context` に渡す。
+- API: `WasmGame::setAllowOpenTanyao` / `isAllowOpenTanyao`（デフォルト true）。
