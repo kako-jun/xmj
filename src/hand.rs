@@ -96,6 +96,18 @@ impl Hand {
         self.melds.push(meld);
     }
 
+    /// 副露を手牌から牌を除去せずに push するだけのメソッド (#132)。
+    ///
+    /// `add_meld` は `meld.tiles` を手牌から remove するが、`meld.tiles` には
+    /// 他家から鳴いた牌 (手牌に無い) も含まれるため、呼び出し側が既に正しい枚数だけ
+    /// remove 済みの場合に `add_meld` を使うと **二重除去** になる
+    /// (例: 5m5m5m を持って 5m をポン → 明示 remove 2 + add_meld remove 3 で 3 枚消え、
+    /// 残るはずの 1 枚が消失)。`Game::do_pon/do_chi/do_kan/do_ankan` のように
+    /// 手牌からの除去を自前で行う経路はこちらを使う。
+    pub fn push_meld(&mut self, meld: Meld) {
+        self.melds.push(meld);
+    }
+
     pub fn tile_count(&self) -> usize {
         self.tiles.len() + self.melds.len() * 3
     }
