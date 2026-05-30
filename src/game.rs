@@ -112,6 +112,19 @@ pub enum ShibariRule {
     YakumanFromSevenHonba,
 }
 
+/// #57 包（責任払い）の責任関係。
+/// 大三元 / 大四喜 / 四槓子 を「他家の打牌から鳴かせて確定させた」打牌者が、
+/// その役満で和了されたとき総得点を負担する。
+#[derive(Debug, Clone)]
+pub struct PaoLiability {
+    /// 役満を確定させたプレイヤー（= 和了予定者）。
+    pub beneficiary: usize,
+    /// 確定打牌をした責任者（鳴かれた牌の打牌者）。
+    pub responsible: usize,
+    /// 対象役満。
+    pub yaku: Yaku,
+}
+
 /// 和了の種類。
 #[derive(Debug, Clone, Copy)]
 pub enum WinKind {
@@ -281,6 +294,11 @@ pub struct Game {
     pub allow_local_yakuman: bool,
     /// #61 本場縛りルール（デフォルト Standard = 1 飜縛り）。
     pub shibari_rule: ShibariRule,
+    /// #57 包（責任払い）を適用するか（デフォルト true、標準ルール）。
+    pub enforce_pao: bool,
+    /// #57 当該局で発生した包の責任関係。鳴きで役満が確定するたびに push、
+    /// 局リセットでクリアする。
+    pub pao_liabilities: Vec<PaoLiability>,
 }
 
 impl Game {
@@ -355,6 +373,8 @@ impl Game {
             allow_open_tanyao: true,
             allow_local_yakuman: false,
             shibari_rule: ShibariRule::Standard,
+            enforce_pao: true,
+            pao_liabilities: Vec::new(),
         };
 
         game.initialize_wall();
@@ -954,6 +974,8 @@ impl Game {
         // #59 食い替え禁止: ポンは現物 (鳴いた牌と同種) のみ禁止。筋食い替えは無い。
         // discard_tile 側は tile_type のみ比較するので is_red は無視される。
         self.kuikae_forbidden = vec![tile];
+        // #57 包: 大三元/大四喜 がこのポンで確定したか
+        self.check_pao_after_call(player_idx, from_player);
         true
     }
 
@@ -1003,6 +1025,8 @@ impl Game {
         self.clear_ippatsu_others(player_idx);
         // #51 鳴き発生で地和を不成立にする
         self.any_call_made_this_round = true;
+        // #57 包: 大三元/大四喜/四槓子 がこの大明槓で確定したか
+        self.check_pao_after_call(player_idx, from_player);
 
         self.current_player = player_idx;
         true
@@ -1646,6 +1670,62 @@ impl Game {
         total_received
     }
 
+    /// #57 winner が和了した役の中に、winner を beneficiary とする包の対象役満が
+    /// 含まれていれば、その責任者 index を返す。
+    fn find_pao_responsible(&self, winner: usize, yaku: &[Yaku]) -> Option<usize> {
+        if !self.enforce_pao {
+            return None;
+        }
+        self.pao_liabilities
+            .iter()
+            .find(|p| p.beneficiary == winner && yaku.contains(&p.yaku))
+            .map(|p| p.responsible)
+    }
+
+    /// #57 包の点数移動。責任者が総得点を負担する。
+    /// - ツモ: 責任者が全額（他家は払わない）
+    /// - ロン: 放銃者と責任者で折半（放銃者が本場ボーナスを負担）。
+    ///   放銃者 == 責任者なら責任者が全額。
+    fn apply_pao_payment(
+        &mut self,
+        winner: usize,
+        kind: WinKind,
+        total_points: i32,
+        honba_bonus: i32,
+        responsible: usize,
+    ) {
+        fn ceil_to_hundred(n: i32) -> i32 {
+            if n <= 0 {
+                return n;
+            }
+            ((n + 99) / 100) * 100
+        }
+        let mut payments: Vec<(usize, i32)> = Vec::new();
+        match kind {
+            WinKind::Tsumo => {
+                payments.push((responsible, ceil_to_hundred(total_points + honba_bonus)));
+            }
+            WinKind::Ron { from } => {
+                if from == responsible {
+                    payments.push((responsible, ceil_to_hundred(total_points + honba_bonus)));
+                } else {
+                    let half = total_points / 2;
+                    payments.push((responsible, ceil_to_hundred(half)));
+                    payments.push((from, ceil_to_hundred(total_points - half + honba_bonus)));
+                }
+            }
+        }
+        let mut total_received = 0i32;
+        for (idx, amount) in &payments {
+            if *idx == winner {
+                continue;
+            }
+            self.players[*idx].pay_unclamped(*amount);
+            total_received += *amount;
+        }
+        self.players[winner].add_score(total_received);
+    }
+
     /// 1 局の和了を確定させ、点数を移動して連荘フラグを更新する。
     ///
     /// - `ScoringResult.total_points`（親なら満貫=12000、子なら満貫=8000 等の合計値）と
@@ -1658,6 +1738,66 @@ impl Game {
     /// **役満ご祝儀**（誠京モードのみ）: `SEIKYO_YAKUMAN_TIP` を放銃者 (ロン) or
     /// 他家全員 (ツモ) から winner に追加で授受する。`Player::pay_yakuman_tip` /
     /// `receive_yakuman_tip` を経由するため 0 クランプせず、ゼロサムが保たれる。
+    /// #57 包の確定判定。`player_idx` が `from` の打牌を鳴いて副露を増やした直後に呼ぶ。
+    /// 大三元 (三元 3 種刻子/槓子) / 大四喜 (風 4 種) / 四槓子 (槓子 4) が
+    /// この鳴きで確定したら `pao_liabilities` に責任関係を積む。
+    fn check_pao_after_call(&mut self, player_idx: usize, from: Option<usize>) {
+        if !self.enforce_pao {
+            return;
+        }
+        let from = match from {
+            Some(f) => f,
+            None => return, // 暗槓など打牌者不在の鳴きは包なし
+        };
+        let melds = self.players[player_idx].hand.get_melds();
+        // 三元牌の刻子/槓子の種類数
+        let mut sangen = std::collections::HashSet::new();
+        let mut winds = std::collections::HashSet::new();
+        let mut kan_count = 0;
+        for m in melds {
+            if matches!(m.meld_type, crate::hand::MeldType::Pon | crate::hand::MeldType::Kan) {
+                if let Some(t) = m.tiles.first() {
+                    if let TileType::Honor(h) = t.tile_type {
+                        match h {
+                            Honor::Haku | Honor::Hatsu | Honor::Chun => {
+                                sangen.insert(h);
+                            }
+                            Honor::Ton | Honor::Nan | Honor::Shaa | Honor::Pei => {
+                                winds.insert(h);
+                            }
+                        }
+                    }
+                }
+            }
+            if matches!(m.meld_type, crate::hand::MeldType::Kan) {
+                kan_count += 1;
+            }
+        }
+        let mut push = |yaku: Yaku, this: &mut Self| {
+            // 同一 beneficiary/yaku の重複は積まない
+            if !this
+                .pao_liabilities
+                .iter()
+                .any(|p| p.beneficiary == player_idx && p.yaku == yaku)
+            {
+                this.pao_liabilities.push(PaoLiability {
+                    beneficiary: player_idx,
+                    responsible: from,
+                    yaku,
+                });
+            }
+        };
+        if sangen.len() == 3 {
+            push(Yaku::Daisangen, self);
+        }
+        if winds.len() == 4 {
+            push(Yaku::Daisuushii, self);
+        }
+        if kan_count == 4 {
+            push(Yaku::Suukantsu, self);
+        }
+    }
+
     /// #61 本場縛り: 現在の honba と縛りルールに照らして、この和了結果が
     /// 最低点数縛りを満たすか。満たさない和了は無効（呼び出し側で和了拒否する）。
     ///
@@ -1714,8 +1854,15 @@ impl Game {
             count_yakuman(&result.yaku)
         };
 
-        // 点数移動（本場ボーナス込みで一括）
-        self.apply_payment(winner, kind, total, honba_bonus, is_dealer_win);
+        // #57 包: 役満確定の責任払い。winner が責任払い対象の役満で和了したか判定。
+        let pao_responsible = self.find_pao_responsible(winner, &result.yaku);
+        if let Some(responsible) = pao_responsible {
+            // 包成立: 責任者が総得点を負担する (ツモ=全額、ロン=放銃者と折半)。
+            self.apply_pao_payment(winner, kind, total, honba_bonus, responsible);
+        } else {
+            // 点数移動（本場ボーナス込みで一括）
+            self.apply_payment(winner, kind, total, honba_bonus, is_dealer_win);
+        }
 
         // 供託リーチ棒を winner に渡す
         if riichi_bonus > 0 {
@@ -1919,6 +2066,8 @@ impl Game {
         self.last_discarder = None;
         // #59 食い替え禁止牌をリセット
         self.kuikae_forbidden.clear();
+        // #57 包の責任関係をリセット
+        self.pao_liabilities.clear();
         // #51 鳴き発生フラグをリセット
         self.any_call_made_this_round = false;
         self.draws_this_round = 0;
@@ -3666,6 +3815,105 @@ mod tests {
         assert_eq!(game.current_player, 1, "do_kan 後の手番は宣言者");
         // last_discard はクリアされる
         assert!(game.last_discard.is_none(), "明槓で last_discard はクリアされる");
+    }
+
+    // ==================== #57 包 (責任払い) ====================
+
+    fn pao_names() -> Vec<String> {
+        vec!["A".into(), "B".into(), "C".into(), "D".into()]
+    }
+
+    fn sangen_pon(tile: Tile, from: usize) -> crate::hand::Meld {
+        crate::hand::Meld {
+            meld_type: crate::hand::MeldType::Pon,
+            tiles: vec![tile, tile, tile],
+            is_open: true,
+            from_player: Some(from),
+            is_kakan: false,
+            claimed_index: Some(0),
+        }
+    }
+
+    /// 白・發 をポン済みの player 1 が、player 0 の打牌 中 をポンして大三元確定
+    /// → pao_liabilities に責任者 0 が積まれる。
+    #[test]
+    fn test_pao_daisangen_detected_on_pon() {
+        let mut game = Game::new(pao_names());
+        let chun = Tile::new_honor(Honor::Chun);
+        game.players[1].hand = crate::hand::Hand::new();
+        game.players[1].hand.add_tile(chun);
+        game.players[1].hand.add_tile(chun);
+        game.players[1].hand.add_meld(sangen_pon(Tile::new_honor(Honor::Haku), 0));
+        game.players[1].hand.add_meld(sangen_pon(Tile::new_honor(Honor::Hatsu), 0));
+        game.last_discard = Some(chun);
+        game.last_discard_hidden = false;
+        game.last_discarder = Some(0);
+        game.current_player = 0;
+
+        assert!(game.do_pon(1), "中をポンで大三元確定");
+        assert_eq!(game.pao_liabilities.len(), 1, "包が 1 件積まれる");
+        let p = &game.pao_liabilities[0];
+        assert_eq!(p.beneficiary, 1);
+        assert_eq!(p.responsible, 0);
+        assert_eq!(p.yaku, Yaku::Daisangen);
+    }
+
+    /// 包成立時のロン支払い: 放銃者と責任者で折半。
+    #[test]
+    fn test_pao_ron_split_payment() {
+        let mut game = Game::new(pao_names());
+        game.pao_liabilities.push(PaoLiability {
+            beneficiary: 1,
+            responsible: 0,
+            yaku: Yaku::Daisangen,
+        });
+        let before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+        let result = crate::scoring::ScoringResult {
+            han: 13,
+            fu: 20,
+            yaku: vec![Yaku::Daisangen],
+            base_points: 8000,
+            total_points: 32000,
+            dora: 0,
+            uradora: 0,
+            akadora: 0,
+            kandora: 0,
+            yakuman_count: 1,
+        };
+        game.resolve_win(1, WinKind::Ron { from: 2 }, result);
+        assert_eq!(game.players[1].score - before[1], 32000, "winner +32000");
+        assert_eq!(before[0] - game.players[0].score, 16000, "責任者 -16000");
+        assert_eq!(before[2] - game.players[2].score, 16000, "放銃者 -16000");
+        assert_eq!(game.players[3].score, before[3], "無関係の 3 は変動なし");
+    }
+
+    /// 包成立時のツモ支払い: 責任者が全額負担。
+    #[test]
+    fn test_pao_tsumo_full_payment() {
+        let mut game = Game::new(pao_names());
+        game.pao_liabilities.push(PaoLiability {
+            beneficiary: 1,
+            responsible: 0,
+            yaku: Yaku::Daisangen,
+        });
+        let before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+        let result = crate::scoring::ScoringResult {
+            han: 13,
+            fu: 20,
+            yaku: vec![Yaku::Daisangen],
+            base_points: 8000,
+            total_points: 32000,
+            dora: 0,
+            uradora: 0,
+            akadora: 0,
+            kandora: 0,
+            yakuman_count: 1,
+        };
+        game.resolve_win(1, WinKind::Tsumo, result);
+        assert_eq!(game.players[1].score - before[1], 32000, "winner +32000");
+        assert_eq!(before[0] - game.players[0].score, 32000, "責任者が全額 -32000");
+        assert_eq!(game.players[2].score, before[2], "他家 2 は変動なし");
+        assert_eq!(game.players[3].score, before[3], "他家 3 は変動なし");
     }
 
     // ==================== #61 本場縛り ====================

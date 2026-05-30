@@ -454,6 +454,20 @@ export class WasmGameBridge {
     return 0
   }
 
+  /** #57: 包 (責任払い) を適用するかを設定する。 */
+  setEnforcePao(enabled: boolean): void {
+    if (typeof this.game.setEnforcePao === 'function') {
+      this.game.setEnforcePao(enabled)
+    }
+  }
+
+  isEnforcePao(): boolean {
+    if (typeof this.game.isEnforcePao === 'function') {
+      return this.game.isEnforcePao() as boolean
+    }
+    return true
+  }
+
   // ---- デバッグ (Issue #79) ----
 
   /**

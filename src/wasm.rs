@@ -758,6 +758,18 @@ impl WasmGame {
         }
     }
 
+    /// #57: 包 (責任払い) を適用するかを設定する。デフォルト true (標準ルール)。
+    #[wasm_bindgen(js_name = setEnforcePao)]
+    pub fn set_enforce_pao(&mut self, enabled: bool) {
+        self.game.enforce_pao = enabled;
+    }
+
+    /// #57: 包設定の現在値。
+    #[wasm_bindgen(js_name = isEnforcePao)]
+    pub fn is_enforce_pao(&self) -> bool {
+        self.game.enforce_pao
+    }
+
     /// #79: 指定プレイヤーの手牌を文字列（CUI コード）で返す。
     /// デバッグモードで CPU 手牌を表向き表示するために使用する。
     #[wasm_bindgen(js_name = getPlayerHandString)]
