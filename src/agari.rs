@@ -363,24 +363,37 @@ pub fn is_suuankou_n(
     is_tsumo: bool,
     melds_needed: usize,
 ) -> bool {
+    suuankou_multiplier_n(concealed_tiles, winning_tile, is_tsumo, melds_needed) > 0
+}
+
+/// #147 四暗刻の役満倍率を返す。0=不成立、1=単役満、2=四暗刻単騎 (ダブル役満)。
+///
+/// - 単騎和了 (雀頭待ち): 手牌側刻子は全て暗刻でロンでも成立。四暗刻単騎 = ダブル役満。
+/// - シャンポン待ち: ツモのみ成立 (ロンは当たり刻子が明刻で三暗刻に格下げ)。単役満。
+pub fn suuankou_multiplier_n(
+    concealed_tiles: &[Tile],
+    winning_tile: &Tile,
+    is_tsumo: bool,
+    melds_needed: usize,
+) -> u32 {
     let decs = enumerate_concealed_decomps(concealed_tiles, winning_tile, melds_needed);
+    let mut best = 0u32;
     for (_pair, mentsu, kind) in &decs {
         if !mentsu.iter().all(|m| matches!(m, Mentsu::Koutsu(_))) {
             continue;
         }
         match kind {
-            MachiKind::Tanki => return true, // 単騎: 雀頭待ちなので手牌側刻子は全て暗刻 (ロンでも成立)
+            MachiKind::Tanki => best = best.max(2), // 四暗刻単騎 = ダブル役満
             MachiKind::Shanpon => {
                 if is_tsumo {
-                    return true;
+                    best = best.max(1);
                 }
-                // ロンだと和了牌を含む刻子が明刻 → 手牌側暗刻が 1 つ減る = 四暗刻不成立
-                continue;
+                // ロンは明刻格下げで四暗刻不成立
             }
-            _ => continue,
+            _ => {}
         }
     }
-    false
+    best
 }
 
 /// 九蓮宝燈 (純正含む) 形か。

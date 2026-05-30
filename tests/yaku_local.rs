@@ -119,9 +119,10 @@ fn suurenkou_detected() {
     ];
     let r = score(hand, tile!(9m), local_ctx()).expect("四連刻で和了");
     assert!(r.yaku.contains(&Yaku::Suurenkou), "四連刻: {:?}", r.yaku);
-    // この手は 4 暗刻でもあるため四暗刻 + 四連刻のダブル役満になる (正しい挙動)。
+    // この手は 4 暗刻の単騎和了 (9m9m 雀頭待ち) でもあるため、四暗刻単騎 (ダブル役満) +
+    // 四連刻 (単役満) = 3 倍役満になる (#147 OSS対比で四暗刻単騎ダブルを実装)。
     assert!(r.yaku.contains(&Yaku::Suuankou), "4 暗刻なので四暗刻も成立: {:?}", r.yaku);
-    assert_eq!(r.yakuman_count, 2, "四連刻 + 四暗刻 = ダブル役満");
+    assert_eq!(r.yakuman_count, 3, "四暗刻単騎(ダブル) + 四連刻 = 3 倍役満");
     // 役満成立時は三連刻 (通常役) はチェックされない (役満ブロックで return)
     assert!(!r.yaku.contains(&Yaku::Sanrenkou));
 }

@@ -53,6 +53,26 @@ fn score_with_melds(
     ScoringEngine::calculate_score_with_context(&hand, &winning_tile, &ctx)
 }
 
+/// ツモ版 (#147 四暗刻ツモ系テスト用)。
+fn score_with_melds_tsumo(
+    tiles: Vec<Tile>,
+    melds: Vec<Meld>,
+    winning_tile: Tile,
+) -> Option<ScoringResult> {
+    let mut hand = Hand::new();
+    for t in tiles {
+        hand.add_tile(t);
+    }
+    for m in melds {
+        hand.add_meld(m);
+    }
+    let ctx = ScoringContext {
+        is_tsumo: true,
+        ..ScoringContext::default()
+    };
+    ScoringEngine::calculate_score_with_context(&hand, &winning_tile, &ctx)
+}
+
 fn kan_meld(tile: Tile, is_open: bool) -> Meld {
     Meld {
         meld_type: MeldType::Kan,
@@ -399,6 +419,63 @@ fn test_sankantsu() {
 }
 
 // =============================================================================
+// #147 OSS対比監査で発見した修正の回帰
+// =============================================================================
+
+/// 暗刻 (鳴かない) で揃えた大三元。旧実装は副露のみ数えて取りこぼしていた。
+/// 白白白 發發發 中中中 + 234m + 99p (門前・暗刻)、和了 2m。
+#[test]
+fn test_daisangen_concealed_ankou() {
+    let tiles = vec![
+        tile!(haku), tile!(haku), tile!(haku),
+        tile!(hatsu), tile!(hatsu), tile!(hatsu),
+        tile!(chun), tile!(chun), tile!(chun),
+        tile!(3m), tile!(4m),
+        tile!(9p), tile!(9p),
+    ];
+    let r = score_with_melds(tiles, vec![], tile!(2m)).expect("暗刻大三元で和了");
+    assert!(
+        r.yaku.contains(&Yaku::Daisangen),
+        "暗刻で揃えた大三元も成立: {:?}",
+        r.yaku
+    );
+    assert_eq!(r.yakuman_count, 1, "大三元は単役満");
+}
+
+/// 四暗刻単騎はダブル役満 (#147 OSS対比)。
+/// 111m 222p 333s 444s + 9m9m、和了 9m (単騎・ツモ)。
+#[test]
+fn test_suuankou_tanki_double() {
+    let melds = vec![];
+    let tiles = vec![
+        tile!(1m), tile!(1m), tile!(1m),
+        tile!(2p), tile!(2p), tile!(2p),
+        tile!(3s), tile!(3s), tile!(3s),
+        tile!(4s), tile!(4s), tile!(4s),
+        tile!(9m),
+    ];
+    let r = score_with_melds_tsumo(tiles, melds, tile!(9m)).expect("四暗刻単騎で和了");
+    assert!(r.yaku.contains(&Yaku::Suuankou));
+    assert_eq!(r.yakuman_count, 2, "四暗刻単騎はダブル役満");
+}
+
+/// シャンポン四暗刻 (単騎でない) は単役満のまま。
+/// 111m 222p 333s + 4s4s 5s5s シャンポン、和了 4s ツモ → 444s 完成。
+#[test]
+fn test_suuankou_shanpon_single() {
+    let tiles = vec![
+        tile!(1m), tile!(1m), tile!(1m),
+        tile!(2p), tile!(2p), tile!(2p),
+        tile!(3s), tile!(3s), tile!(3s),
+        tile!(4s), tile!(4s),
+        tile!(5s), tile!(5s),
+    ];
+    let r = score_with_melds_tsumo(tiles, vec![], tile!(4s)).expect("シャンポン四暗刻ツモ");
+    assert!(r.yaku.contains(&Yaku::Suuankou));
+    assert_eq!(r.yakuman_count, 1, "シャンポン四暗刻は単役満");
+}
+
+// =============================================================================
 // #130 暗槓込み四暗刻
 // =============================================================================
 
@@ -419,7 +496,8 @@ fn test_suuankou_with_ankan_tanki() {
         "暗槓を暗刻に数えて四暗刻成立: {:?}",
         result.yaku
     );
-    assert_eq!(result.yakuman_count, 1, "四暗刻は単役満");
+    // 9s9s 雀頭の単騎和了なので四暗刻単騎 = ダブル役満 (#147)。
+    assert_eq!(result.yakuman_count, 2, "暗槓込み四暗刻単騎はダブル役満");
 }
 
 /// 暗槓込みでもシャンポンロンは明刻格下げで四暗刻不成立 (三暗刻)。
