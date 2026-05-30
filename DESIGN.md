@@ -790,3 +790,23 @@ PR #20 時点では Rust core ロジック層 + CLI 起動メッセージまで�
 - `allow_open_tanyao=false` のとき、非門前（鳴きあり）の手では断么九を付与しない。門前手は影響なし。
 - `ScoringContext.allow_open_tanyao` 経由で `calculate_score_with_context` に渡す。
 - API: `WasmGame::setAllowOpenTanyao` / `isAllowOpenTanyao`（デフォルト true）。
+
+#### 特殊ルール一式（session547 で実装、トグル制御）
+
+標準/ローカルの特殊ルールを一括で入れた。ロジックは実装済み、UI 配線は follow-up。
+
+| ルール | Issue | トグル / API | デフォルト |
+|---|---|---|---|
+| 食い替え禁止 | #59 | `enforce_kuikae` / `setEnforceKuikae` | true |
+| ローカル役満（人和/大車輪/四連刻/百万石/三連刻） | #58 | `allow_local_yakuman` / `setAllowLocalYakuman` | false |
+| オープンリーチ | #60 | `declareOpenRiichi` / `isPlayerOpenRiichi`（+1飜） | — |
+| 本場縛り（2飜/満貫/役満縛り） | #61 | `ShibariRule` / `setShibariRule(0-3)` | 0=標準 |
+| 包（責任払い） | #57 | `enforce_pao` / `setEnforcePao` | true |
+| 割れ目 | #118 | `warime_player` / `setWarimePlayer(-1=無効)` | 無効 |
+| 特殊流局（四風連打/四家立直/四槓散了/九種九牌/流し満貫） | #55 | `allow_abortive_draws` / `declareKyuushu` / `applyAbortiveDraw(0-2)` / `checkSuufonRenda` 等 | true |
+| 差し馬 | #117 | `addSashimaBet(a,b,amount)` → 対局終了時 `settle_sashima` | — |
+
+- **包**: `check_pao_after_call` が大三元(三元3種)/大四喜(風4種)/四槓子(槓4)の確定打牌者を記録。`resolve_win` で対象役満の和了なら責任者がツモ全額/ロン折半。
+- **特殊流局**: 検出ヘルパーは pure（テスト可）。流し満貫は河が全て么九 + 無鳴き（`discard_taken_from` で追跡）を `resolve_draw` で満貫和了扱い。途中流局は親連荘・聴牌料なし。
+- **差し馬**: 対局終了時に最終点数が高い方が低い方から賭け金を受け取る（`next_round` の game-over パスで `settle_sashima`、二重精算ガード）。
+- follow-up（実機/UI）: 各トグルの modeSelectScene UI、特殊流局の手番ループ自動検出配線、九種九牌ボタン、オープンリーチの手牌公開描画と3択UI、割れ目のサイコロ自動決定。
