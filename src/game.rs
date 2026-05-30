@@ -1262,6 +1262,9 @@ impl Game {
         self.clear_ippatsu_others(player_idx);
         // #51 鳴き発生で地和を不成立にする
         self.any_call_made_this_round = true;
+        // #57 包: 加槓 (kakan) で四槓子が確定しても包は登録しない (意図的)。
+        // 加槓に使う牌は自分のツモ牌であり、その槓に対する「直前の打牌責任者」が
+        // 存在しないため。大明槓 (do_kan) は直前打牌者が居るので包対象になる。
         // 槍槓窓口を閉じる
         self.pending_chankan = None;
         self.current_player = player_idx;
@@ -1776,7 +1779,8 @@ impl Game {
                 payments.push((responsible, ceil_to_hundred(total_points + honba_bonus)));
             }
             WinKind::Ron { from } => {
-                if from == responsible {
+                if from >= self.players.len() || from == responsible {
+                    // 放銃者が責任者 (or 不正 index) なら責任者が全額。
                     payments.push((responsible, ceil_to_hundred(total_points + honba_bonus)));
                 } else {
                     let half = total_points / 2;
@@ -1790,8 +1794,14 @@ impl Game {
             if *idx == winner {
                 continue;
             }
-            self.players[*idx].pay_unclamped(*amount);
-            total_received += *amount;
+            // #118 割れ目: 払う側 or winner が割れ目なら 2 倍 (通常払いと整合)。
+            let amt = if self.warime_player == Some(*idx) || self.warime_player == Some(winner) {
+                *amount * 2
+            } else {
+                *amount
+            };
+            self.players[*idx].pay_unclamped(amt);
+            total_received += amt;
         }
         self.players[winner].add_score(total_received);
     }
@@ -2157,6 +2167,10 @@ impl Game {
     pub fn resolve_draw(&mut self, tenpai_players: Vec<usize>) {
         // #55 流し満貫: 河が全て么九 + 無鳴きのプレイヤーがいれば満貫和了扱い。
         // 通常のテンパイ料は発生させず、流し満貫の支払いのみ行う。
+        // 仕様メモ (意図的): 本場ボーナス・供託リーチ棒は流し満貫では加算/回収しない
+        // (honba_bonus=0、riichi_sticks は持ち越し)。流し満貫は「流局時の特殊精算」であり
+        // 通常の和了 (resolve_win) とは別経路。供託・本場の扱いはハウスルール差があるため
+        // 持ち越し運用を採る。
         if self.allow_abortive_draws {
             let nagashi = self.nagashi_mangan_players();
             if !nagashi.is_empty() {

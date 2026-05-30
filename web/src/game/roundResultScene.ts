@@ -130,6 +130,22 @@ const summarizeDraw = (
   return lines
 }
 
+/** #55 特殊（途中）流局の表示文言。 */
+const ABORTIVE_LABELS: Record<string, string> = {
+  SuufonRenda: '四風連打',
+  SuuchaRiichi: '四家立直',
+  SuukanSanra: '四槓散了',
+  KyuushuKyuuhai: '九種九牌',
+  SanchaaHou: '三家和',
+}
+
+const summarizeAbortive = (
+  outcome: Extract<RoundOutcome, { kind: 'abortive' }>
+): string[] => {
+  const label = ABORTIVE_LABELS[outcome.data.abortiveKind] ?? '途中流局'
+  return ['途中流局', label, '親は連荘・聴牌料なし・供託は持ち越し']
+}
+
 export const createRoundResultScene = (
   options: RoundResultSceneOptions
 ): Container => {
@@ -152,7 +168,12 @@ export const createRoundResultScene = (
     .stroke({ color: PANEL_BORDER_COLOR, width: 3 })
   root.addChild(frame)
 
-  const titleText = options.outcome.kind === 'win' ? '和了' : '流局'
+  const titleText =
+    options.outcome.kind === 'win'
+      ? '和了'
+      : options.outcome.kind === 'abortive'
+        ? '途中流局'
+        : '流局'
   const title = makeText(titleText, 36, TEXT_PRIMARY_COLOR, 'center', 'bold')
   title.anchor.set(0.5)
   title.x = cx
@@ -162,7 +183,9 @@ export const createRoundResultScene = (
   const lines =
     options.outcome.kind === 'win'
       ? summarizeWin(options.outcome, options.getPlayerName)
-      : summarizeDraw(options.outcome, options.getPlayerName)
+      : options.outcome.kind === 'abortive'
+        ? summarizeAbortive(options.outcome)
+        : summarizeDraw(options.outcome, options.getPlayerName)
 
   lines.forEach((line, i) => {
     const color = i === 0 ? TEXT_DANGER_COLOR : TEXT_PRIMARY_COLOR

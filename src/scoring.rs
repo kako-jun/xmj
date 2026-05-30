@@ -28,6 +28,18 @@ pub fn dora_indicator_to_dora(indicator: &Tile) -> Tile {
     }
 }
 
+/// 赤ドラ牌を通常牌に正規化する (is_red を落とす)。
+///
+/// `Tile` の PartialEq/Hash は is_red を含むため、HashMap キーに生の Tile を使うと
+/// 「赤5 と通常5」が別牌として数えられ、七対子・対々和などの枚数判定をすり抜ける。
+/// 本番 wall は赤5を生成するため、枚数集計の前に必ず正規化する。
+fn strip_red(t: &Tile) -> Tile {
+    match t.tile_type {
+        TileType::Number { suit, value } => Tile::new_number(suit, value, false),
+        TileType::Honor(_) => *t,
+    }
+}
+
 /// 役判定に必要な対局・プレイヤー状態。
 ///
 /// 既存 `calculate_score(hand, tile, is_tsumo, is_dealer)` API は本構造を default で
@@ -328,6 +340,9 @@ impl ScoringEngine {
         }
 
         // #58 ローカル役満 (allow_local_yakuman 有効時のみ)
+        // 注: ローカル役満が標準役満 (字一色/九蓮宝燈 等) と同時成立した場合は
+        // ダブル役満として yakuman_count を積み増す。重複可否はハウスルール差があるが、
+        // 本実装は積み増し方針で統一する。
         if ctx.allow_local_yakuman {
             // 人和: 子の第一巡・無鳴きでのロン和了 (ctx フラグ)
             if ctx.is_renhou {
@@ -654,7 +669,8 @@ impl ScoringEngine {
 
         let mut tile_map = HashMap::new();
         for tile in tiles {
-            *tile_map.entry(*tile).or_insert(0) += 1;
+            // 赤5と通常5が別牌として数えられないよう正規化する
+            *tile_map.entry(strip_red(tile)).or_insert(0) += 1;
         }
 
         let pairs: Vec<_> = tile_map.iter().filter(|(_, &count)| count == 2).collect();
@@ -689,7 +705,8 @@ impl ScoringEngine {
         }
         let mut tile_map: HashMap<Tile, usize> = HashMap::new();
         for t in &tiles {
-            *tile_map.entry(*t).or_insert(0) += 1;
+            // 赤5を正規化して刻子枚数判定が is_red 差でずれないようにする
+            *tile_map.entry(strip_red(t)).or_insert(0) += 1;
         }
         // 雀頭候補を順に試す
         let unique: Vec<Tile> = tile_map.keys().copied().collect();

@@ -262,6 +262,54 @@ fn fu_pinfu_tsumo_is_20() {
     assert_eq!(r.fu, 20, "平和ツモ = 20 符");
 }
 
+// ============ 赤ドラ正規化の回帰 (レビュー must) ============
+
+#[test]
+fn chiitoitsu_with_red_five() {
+    // 七対子のうち 5p の対子の片方が赤5。赤を正規化しないと別牌扱いで七対子が落ちる。
+    let red5p = Tile::new_number(xmj_core::tile::Suit::Pin, 5, true);
+    let mut hand = Hand::new();
+    for t in [
+        tile!(1m), tile!(1m), tile!(3m), tile!(3m),
+        tile!(5s), tile!(5s), tile!(7s), tile!(7s),
+        tile!(2p), tile!(2p), tile!(9p), tile!(9p),
+        red5p, // 5p の片割れ (赤)
+    ] {
+        hand.add_tile(t);
+    }
+    // 和了牌 = 通常 5p (赤5p と対子を組む)
+    let r = ScoringEngine::calculate_score_with_context(&hand, &tile!(5p), &tsumo_ctx())
+        .expect("赤5 を含む七対子で和了");
+    assert!(r.yaku.contains(&Yaku::Chiitoitsu), "赤5 込み七対子成立: {:?}", r.yaku);
+    assert_eq!(r.akadora, 1, "赤ドラ 1 枚もカウント");
+}
+
+#[test]
+fn toitoi_with_red_five() {
+    // 副露あり対々和の刻子に赤5を含む。正規化しないと刻子枚数判定がずれて対々和が落ちる。
+    // ポン 2m2m2m (鳴き=非門前で四暗刻回避) + 手牌 111m 5p(赤)5p 7s7s7s 9p9p、和了 5p。
+    let red5p = Tile::new_number(xmj_core::tile::Suit::Pin, 5, true);
+    let mut hand = Hand::new();
+    for t in [
+        tile!(1m), tile!(1m), tile!(1m),
+        red5p, tile!(5p), // 5p 対子 (片方赤) → 和了で刻子化
+        tile!(7s), tile!(7s), tile!(7s),
+        tile!(9p), tile!(9p),
+    ] {
+        hand.add_tile(t);
+    }
+    hand.add_meld(Meld {
+        meld_type: MeldType::Pon,
+        tiles: vec![tile!(2m), tile!(2m), tile!(2m)],
+        is_open: true,
+        ..Default::default()
+    });
+    // 和了牌 = 5p (5p5p5p 刻子完成、シャンポン)
+    let r = ScoringEngine::calculate_score_with_context(&hand, &tile!(5p), &tsumo_ctx())
+        .expect("赤5 を含む対々和で和了");
+    assert!(r.yaku.contains(&Yaku::Toitoi), "赤5 込み対々和成立: {:?}", r.yaku);
+}
+
 // ============ オープンリーチ (#60) ============
 
 #[test]

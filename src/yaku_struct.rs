@@ -532,8 +532,9 @@ fn calc_fu(
         MachiKind::Ryanmen | MachiKind::Shanpon => 0,
     };
 
-    // 喰い平和形ロン (副露で 20 符のまま) は 30 符に切り上げる慣習。
-    if fu == 20 && !ctx.is_tsumo {
+    // 喰い平和形ロン (非門前・全順子・両面・役牌頭でない = 20 符のまま) は 30 符に
+    // 切り上げる慣習。門前ロンは上で +10 されて 20 符にならないので !is_menzen を明示する。
+    if fu == 20 && !ctx.is_tsumo && !is_menzen {
         fu = 30;
     }
 
