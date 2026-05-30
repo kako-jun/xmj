@@ -408,6 +408,20 @@ export class WasmGameBridge {
     return true
   }
 
+  /** #58: ローカル役満 (人和/大車輪/四連刻/百万石/三連刻) を認めるかを設定する。 */
+  setAllowLocalYakuman(allowed: boolean): void {
+    if (typeof this.game.setAllowLocalYakuman === 'function') {
+      this.game.setAllowLocalYakuman(allowed)
+    }
+  }
+
+  isAllowLocalYakuman(): boolean {
+    if (typeof this.game.isAllowLocalYakuman === 'function') {
+      return this.game.isAllowLocalYakuman() as boolean
+    }
+    return false
+  }
+
   // ---- デバッグ (Issue #79) ----
 
   /**

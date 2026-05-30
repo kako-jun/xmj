@@ -63,6 +63,11 @@ pub struct ScoringContext {
     /// #129: 喰いタン (鳴きタンヤオ) を認めるか。デフォルト true。
     /// false のとき、非門前 (鳴きあり) の手では断么九を付与しない。
     pub allow_open_tanyao: bool,
+    /// #58: ローカル役満 (人和/大車輪/四連刻/百万石/三連刻) を認めるか。デフォルト false。
+    pub allow_local_yakuman: bool,
+    /// #58: 人和 (子の第一巡・無鳴きでのロン和了)。`Game::build_scoring_context` で
+    /// winner != dealer + ロン + winner discards 0 + 無鳴き のとき true。
+    pub is_renhou: bool,
 }
 
 impl Default for ScoringContext {
@@ -84,6 +89,8 @@ impl Default for ScoringContext {
             is_tenhou: false,
             is_chiihou: false,
             allow_open_tanyao: true,
+            allow_local_yakuman: false,
+            is_renhou: false,
         }
     }
 }
@@ -138,6 +145,18 @@ pub enum Yaku {
     Suukantsu,
     Tenhou,
     Chiihou,
+
+    // #58 ローカル役満 / ローカル役 (allow_local_yakuman 有効時のみ付与)
+    /// 人和: 子の第一巡、誰も鳴いていない状態でロン和了 (役満扱い)。
+    Renhou,
+    /// 大車輪系: 同一数牌スーツの 2-8 を全て対子にした七対子形 (筒=大車輪/索=大竹林/萬=大数隣)。
+    Daisharin,
+    /// 四連刻: 同一スーツの連続する 4 刻子 (例: 222m 333m 444m 555m)。役満。
+    Suurenkou,
+    /// 百万石: 萬子のみ (清一色) かつ牌の数字合計が 100 以上。役満。
+    Hyakumangoku,
+    /// 三連刻: 同一スーツの連続する 3 刻子 (例: 222m 333m 444m)。2 飜のローカル役。
+    Sanrenkou,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -301,6 +320,34 @@ impl ScoringEngine {
             yaku.push(Yaku::Chiihou);
             han += 13;
             yakuman_count += 1;
+        }
+
+        // #58 ローカル役満 (allow_local_yakuman 有効時のみ)
+        if ctx.allow_local_yakuman {
+            // 人和: 子の第一巡・無鳴きでのロン和了 (ctx フラグ)
+            if ctx.is_renhou {
+                yaku.push(Yaku::Renhou);
+                han += 13;
+                yakuman_count += 1;
+            }
+            // 大車輪系: 同一スーツ 2-8 を全て対子にした七対子形 (門前のみ)
+            if is_menzen && Self::check_daisharin(&all_tiles) {
+                yaku.push(Yaku::Daisharin);
+                han += 13;
+                yakuman_count += 1;
+            }
+            // 百万石: 萬子のみ (清一色) かつ牌の数字合計 100 以上
+            if Self::check_hyakumangoku(&all_tiles) {
+                yaku.push(Yaku::Hyakumangoku);
+                han += 13;
+                yakuman_count += 1;
+            }
+            // 四連刻: 同一スーツ連続 4 刻子
+            if crate::yaku_struct::max_renkou_run(hand, winning_tile) >= 4 {
+                yaku.push(Yaku::Suurenkou);
+                han += 13;
+                yakuman_count += 1;
+            }
         }
 
         // 役満がある場合は他の役をチェックしない
@@ -797,6 +844,58 @@ impl ScoringEngine {
     // 字一色
     fn check_tsuuiisou(tiles: &[Tile]) -> bool {
         tiles.iter().all(|tile| matches!(tile.tile_type, TileType::Honor(_)))
+    }
+
+    /// #58 大車輪系: 同一数牌スーツの 2-8 を全て対子にした七対子形。
+    /// 筒子=大車輪 / 索子=大竹林 / 萬子=大数隣 だが、scoring 上は同一役満として扱う。
+    fn check_daisharin(tiles: &[Tile]) -> bool {
+        if tiles.len() != 14 {
+            return false;
+        }
+        // 単一スーツ判定
+        let mut suit: Option<Suit> = None;
+        for t in tiles {
+            match t.tile_type {
+                TileType::Number { suit: s, value } => {
+                    if !(2..=8).contains(&value) {
+                        return false;
+                    }
+                    match suit {
+                        None => suit = Some(s),
+                        Some(prev) if prev != s => return false,
+                        _ => {}
+                    }
+                }
+                TileType::Honor(_) => return false,
+            }
+        }
+        let s = match suit {
+            Some(x) => x,
+            None => return false,
+        };
+        // 2-8 が各 2 枚ずつ (= 7 対子)
+        for v in 2u8..=8 {
+            let cnt = tiles
+                .iter()
+                .filter(|t| t.tile_type == (TileType::Number { suit: s, value: v }))
+                .count();
+            if cnt != 2 {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// #58 百万石: 萬子のみ (清一色) かつ全牌の数字合計が 100 以上。
+    fn check_hyakumangoku(tiles: &[Tile]) -> bool {
+        let mut sum: u32 = 0;
+        for t in tiles {
+            match t.tile_type {
+                TileType::Number { suit: Suit::Man, value } => sum += value as u32,
+                _ => return false,
+            }
+        }
+        sum >= 100
     }
 
     // 緑一色

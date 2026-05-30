@@ -174,6 +174,25 @@ pub fn evaluate_best(
             han += 2;
         }
 
+        // #58 三連刻 (ローカル, 2 飜): 同一スーツ連続 3 刻子。
+        // 四連刻 (役満) は scoring.rs の yakuman ブロックで先に確定するためここには来ない。
+        if ctx.allow_local_yakuman {
+            let koutsu: Vec<(Suit, u8)> = all
+                .iter()
+                .filter_map(|s| match s.mentsu {
+                    Mentsu::Koutsu(t) => match t.tile_type {
+                        TileType::Number { suit, value } => Some((suit, value)),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect();
+            if longest_consecutive_same_suit(&koutsu) >= 3 {
+                yaku.push(Yaku::Sanrenkou);
+                han += 2;
+            }
+        }
+
         // 平和 (門前のみ)
         let is_pinfu = is_menzen && is_pinfu_decomp(&all, &pair, wait, ctx);
         if is_pinfu {
@@ -201,6 +220,72 @@ pub fn evaluate_best(
         };
     }
 
+    best
+}
+
+/// #58: 同一スーツの連続刻子 (連刻) の最大連続数を返す。
+///
+/// 副露の刻子 (ポン/カン) + 各分解の手牌側刻子を合わせ、man/pin/sou ごとに
+/// 「連続する数値の刻子」の最長ランを求め、全分解の最大値を返す。
+/// 三連刻 (n=3) / 四連刻 (n=4) 判定に使う。和了形が無ければ 0。
+pub fn max_renkou_run(hand: &Hand, winning_tile: &Tile) -> usize {
+    let melds = hand.get_melds();
+    let melds_needed = match 4usize.checked_sub(melds.len()) {
+        Some(n) => n,
+        None => return 0,
+    };
+    // 副露の刻子値 (suit, value)
+    let mut meld_koutsu: Vec<(Suit, u8)> = Vec::new();
+    for m in melds {
+        if matches!(m.meld_type, MeldType::Pon | MeldType::Kan) {
+            if let Some(t) = m.tiles.first() {
+                if let TileType::Number { suit, value } = t.tile_type {
+                    meld_koutsu.push((suit, value));
+                }
+            }
+        }
+    }
+
+    let winning_norm = strip_red(winning_tile);
+    let mut concealed = hand.get_tiles().clone();
+    concealed.push(winning_norm);
+    let decomps = enumerate_concealed_decomps(&concealed, &winning_norm, melds_needed);
+
+    let mut best = 0usize;
+    for (_pair, ml, _wait) in decomps {
+        let mut koutsu = meld_koutsu.clone();
+        for m in &ml {
+            if let Mentsu::Koutsu(t) = m {
+                if let TileType::Number { suit, value } = t.tile_type {
+                    koutsu.push((suit, value));
+                }
+            }
+        }
+        best = best.max(longest_consecutive_same_suit(&koutsu));
+    }
+    best
+}
+
+/// (suit, value) の刻子集合から、同一スーツで連続する数値の最長ランを返す。
+fn longest_consecutive_same_suit(koutsu: &[(Suit, u8)]) -> usize {
+    let mut best = 0usize;
+    for suit in [Suit::Man, Suit::Pin, Suit::Sou] {
+        let mut present = [false; 10]; // value 1..=9
+        for (s, v) in koutsu {
+            if *s == suit && (1..=9).contains(v) {
+                present[*v as usize] = true;
+            }
+        }
+        let mut run = 0usize;
+        for v in 1..=9 {
+            if present[v] {
+                run += 1;
+                best = best.max(run);
+            } else {
+                run = 0;
+            }
+        }
+    }
     best
 }
 

@@ -694,6 +694,19 @@ impl WasmGame {
         self.game.allow_open_tanyao
     }
 
+    /// #58: ローカル役満 (人和/大車輪/四連刻/百万石/三連刻) を認めるかを設定する。
+    /// デフォルト false。
+    #[wasm_bindgen(js_name = setAllowLocalYakuman)]
+    pub fn set_allow_local_yakuman(&mut self, allowed: bool) {
+        self.game.allow_local_yakuman = allowed;
+    }
+
+    /// #58: ローカル役満設定の現在値。
+    #[wasm_bindgen(js_name = isAllowLocalYakuman)]
+    pub fn is_allow_local_yakuman(&self) -> bool {
+        self.game.allow_local_yakuman
+    }
+
     /// #79: 指定プレイヤーの手牌を文字列（CUI コード）で返す。
     /// デバッグモードで CPU 手牌を表向き表示するために使用する。
     #[wasm_bindgen(js_name = getPlayerHandString)]

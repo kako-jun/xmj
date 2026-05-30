@@ -263,6 +263,8 @@ pub struct Game {
     /// 現物（鳴いた牌と同種）と筋（チーのリャンメン反対側）を入れる。
     /// 打牌が成立した時点でクリアする。チー / ポン以外の操作では空のまま。
     pub kuikae_forbidden: Vec<Tile>,
+    /// #58 ローカル役満 (人和/大車輪/四連刻/百万石/三連刻) を認めるか（デフォルト false）。
+    pub allow_local_yakuman: bool,
 }
 
 impl Game {
@@ -335,6 +337,7 @@ impl Game {
             enforce_kuikae: true,
             kuikae_forbidden: Vec::new(),
             allow_open_tanyao: true,
+            allow_local_yakuman: false,
         };
 
         game.initialize_wall();
@@ -1362,6 +1365,12 @@ impl Game {
             is_tenhou,
             is_chiihou,
             allow_open_tanyao: self.allow_open_tanyao,
+            allow_local_yakuman: self.allow_local_yakuman,
+            // #58 人和: 子 + ロン + 当該プレイヤー discards 0 + 無鳴き (第一巡ロン)。
+            is_renhou: !is_tsumo
+                && !is_dealer
+                && no_calls_yet
+                && winner_no_discards,
         }
     }
 
