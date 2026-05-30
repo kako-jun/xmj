@@ -770,6 +770,25 @@ impl WasmGame {
         self.game.enforce_pao
     }
 
+    /// #118: 割れ目プレイヤーを設定する。0-3 で指定、負値 (例 -1) で無効化。
+    #[wasm_bindgen(js_name = setWarimePlayer)]
+    pub fn set_warime_player(&mut self, idx: i32) {
+        self.game.warime_player = if idx >= 0 && (idx as usize) < self.game.players.len() {
+            Some(idx as usize)
+        } else {
+            None
+        };
+    }
+
+    /// #118: 割れ目プレイヤー (無効なら -1) を返す。
+    #[wasm_bindgen(js_name = getWarimePlayer)]
+    pub fn get_warime_player(&self) -> i32 {
+        match self.game.warime_player {
+            Some(i) => i as i32,
+            None => -1,
+        }
+    }
+
     /// #79: 指定プレイヤーの手牌を文字列（CUI コード）で返す。
     /// デバッグモードで CPU 手牌を表向き表示するために使用する。
     #[wasm_bindgen(js_name = getPlayerHandString)]

@@ -299,6 +299,9 @@ pub struct Game {
     /// #57 当該局で発生した包の責任関係。鳴きで役満が確定するたびに push、
     /// 局リセットでクリアする。
     pub pao_liabilities: Vec<PaoLiability>,
+    /// #118 割れ目プレイヤー（None なら割れ目ルール無効）。
+    /// このプレイヤーが絡む支払い（払う / 受け取る）は 2 倍になる。
+    pub warime_player: Option<usize>,
 }
 
 impl Game {
@@ -375,6 +378,7 @@ impl Game {
             shibari_rule: ShibariRule::Standard,
             enforce_pao: true,
             pao_liabilities: Vec::new(),
+            warime_player: None,
         };
 
         game.initialize_wall();
@@ -1662,8 +1666,14 @@ impl Game {
         // 徴収を実行
         let mut total_received = 0i32;
         for (idx, amount) in &payments {
-            self.players[*idx].pay_unclamped(*amount);
-            total_received += *amount;
+            // #118 割れ目: 払う側 or 受け取る側 (winner) が割れ目なら 2 倍。
+            let amt = if self.warime_player == Some(*idx) || self.warime_player == Some(winner) {
+                *amount * 2
+            } else {
+                *amount
+            };
+            self.players[*idx].pay_unclamped(amt);
+            total_received += amt;
         }
         // winner に合計を渡す（本場ボーナス含む。重複加算しない）
         self.players[winner].add_score(total_received);
@@ -3815,6 +3825,55 @@ mod tests {
         assert_eq!(game.current_player, 1, "do_kan 後の手番は宣言者");
         // last_discard はクリアされる
         assert!(game.last_discard.is_none(), "明槓で last_discard はクリアされる");
+    }
+
+    // ==================== #118 割れ目 ====================
+
+    fn warime_result(total: u32) -> crate::scoring::ScoringResult {
+        crate::scoring::ScoringResult {
+            han: 4,
+            fu: 30,
+            yaku: vec![Yaku::Tanyao],
+            base_points: 2000,
+            total_points: total,
+            dora: 0,
+            uradora: 0,
+            akadora: 0,
+            kandora: 0,
+            yakuman_count: 0,
+        }
+    }
+
+    /// 割れ目プレイヤーが放銃すると支払いが 2 倍。
+    #[test]
+    fn test_warime_discarder_pays_double() {
+        let mut game = Game::new(vec!["A".into(), "B".into(), "C".into(), "D".into()]);
+        game.warime_player = Some(0); // player 0 が割れ目
+        let before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+        // player 1 が player 0 からロン (子満貫 8000)
+        game.resolve_win(1, WinKind::Ron { from: 0 }, warime_result(8000));
+        assert_eq!(before[0] - game.players[0].score, 16000, "割れ目放銃で 2 倍 (16000)");
+        assert_eq!(game.players[1].score - before[1], 16000, "winner も 2 倍受領");
+    }
+
+    /// 割れ目プレイヤーが和了すると受け取りが 2 倍。
+    #[test]
+    fn test_warime_winner_receives_double() {
+        let mut game = Game::new(vec!["A".into(), "B".into(), "C".into(), "D".into()]);
+        game.warime_player = Some(1); // player 1 (winner) が割れ目
+        let before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+        game.resolve_win(1, WinKind::Ron { from: 2 }, warime_result(8000));
+        assert_eq!(before[2] - game.players[2].score, 16000, "割れ目和了で放銃者 2 倍");
+        assert_eq!(game.players[1].score - before[1], 16000, "割れ目 winner 2 倍受領");
+    }
+
+    /// 割れ目無効 (None) なら通常通り。
+    #[test]
+    fn test_warime_disabled_normal() {
+        let mut game = Game::new(vec!["A".into(), "B".into(), "C".into(), "D".into()]);
+        let before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+        game.resolve_win(1, WinKind::Ron { from: 0 }, warime_result(8000));
+        assert_eq!(before[0] - game.players[0].score, 8000, "割れ目なしは通常 8000");
     }
 
     // ==================== #57 包 (責任払い) ====================

@@ -468,6 +468,20 @@ export class WasmGameBridge {
     return true
   }
 
+  /** #118: 割れ目プレイヤーを設定する (0-3、-1 で無効)。 */
+  setWarimePlayer(idx: number): void {
+    if (typeof this.game.setWarimePlayer === 'function') {
+      this.game.setWarimePlayer(idx)
+    }
+  }
+
+  getWarimePlayer(): number {
+    if (typeof this.game.getWarimePlayer === 'function') {
+      return this.game.getWarimePlayer() as number
+    }
+    return -1
+  }
+
   // ---- デバッグ (Issue #79) ----
 
   /**
