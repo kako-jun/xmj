@@ -267,6 +267,91 @@ describe('WasmGameBridge', () => {
     expect(summary.totalPoints).toBe(2600)
   })
 
+  it('#143 本場縛りブロックのセンチネル JSON は SHIBARI_BLOCKED を返す (ツモ)', () => {
+    // wasm が {"shibariBlocked":true} を返したら、null (和了形不成立) と区別して
+    // センチネルを返す。これが #143 の TS 側の核心分岐。
+    class ShibariGame extends MockWasmGame {
+      static override newHybrid(_n: string, _p: number): ShibariGame {
+        return new ShibariGame()
+      }
+      override resolveWinTsumo(): string {
+        return JSON.stringify({ shibariBlocked: true })
+      }
+    }
+    __setWasmModuleForTest({
+      ...fakeModule,
+      WasmGame: ShibariGame as unknown as typeof import('../../pkg/xmj_core.js').WasmGame,
+    } as typeof import('../../pkg/xmj_core.js'))
+    const bridge = WasmGameBridge.createHybrid('me', 0)
+    const summary = bridge.resolveWinTsumo(0)
+    expect(summary).toBe(SHIBARI_BLOCKED)
+    // 空文字 (和了形不成立) パスとは異なり null ではない
+    expect(summary).not.toBeNull()
+  })
+
+  it('#143 本場縛りブロックのセンチネルはロンでも返る', () => {
+    class ShibariGame extends MockWasmGame {
+      static override newHybrid(_n: string, _p: number): ShibariGame {
+        return new ShibariGame()
+      }
+      override resolveWinRon(): string {
+        return JSON.stringify({ shibariBlocked: true })
+      }
+    }
+    __setWasmModuleForTest({
+      ...fakeModule,
+      WasmGame: ShibariGame as unknown as typeof import('../../pkg/xmj_core.js').WasmGame,
+    } as typeof import('../../pkg/xmj_core.js'))
+    const bridge = WasmGameBridge.createHybrid('me', 0)
+    expect(bridge.resolveWinRon(0, 1)).toBe(SHIBARI_BLOCKED)
+  })
+
+  it('#143 shibariBlocked が true 以外 (false) ならセンチネルにせず通常サマリとして整形する', () => {
+    // 厳密等価 (=== true) の境界。shibariBlocked:false を持つ正規サマリは
+    // センチネル扱いせず RoundWinSummary に整形する (誤センチネル化しない)。
+    class FalseFlagGame extends MockWasmGame {
+      static override newHybrid(_n: string, _p: number): FalseFlagGame {
+        return new FalseFlagGame()
+      }
+      override resolveWinTsumo(): string {
+        return JSON.stringify({
+          shibariBlocked: false,
+          han: 4,
+          fu: 30,
+          totalPoints: 8000,
+          yaku: ['Haitei'],
+        })
+      }
+    }
+    __setWasmModuleForTest({
+      ...fakeModule,
+      WasmGame: FalseFlagGame as unknown as typeof import('../../pkg/xmj_core.js').WasmGame,
+    } as typeof import('../../pkg/xmj_core.js'))
+    const bridge = WasmGameBridge.createHybrid('me', 0)
+    const summary = bridge.resolveWinTsumo(0)
+    expect(summary).not.toBe(SHIBARI_BLOCKED)
+    if (summary === null || summary === SHIBARI_BLOCKED) throw new Error('unreachable')
+    expect(summary.han).toBe(4)
+    expect(summary.totalPoints).toBe(8000)
+  })
+
+  it('#143 槍槓ロンの本場縛りブロックもセンチネルを返す', () => {
+    class ChankanGame extends MockWasmGame {
+      static override newHybrid(_n: string, _p: number): ChankanGame {
+        return new ChankanGame()
+      }
+      resolveWinChankan(): string {
+        return JSON.stringify({ shibariBlocked: true })
+      }
+    }
+    __setWasmModuleForTest({
+      ...fakeModule,
+      WasmGame: ChankanGame as unknown as typeof import('../../pkg/xmj_core.js').WasmGame,
+    } as typeof import('../../pkg/xmj_core.js'))
+    const bridge = WasmGameBridge.createHybrid('me', 0)
+    expect(bridge.resolveWinChankan(1, 0)).toBe(SHIBARI_BLOCKED)
+  })
+
   it('和了形でないとき (空文字) は null を返す', () => {
     class EmptyGame extends MockWasmGame {
       static override newHybrid(_n: string, _p: number): EmptyGame {
