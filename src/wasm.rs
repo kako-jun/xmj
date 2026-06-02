@@ -1617,6 +1617,313 @@ mod tests {
         assert_eq!(g.get_last_outcome_json(), "");
     }
 
+    // ==================== #143 本場縛りブロックのセンチネル化 ====================
+
+    /// 1飜の合法和了 (役牌白ポン) を 13 枚 + 当たり牌 (Ton) に分割して player[winner] に持たせ、
+    /// 2飜縛り / 5本場 (天和無効化のため進行済み) をセットする共通ヘルパ。
+    /// Ron / Chankan のセンチネル検証で使う。winning_tile は東 (Ton)。
+    #[cfg(feature = "wasm")]
+    fn setup_shibari_blocked_meld_hand(winner: usize) -> WasmGame {
+        use crate::tile::{Tile, Suit, Honor};
+        use crate::hand::{Meld, MeldType};
+        use crate::game::ShibariRule;
+        let mut g = make_game();
+        let mut hand = crate::Hand::new();
+        // 13 枚相当 (手牌 10 + ポン 3)。東は 1 枚だけ持ち、もう 1 枚 (Ton) が当たり牌。
+        for tile in [
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Sou, 7, false),
+            Tile::new_number(Suit::Sou, 8, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_honor(Honor::Ton),
+        ] {
+            hand.add_tile(tile);
+        }
+        hand.add_meld(Meld {
+            meld_type: MeldType::Pon,
+            tiles: vec![
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+            ],
+            is_open: true,
+            ..Default::default()
+        });
+        g.game.players[winner].hand = hand;
+        g.game.shibari_rule = ShibariRule::TwoHanFromFiveHonba;
+        g.game.honba = 5;
+        // 天和 (役満) が乗ると 2飜縛りを満たしてしまうので進行済みにして無効化する
+        g.game.draws_this_round = 1;
+        g
+    }
+
+    /// #143/観点2: 本場縛りで弾かれた合法ロン和了は空文字ではなく
+    /// SHIBARI_BLOCKED_JSON センチネルを返す (Tsumo 同様 Ron でも区別する)。
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn resolve_win_ron_shibari_blocked_returns_sentinel() {
+        use crate::tile::{Tile, Honor};
+        let mut g = setup_shibari_blocked_meld_hand(1);
+        // 当たり牌 (東) を放銃牌としてセット
+        g.game.last_discard = Some(Tile::new_honor(Honor::Ton));
+        g.game.last_discard_hidden = false;
+        let s = g.resolve_win_ron(1, 0);
+        assert_eq!(s, SHIBARI_BLOCKED_JSON, "ロンの本場縛りブロックもセンチネルを返す: got {:?}", s);
+        // resolve_win は呼ばれていないので局結果は書かれない (点数移動なし)
+        assert_eq!(g.get_last_outcome_json(), "");
+    }
+
+    /// #143/観点3: 槍槓ロンが本場縛りで弾かれたときセンチネルを返し、
+    /// かつ pending_chankan がクリアされない (= 加槓が続行できる) こと。
+    ///
+    /// 槍槓は Chankan 役 (1飜) が自動で乗るため、役牌白ポン (1飜) と合わせて
+    /// 2飜となり 2飜縛り (TwoHanFromFiveHonba) は満たしてしまう。そこで満貫縛り
+    /// (ManganFromFiveHonba) に差し替え、2飜 (満貫未満) を確実にブロックさせる。
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn resolve_win_chankan_shibari_blocked_keeps_pending() {
+        use crate::tile::{Tile, Honor};
+        use crate::game::ShibariRule;
+        let mut g = setup_shibari_blocked_meld_hand(1);
+        g.game.shibari_rule = ShibariRule::ManganFromFiveHonba;
+        let win_tile = Tile::new_honor(Honor::Ton);
+        g.game.pending_chankan = Some(win_tile);
+        let s = g.resolve_win_chankan(1, 0);
+        assert_eq!(s, SHIBARI_BLOCKED_JSON, "槍槓ロンの本場縛りブロックもセンチネルを返す: got {:?}", s);
+        // ブロック時は resolve_win に進まず pending_chankan を None にしない → 加槓続行できる
+        assert_eq!(
+            g.game.pending_chankan,
+            Some(win_tile),
+            "本場縛りブロック時は pending_chankan を維持する (加槓続行)"
+        );
+        assert_eq!(g.get_last_outcome_json(), "", "点数移動なし");
+    }
+
+    /// #143/観点4: 二重実行不変条件。縛り未達の手で resolve_win_tsumo を 2 回呼んでも
+    /// 両回ともセンチネルで、局結果は一度も書かれない (点数が一切動かない)。
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn resolve_win_tsumo_shibari_blocked_is_idempotent() {
+        use crate::tile::{Tile, Suit, Honor};
+        use crate::hand::{Meld, MeldType};
+        use crate::game::ShibariRule;
+        let mut g = make_game();
+        let mut hand = crate::Hand::new();
+        for tile in [
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Sou, 7, false),
+            Tile::new_number(Suit::Sou, 8, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Ton),
+        ] {
+            hand.add_tile(tile);
+        }
+        hand.add_meld(Meld {
+            meld_type: MeldType::Pon,
+            tiles: vec![
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+            ],
+            is_open: true,
+            ..Default::default()
+        });
+        g.game.players[0].hand = hand;
+        g.game.shibari_rule = ShibariRule::TwoHanFromFiveHonba;
+        g.game.honba = 5;
+        g.game.draws_this_round = 1;
+        let first = g.resolve_win_tsumo(0);
+        let second = g.resolve_win_tsumo(0);
+        assert_eq!(first, SHIBARI_BLOCKED_JSON, "1 回目もセンチネル");
+        assert_eq!(second, SHIBARI_BLOCKED_JSON, "2 回目もセンチネル (不変)");
+        assert_eq!(g.get_last_outcome_json(), "", "再実行しても局結果は書かれない (点数移動ゼロ)");
+    }
+
+    /// #143/観点5: 和了形不成立 (役無し・ばらばら手) のときは従来通り空文字を返し、
+    /// センチネルを返さない (センチネル導入で空文字パスを壊していないことの回帰)。
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn resolve_win_tsumo_invalid_hand_returns_empty_not_sentinel() {
+        use crate::tile::{Tile, Suit, Honor};
+        use crate::game::ShibariRule;
+        let mut g = make_game();
+        let mut hand = crate::Hand::new();
+        // ばらばらの 14 枚 (和了形でない)
+        for tile in [
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 4, false),
+            Tile::new_number(Suit::Man, 7, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 5, false),
+            Tile::new_number(Suit::Pin, 8, false),
+            Tile::new_number(Suit::Sou, 3, false),
+            Tile::new_number(Suit::Sou, 6, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Nan),
+            Tile::new_honor(Honor::Shaa),
+            Tile::new_honor(Honor::Pei),
+            Tile::new_honor(Honor::Haku),
+        ] {
+            hand.add_tile(tile);
+        }
+        g.game.players[0].hand = hand;
+        // 縛りが効く状況でも、そもそも和了形でないので meets_shibari に到達しない
+        g.game.shibari_rule = ShibariRule::TwoHanFromFiveHonba;
+        g.game.honba = 5;
+        let s = g.resolve_win_tsumo(0);
+        assert_eq!(s, "", "和了形不成立は空文字 (センチネルではない): got {:?}", s);
+        assert_ne!(s, SHIBARI_BLOCKED_JSON, "和了形不成立をセンチネル扱いしない");
+    }
+
+    /// #143/観点6: 縛りを満たす通常和了は正規サマリ JSON を返し、
+    /// センチネル文字列が混入しないこと。
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn resolve_win_tsumo_passing_shibari_returns_summary_not_sentinel() {
+        use crate::tile::{Tile, Suit, Honor};
+        use crate::hand::{Meld, MeldType};
+        use crate::game::ShibariRule;
+        let mut g = make_game();
+        let mut hand = crate::Hand::new();
+        for tile in [
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Sou, 7, false),
+            Tile::new_number(Suit::Sou, 8, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Ton),
+        ] {
+            hand.add_tile(tile);
+        }
+        hand.add_meld(Meld {
+            meld_type: MeldType::Pon,
+            tiles: vec![
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+            ],
+            is_open: true,
+            ..Default::default()
+        });
+        g.game.players[0].hand = hand;
+        // 縛りなし (Standard) なら 1飜でも通る → 正規サマリ
+        g.game.shibari_rule = ShibariRule::Standard;
+        g.game.honba = 5;
+        let s = g.resolve_win_tsumo(0);
+        assert_ne!(s, SHIBARI_BLOCKED_JSON, "通常和了はセンチネルでない");
+        assert!(!s.is_empty(), "通常和了は空文字でない");
+        assert!(!s.contains("shibariBlocked"), "正規サマリにセンチネルキーが混入しない: {}", s);
+        assert!(s.contains("\"han\""), "正規サマリは han を含む: {}", s);
+    }
+
+    /// #143/観点9 (過去事故): 縛り飜未満でも役満が乗っていれば縛りを満たし、
+    /// センチネルを返さない (役満時に誤ブロックしない回帰)。天和を有効化して役満を作る。
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn resolve_win_tsumo_yakuman_passes_shibari_no_sentinel() {
+        use crate::tile::{Tile, Suit, Honor};
+        use crate::hand::{Meld, MeldType};
+        use crate::game::ShibariRule;
+        let mut g = make_game();
+        let mut hand = crate::Hand::new();
+        for tile in [
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Sou, 7, false),
+            Tile::new_number(Suit::Sou, 8, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Ton),
+        ] {
+            hand.add_tile(tile);
+        }
+        hand.add_meld(Meld {
+            meld_type: MeldType::Pon,
+            tiles: vec![
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+            ],
+            is_open: true,
+            ..Default::default()
+        });
+        g.game.players[0].hand = hand;
+        g.game.shibari_rule = ShibariRule::TwoHanFromFiveHonba;
+        g.game.honba = 5;
+        // draws_this_round = 0 のまま親 (idx 0) のツモ → 天和成立 (役満)
+        g.game.draws_this_round = 0;
+        let s = g.resolve_win_tsumo(0);
+        assert_ne!(s, SHIBARI_BLOCKED_JSON, "役満は縛りを満たすのでセンチネルにならない: got {:?}", s);
+        assert!(!s.is_empty(), "役満和了は空文字でない");
+    }
+
+    /// #143/観点10: ManganFromFiveHonba 縛りでも、満貫未満の合法和了は
+    /// センチネルを返す (別 shibari_rule でも wasm 戻り値経由でセンチネル化される)。
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn resolve_win_tsumo_mangan_shibari_blocks_below_mangan() {
+        use crate::tile::{Tile, Suit, Honor};
+        use crate::hand::{Meld, MeldType};
+        use crate::game::ShibariRule;
+        let mut g = make_game();
+        let mut hand = crate::Hand::new();
+        for tile in [
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Sou, 7, false),
+            Tile::new_number(Suit::Sou, 8, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Ton),
+        ] {
+            hand.add_tile(tile);
+        }
+        hand.add_meld(Meld {
+            meld_type: MeldType::Pon,
+            tiles: vec![
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+            ],
+            is_open: true,
+            ..Default::default()
+        });
+        g.game.players[0].hand = hand;
+        g.game.shibari_rule = ShibariRule::ManganFromFiveHonba;
+        g.game.honba = 5;
+        g.game.draws_this_round = 1; // 天和無効化
+        let s = g.resolve_win_tsumo(0);
+        assert_eq!(
+            s, SHIBARI_BLOCKED_JSON,
+            "満貫未満は ManganFromFiveHonba 縛りでブロック → センチネル: got {:?}", s
+        );
+    }
+
     #[test]
     #[cfg(feature = "wasm")]
     fn can_tsumo_false_for_13_tile_hand() {
