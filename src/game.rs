@@ -2198,13 +2198,56 @@ impl Game {
         };
 
         if per_tenpai != 0 {
-            for i in 0..self.players.len() {
-                if tenpai_players.contains(&i) {
-                    self.players[i].add_score(per_tenpai);
+            // 各プレイヤーの符号付き精算額（正=受領 / 負=支払い）を組み立てる。
+            // テンパイ者は +per_tenpai、ノーテン者は per_noten（負値）。
+            let mut deltas: Vec<i32> = (0..self.players.len())
+                .map(|i| {
+                    if tenpai_players.contains(&i) {
+                        per_tenpai
+                    } else {
+                        per_noten
+                    }
+                })
+                .collect();
+
+            // #118/#145 割れ目: 割れ目プレイヤーのノーテン罰符（支払い/受領）も 2 倍。
+            // 和了 (resolve_win) で割れ目が払い/受けを 2 倍するのと整合させ、罰符にも適用する。
+            // 割れ目分を 2 倍にすると単純加算ではゼロサムが崩れるため、増分 (extra) の
+            // 反対符号を反対グループ（割れ目がノーテンなら受領するテンパイ者、テンパイなら
+            // 支払うノーテン者）へ均等転嫁してゼロサムを保つ。割り切れない端数は先頭の
+            // 相手へ寄せる（点数は 100 点単位だが 4 人なので実質端数は出ない）。
+            if let Some(w) = self.warime_player {
+                if w < deltas.len() {
+                    let extra = deltas[w]; // 2 倍にした増分 = 元の額そのもの
+                    deltas[w] += extra;
+                    // 反対グループ = 割れ目と符号が逆のプレイヤー（割れ目自身は除く）
+                    let opponents: Vec<usize> = (0..deltas.len())
+                        .filter(|&i| i != w && (deltas[i] > 0) != (extra > 0))
+                        .collect();
+                    if !opponents.is_empty() {
+                        let comp = -extra; // 転嫁する総額（符号は反対）
+                        let share = comp / opponents.len() as i32;
+                        let mut rem = comp - share * opponents.len() as i32;
+                        let step = if comp >= 0 { 1 } else { -1 };
+                        for &o in &opponents {
+                            let mut amt = share;
+                            if rem != 0 {
+                                amt += step; // 端数 1 単位を先頭から符号を合わせて寄せる
+                                rem -= step;
+                            }
+                            deltas[o] += amt;
+                        }
+                    }
+                }
+            }
+
+            for (i, &d) in deltas.iter().enumerate() {
+                if d >= 0 {
+                    self.players[i].add_score(d);
                 } else {
-                    // per_noten は負の値。pay_unclamped で 0 クランプせず徴収
+                    // 負値は pay_unclamped で 0 クランプせず徴収
                     // （飛び検知のためゼロサム維持が必要）
-                    self.players[i].pay_unclamped(-per_noten);
+                    self.players[i].pay_unclamped(-d);
                 }
             }
         }
@@ -4239,6 +4282,51 @@ mod tests {
         let before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
         game.resolve_win(1, WinKind::Ron { from: 0 }, warime_result(8000));
         assert_eq!(before[0] - game.players[0].score, 8000, "割れ目なしは通常 8000");
+    }
+
+    /// #145 割れ目プレイヤーがノーテンだとノーテン罰符の支払いが 2 倍。
+    /// 1 人テンパイ (per_tenpai=3000, per_noten=-1000)。割れ目=ノーテン者。
+    #[test]
+    fn test_warime_noten_pays_double() {
+        let mut game = Game::new(vec!["A".into(), "B".into(), "C".into(), "D".into()]);
+        game.warime_player = Some(2); // player 2 が割れ目でノーテン
+        let before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+        // player 0 のみテンパイ
+        game.resolve_draw(vec![0]);
+        // 割れ目ノーテンは 2 倍払い、増分はテンパイ者へ転嫁してゼロサム維持
+        assert_eq!(game.players[2].score - before[2], -2000, "割れ目ノーテンは 2 倍 (-2000)");
+        assert_eq!(game.players[1].score - before[1], -1000, "他ノーテンは通常 -1000");
+        assert_eq!(game.players[3].score - before[3], -1000, "他ノーテンは通常 -1000");
+        assert_eq!(game.players[0].score - before[0], 4000, "テンパイ者が増分も受領 (+4000)");
+        let sum: i32 = (0..4).map(|i| game.players[i].score - before[i]).sum();
+        assert_eq!(sum, 0, "ゼロサム維持");
+    }
+
+    /// #145 割れ目プレイヤーがテンパイだとテンパイ料の受領が 2 倍。
+    /// 1 人テンパイ (per_tenpai=3000, per_noten=-1000)。割れ目=唯一のテンパイ者。
+    #[test]
+    fn test_warime_tenpai_receives_double() {
+        let mut game = Game::new(vec!["A".into(), "B".into(), "C".into(), "D".into()]);
+        game.warime_player = Some(0); // player 0 が割れ目でテンパイ
+        let before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+        game.resolve_draw(vec![0]);
+        assert_eq!(game.players[0].score - before[0], 6000, "割れ目テンパイは 2 倍受領 (+6000)");
+        // 増分 3000 を 3 人のノーテン者へ均等転嫁 → 各 -2000
+        assert_eq!(game.players[1].score - before[1], -2000, "ノーテンが増分負担 (-2000)");
+        assert_eq!(game.players[2].score - before[2], -2000, "ノーテンが増分負担 (-2000)");
+        assert_eq!(game.players[3].score - before[3], -2000, "ノーテンが増分負担 (-2000)");
+        let sum: i32 = (0..4).map(|i| game.players[i].score - before[i]).sum();
+        assert_eq!(sum, 0, "ゼロサム維持");
+    }
+
+    /// #145 割れ目無効 (None) なら流局精算は通常通り。
+    #[test]
+    fn test_warime_draw_disabled_normal() {
+        let mut game = Game::new(vec!["A".into(), "B".into(), "C".into(), "D".into()]);
+        let before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+        game.resolve_draw(vec![0]);
+        assert_eq!(game.players[0].score - before[0], 3000, "割れ目なしテンパイは +3000");
+        assert_eq!(game.players[1].score - before[1], -1000, "割れ目なしノーテンは -1000");
     }
 
     // ==================== #57 包 (責任払い) ====================
