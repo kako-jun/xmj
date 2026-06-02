@@ -1355,7 +1355,12 @@ impl Game {
             p.is_riichi = true;
             p.riichi_turn = Some(turn);
             p.ippatsu = true;
-            p.subtract_score(1000);
+            // 嘘リーチは 1000 点未満でも宣言できる（can_riichi の点数要件を外している）。
+            // `subtract_score` は 0 クランプするため、持ち点 < 1000 だと実引き額が供託に積む
+            // 1000 点（下の `riichi_sticks += 1`）と食い違い、点棒総和が増えてゼロサムが壊れる
+            // (#144)。供託と整合させるため `pay_unclamped` で必ず 1000 点引く（負スコア許容、
+            // トビは標準処理で検知される）。
+            p.pay_unclamped(1000);
             p.uso_riichi = true;
         } else if !self.players[player_idx].declare_riichi(turn) {
             // Game::can_riichi で通った後に Player::declare_riichi が false を返すのは
@@ -3472,6 +3477,35 @@ mod tests {
             winner_before + 8000 + 300,
             "和了点 8000 + 本場ボーナス 300 = +8300"
         );
+    }
+
+    /// #144 嘘リーチを持ち点 < 1000 で宣言してもゼロサムが崩れないこと。
+    ///
+    /// 旧実装は `subtract_score(1000)`（0 クランプ）だったため、持ち点 < 1000 だと
+    /// 実引き額が供託に積む 1000 点と食い違い、点棒総和が増えていた。
+    /// 現行は `pay_unclamped(1000)` で必ず 1000 点引く（負スコア許容）。
+    #[test]
+    fn test_uso_riichi_below_1000_keeps_zero_sum() {
+        let mut game = Game::new(round_loop_names());
+        game.uso_riichi_enabled = true;
+        let idx = 0;
+        // 持ち点を 1000 未満（嘘リーチでのみ宣言可能なエッジ）に設定
+        game.players[idx].score = 500;
+        let before = game.clone();
+
+        assert!(
+            game.declare_riichi(idx),
+            "uso_riichi 有効・門前なら持ち点 < 1000 でも宣言できる"
+        );
+        assert!(game.players[idx].uso_riichi, "嘘リーチフラグが立つ");
+        // pay_unclamped で 1000 引かれて負スコアになる（0 クランプしない）
+        assert_eq!(
+            game.players[idx].score, -500,
+            "供託 1000 と整合する実引き額（500 - 1000 = -500）"
+        );
+        assert_eq!(game.riichi_sticks, 1, "供託にリーチ棒が 1 本積まれる");
+        // 点棒総和（score + riichi_sticks*1000 + pot）が宣言前後で保存される
+        assert_score_conservation(&before, &game);
     }
 
     /// 供託リーチ棒は和了者に渡る
