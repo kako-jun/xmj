@@ -3508,6 +3508,94 @@ mod tests {
         assert_score_conservation(&before, &game);
     }
 
+    /// #144 境界値 (-1): 持ち点 999（供託 1000 にちょうど 1 点足りない）でも
+    /// `pay_unclamped(1000)` で必ず 1000 引き、999 - 1000 = -1 になりゼロサムを保つ。
+    #[test]
+    fn test_uso_riichi_score_999_pays_full_1000() {
+        let mut game = Game::new(round_loop_names());
+        game.uso_riichi_enabled = true;
+        let idx = 0;
+        game.players[idx].score = 999;
+        let before = game.clone();
+
+        assert!(game.declare_riichi(idx), "持ち点 999 でも嘘リーチ宣言できる");
+        assert!(game.players[idx].uso_riichi, "嘘リーチフラグが立つ");
+        assert_eq!(
+            game.players[idx].score, -1,
+            "999 - 1000 = -1（0 クランプしない）"
+        );
+        assert_eq!(game.riichi_sticks, 1, "供託にリーチ棒が 1 本積まれる");
+        assert_score_conservation(&before, &game);
+    }
+
+    /// #144 境界値 (0): 持ち点ちょうど 1000 なら引いて 0 になる。
+    /// 非テンパイのため `Player::can_riichi()` は false → 嘘リーチ経路を通る。
+    #[test]
+    fn test_uso_riichi_score_exactly_1000_becomes_zero() {
+        let mut game = Game::new(round_loop_names());
+        game.uso_riichi_enabled = true;
+        let idx = 0;
+        game.players[idx].score = 1000;
+        let before = game.clone();
+
+        assert!(game.declare_riichi(idx), "持ち点 1000 でも宣言できる");
+        assert!(
+            game.players[idx].uso_riichi,
+            "非テンパイなので 1000 点あっても嘘リーチ扱い"
+        );
+        assert_eq!(
+            game.players[idx].score, 0,
+            "1000 - 1000 = 0（ちょうど 0、負にはならない）"
+        );
+        assert_eq!(game.riichi_sticks, 1, "供託にリーチ棒が 1 本積まれる");
+        assert_score_conservation(&before, &game);
+    }
+
+    /// #144 状態遷移: 持ち点 < 1000 で嘘リーチ宣言 → そのまま流局精算 (resolve_draw)
+    /// まで通しても点棒総和が保存されること。旧実装は流局時に嘘リーチ者へ二重徴収
+    /// （徴収先が無く点棒消滅）していたため、宣言＋流局の通し検証で総和保存を担保する。
+    #[test]
+    fn test_uso_riichi_below_1000_then_draw_keeps_zero_sum() {
+        let mut game = Game::new(round_loop_names());
+        game.uso_riichi_enabled = true;
+        let uso = 0;
+        game.players[uso].score = 500;
+        let before = game.clone();
+
+        assert!(game.declare_riichi(uso), "持ち点 < 1000 で嘘リーチ宣言");
+
+        // 嘘リーチ者は非テンパイなので noten 側。他 1 名のみテンパイの流局とする。
+        game.resolve_draw(vec![1]);
+
+        // 供託リーチ棒は持ち越し（流局では回収されない）。総和は宣言前と一致する。
+        assert_score_conservation(&before, &game);
+        assert_eq!(
+            game.riichi_sticks, 1,
+            "流局では供託リーチ棒は持ち越し（回収されない）"
+        );
+    }
+
+    /// #144 分岐: uso_riichi 無効なら持ち点 < 1000 の非テンパイでは宣言できず、
+    /// スコアも供託も一切変化しないこと（嘘リーチ緩和は uso_riichi_enabled 限定）。
+    #[test]
+    fn test_below_1000_cannot_riichi_when_uso_disabled() {
+        let mut game = Game::new(round_loop_names());
+        // uso_riichi_enabled は既定で false
+        let idx = 0;
+        game.players[idx].score = 500;
+        let before = game.clone();
+
+        assert!(
+            !game.declare_riichi(idx),
+            "嘘リーチ無効・非テンパイ・持ち点 < 1000 では宣言不可"
+        );
+        assert!(!game.players[idx].uso_riichi, "嘘リーチフラグは立たない");
+        assert!(!game.players[idx].is_riichi, "リーチもしていない");
+        assert_eq!(game.players[idx].score, 500, "スコアは不変");
+        assert_eq!(game.riichi_sticks, 0, "供託も積まれない");
+        assert_score_conservation(&before, &game);
+    }
+
     /// 供託リーチ棒は和了者に渡る
     #[test]
     fn test_riichi_sticks_go_to_winner() {
