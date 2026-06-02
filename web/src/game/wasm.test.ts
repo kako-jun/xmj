@@ -381,15 +381,15 @@ describe('WasmGameBridge', () => {
     expect(bridge.canTsumo()).toBe(false)
     expect(MockWasmGame.lastCanTsumoArg).toBe(1)
     // 明示 idx は素通し
-    expect(bridge.canTsumo(0 as 0)).toBe(true)
+    expect(bridge.canTsumo(0 as const)).toBe(true)
     expect(MockWasmGame.lastCanTsumoArg).toBe(0)
   })
 
   it('canRon は指定 idx を Rust に渡す', () => {
     const bridge = WasmGameBridge.createHybrid('me', 0)
-    expect(bridge.canRon(2 as 2)).toBe(true)
+    expect(bridge.canRon(2 as const)).toBe(true)
     expect(MockWasmGame.lastCanRonArg).toBe(2)
-    expect(bridge.canRon(0 as 0)).toBe(false)
+    expect(bridge.canRon(0 as const)).toBe(false)
   })
 
   it('getLastDiscarder は number を PlayerIndex として返す', () => {

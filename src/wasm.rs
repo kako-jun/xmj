@@ -1576,9 +1576,28 @@ mod tests {
         // #143: 本場縛りで弾かれた合法和了は空文字ではなく
         // SHIBARI_BLOCKED_JSON センチネルを返し、役無し (空文字) と区別する。
         // 役牌白ポン (1飜) の手を 5 本場 + 2飜縛りに掛けるとブロックされる。
+        use crate::game::ShibariRule;
+        let mut g = setup_shibari_blocked_tsumo_hand();
+        g.game.shibari_rule = ShibariRule::TwoHanFromFiveHonba;
+        // 天和 (役満) が乗ると 2飜縛りを満たしてしまうので進行済みにして無効化する
+        g.game.draws_this_round = 1;
+        let s = g.resolve_win_tsumo(0);
+        assert_eq!(s, SHIBARI_BLOCKED_JSON, "本場縛りブロックはセンチネルを返す: got {:?}", s);
+        // resolve_win は呼ばれていないので局結果は書かれない
+        assert_eq!(g.get_last_outcome_json(), "");
+    }
+
+    // ==================== #143 本場縛りブロックのセンチネル化 ====================
+
+    /// 1飜の合法和了 (役牌白ポン) を完成形 (手牌 11 枚 + 白ポン) として player[0] に持たせ、
+    /// 5本場をセットした WasmGame を返すツモ用共通ヘルパ。
+    /// 雀頭は東対子。手牌は和了済み形 (打牌不要) なので resolve_win_tsumo(0) を直接呼べる。
+    /// shibari_rule と draws_this_round (天和の有効/無効) は検証ごとに違うため、
+    /// 呼び出し側で設定する。
+    #[cfg(feature = "wasm")]
+    fn setup_shibari_blocked_tsumo_hand() -> WasmGame {
         use crate::tile::{Tile, Suit, Honor};
         use crate::hand::{Meld, MeldType};
-        use crate::game::ShibariRule;
         let mut g = make_game();
         let mut hand = crate::Hand::new();
         for tile in [
@@ -1607,17 +1626,9 @@ mod tests {
             ..Default::default()
         });
         g.game.players[0].hand = hand;
-        g.game.shibari_rule = ShibariRule::TwoHanFromFiveHonba;
         g.game.honba = 5;
-        // 天和 (役満) が乗ると 2飜縛りを満たしてしまうので進行済みにして無効化する
-        g.game.draws_this_round = 1;
-        let s = g.resolve_win_tsumo(0);
-        assert_eq!(s, SHIBARI_BLOCKED_JSON, "本場縛りブロックはセンチネルを返す: got {:?}", s);
-        // resolve_win は呼ばれていないので局結果は書かれない
-        assert_eq!(g.get_last_outcome_json(), "");
+        g
     }
-
-    // ==================== #143 本場縛りブロックのセンチネル化 ====================
 
     /// 1飜の合法和了 (役牌白ポン) を 13 枚 + 当たり牌 (Ton) に分割して player[winner] に持たせ、
     /// 2飜縛り / 5本場 (天和無効化のため進行済み) をセットする共通ヘルパ。
@@ -1709,39 +1720,9 @@ mod tests {
     #[test]
     #[cfg(feature = "wasm")]
     fn resolve_win_tsumo_shibari_blocked_is_idempotent() {
-        use crate::tile::{Tile, Suit, Honor};
-        use crate::hand::{Meld, MeldType};
         use crate::game::ShibariRule;
-        let mut g = make_game();
-        let mut hand = crate::Hand::new();
-        for tile in [
-            Tile::new_number(Suit::Man, 1, false),
-            Tile::new_number(Suit::Man, 1, false),
-            Tile::new_number(Suit::Man, 1, false),
-            Tile::new_number(Suit::Pin, 2, false),
-            Tile::new_number(Suit::Pin, 3, false),
-            Tile::new_number(Suit::Pin, 4, false),
-            Tile::new_number(Suit::Sou, 7, false),
-            Tile::new_number(Suit::Sou, 8, false),
-            Tile::new_number(Suit::Sou, 9, false),
-            Tile::new_honor(Honor::Ton),
-            Tile::new_honor(Honor::Ton),
-        ] {
-            hand.add_tile(tile);
-        }
-        hand.add_meld(Meld {
-            meld_type: MeldType::Pon,
-            tiles: vec![
-                Tile::new_honor(Honor::Haku),
-                Tile::new_honor(Honor::Haku),
-                Tile::new_honor(Honor::Haku),
-            ],
-            is_open: true,
-            ..Default::default()
-        });
-        g.game.players[0].hand = hand;
+        let mut g = setup_shibari_blocked_tsumo_hand();
         g.game.shibari_rule = ShibariRule::TwoHanFromFiveHonba;
-        g.game.honba = 5;
         g.game.draws_this_round = 1;
         let first = g.resolve_win_tsumo(0);
         let second = g.resolve_win_tsumo(0);
@@ -1792,40 +1773,10 @@ mod tests {
     #[test]
     #[cfg(feature = "wasm")]
     fn resolve_win_tsumo_passing_shibari_returns_summary_not_sentinel() {
-        use crate::tile::{Tile, Suit, Honor};
-        use crate::hand::{Meld, MeldType};
         use crate::game::ShibariRule;
-        let mut g = make_game();
-        let mut hand = crate::Hand::new();
-        for tile in [
-            Tile::new_number(Suit::Man, 1, false),
-            Tile::new_number(Suit::Man, 1, false),
-            Tile::new_number(Suit::Man, 1, false),
-            Tile::new_number(Suit::Pin, 2, false),
-            Tile::new_number(Suit::Pin, 3, false),
-            Tile::new_number(Suit::Pin, 4, false),
-            Tile::new_number(Suit::Sou, 7, false),
-            Tile::new_number(Suit::Sou, 8, false),
-            Tile::new_number(Suit::Sou, 9, false),
-            Tile::new_honor(Honor::Ton),
-            Tile::new_honor(Honor::Ton),
-        ] {
-            hand.add_tile(tile);
-        }
-        hand.add_meld(Meld {
-            meld_type: MeldType::Pon,
-            tiles: vec![
-                Tile::new_honor(Honor::Haku),
-                Tile::new_honor(Honor::Haku),
-                Tile::new_honor(Honor::Haku),
-            ],
-            is_open: true,
-            ..Default::default()
-        });
-        g.game.players[0].hand = hand;
+        let mut g = setup_shibari_blocked_tsumo_hand();
         // 縛りなし (Standard) なら 1飜でも通る → 正規サマリ
         g.game.shibari_rule = ShibariRule::Standard;
-        g.game.honba = 5;
         let s = g.resolve_win_tsumo(0);
         assert_ne!(s, SHIBARI_BLOCKED_JSON, "通常和了はセンチネルでない");
         assert!(!s.is_empty(), "通常和了は空文字でない");
@@ -1838,39 +1789,9 @@ mod tests {
     #[test]
     #[cfg(feature = "wasm")]
     fn resolve_win_tsumo_yakuman_passes_shibari_no_sentinel() {
-        use crate::tile::{Tile, Suit, Honor};
-        use crate::hand::{Meld, MeldType};
         use crate::game::ShibariRule;
-        let mut g = make_game();
-        let mut hand = crate::Hand::new();
-        for tile in [
-            Tile::new_number(Suit::Man, 1, false),
-            Tile::new_number(Suit::Man, 1, false),
-            Tile::new_number(Suit::Man, 1, false),
-            Tile::new_number(Suit::Pin, 2, false),
-            Tile::new_number(Suit::Pin, 3, false),
-            Tile::new_number(Suit::Pin, 4, false),
-            Tile::new_number(Suit::Sou, 7, false),
-            Tile::new_number(Suit::Sou, 8, false),
-            Tile::new_number(Suit::Sou, 9, false),
-            Tile::new_honor(Honor::Ton),
-            Tile::new_honor(Honor::Ton),
-        ] {
-            hand.add_tile(tile);
-        }
-        hand.add_meld(Meld {
-            meld_type: MeldType::Pon,
-            tiles: vec![
-                Tile::new_honor(Honor::Haku),
-                Tile::new_honor(Honor::Haku),
-                Tile::new_honor(Honor::Haku),
-            ],
-            is_open: true,
-            ..Default::default()
-        });
-        g.game.players[0].hand = hand;
+        let mut g = setup_shibari_blocked_tsumo_hand();
         g.game.shibari_rule = ShibariRule::TwoHanFromFiveHonba;
-        g.game.honba = 5;
         // draws_this_round = 0 のまま親 (idx 0) のツモ → 天和成立 (役満)
         g.game.draws_this_round = 0;
         let s = g.resolve_win_tsumo(0);
@@ -1883,39 +1804,9 @@ mod tests {
     #[test]
     #[cfg(feature = "wasm")]
     fn resolve_win_tsumo_mangan_shibari_blocks_below_mangan() {
-        use crate::tile::{Tile, Suit, Honor};
-        use crate::hand::{Meld, MeldType};
         use crate::game::ShibariRule;
-        let mut g = make_game();
-        let mut hand = crate::Hand::new();
-        for tile in [
-            Tile::new_number(Suit::Man, 1, false),
-            Tile::new_number(Suit::Man, 1, false),
-            Tile::new_number(Suit::Man, 1, false),
-            Tile::new_number(Suit::Pin, 2, false),
-            Tile::new_number(Suit::Pin, 3, false),
-            Tile::new_number(Suit::Pin, 4, false),
-            Tile::new_number(Suit::Sou, 7, false),
-            Tile::new_number(Suit::Sou, 8, false),
-            Tile::new_number(Suit::Sou, 9, false),
-            Tile::new_honor(Honor::Ton),
-            Tile::new_honor(Honor::Ton),
-        ] {
-            hand.add_tile(tile);
-        }
-        hand.add_meld(Meld {
-            meld_type: MeldType::Pon,
-            tiles: vec![
-                Tile::new_honor(Honor::Haku),
-                Tile::new_honor(Honor::Haku),
-                Tile::new_honor(Honor::Haku),
-            ],
-            is_open: true,
-            ..Default::default()
-        });
-        g.game.players[0].hand = hand;
+        let mut g = setup_shibari_blocked_tsumo_hand();
         g.game.shibari_rule = ShibariRule::ManganFromFiveHonba;
-        g.game.honba = 5;
         g.game.draws_this_round = 1; // 天和無効化
         let s = g.resolve_win_tsumo(0);
         assert_eq!(

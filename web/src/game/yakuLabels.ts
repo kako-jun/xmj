@@ -86,7 +86,6 @@ export const yakuLabel = (key: string): string => {
   }
   const label = YAKU_LABELS[key]
   if (label !== undefined) return label
-  // eslint-disable-next-line no-console
   console.warn(`yakuLabel: 未登録の役キー: ${key}`)
   return key
 }

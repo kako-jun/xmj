@@ -12,7 +12,7 @@ import { Container, Text } from 'pixi.js'
 import { App } from './App'
 import { initWithState } from './state'
 import type { Tile, PlayerIndex } from './types'
-import { tileToCuiCode } from './types'
+import { tileToCuiCode, SHIBARI_BLOCKED } from './types'
 import { EVENT_LOG_LIMIT } from './constants'
 
 const tileToCuiCodeForTest = (tile: Tile): string => tileToCuiCode(tile)
@@ -867,7 +867,7 @@ Last discard: 5m`,
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     // N5: テストでは CPU ターン遅延を明示的に 0 にして flake を避ける
     const app = new App(fakeApp, { cpuTurnDelayMs: 0 })
-    let resolveTsumoCalls: number[] = []
+    const resolveTsumoCalls: number[] = []
 
     const bridge = createBridgeMock({
       drawTile: () => false,
@@ -1833,7 +1833,7 @@ Dora indicators: 5p 1p
     const fakeApp = { stage } as unknown as import('pixi.js').Application
     const app = new App(fakeApp)
 
-    let wall = 0
+    const wall = 0
     let isGameOverVal = false
 
     const bridge = createBridgeMock({
@@ -1981,6 +1981,161 @@ Dora indicators: 5p 1p
 
     ;(app as unknown as { handleHandTileTap: (i: number) => void }).handleHandTileTap(0)
     expect(app.selectedHandIndex).toBe(0)
+  })
+
+  // ============================================================================
+  // Issue #143: 本場縛りブロック (SHIBARI_BLOCKED) の UI 分岐
+  //
+  // resolveWinTsumo/Ron/Chankan が SHIBARI_BLOCKED センチネルを返したとき、
+  // 「和了形不成立」(null) とは別メッセージを出し、ツモ/ロン/槍槓で turn flow が
+  // 正しく分岐すること (ron だけ advanceTurnLoop を呼ぶ / tsumo は呼ばない /
+  // 槍槓は加槓を続行する) を App 層で固定する。
+  // ============================================================================
+
+  it('#143 confirmTsumo: resolveWinTsumo が SHIBARI_BLOCKED なら専用ログを出し、和了せず手番に残る (advanceTurnLoop 不発)', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp, { cpuTurnDelayMs: 0 })
+
+    let resolveTsumoCalls = 0
+    let cpuTurnCalls = 0
+
+    const bridge = createBridgeMock({
+      drawTile: () => false,
+      canTsumo: () => true,
+      resolveWinTsumo: () => {
+        resolveTsumoCalls += 1
+        return SHIBARI_BLOCKED
+      },
+      // advanceTurnLoop が誤って呼ばれたら CPU ターンに入ってしまうので検知用
+      executeCpuTurn: () => {
+        cpuTurnCalls += 1
+        return '5m'
+      },
+    })
+
+    app.startGame(bridge, 0)
+
+    expect(findActionButton('tsumo')).toBeTruthy()
+    clickActionButton('tsumo')
+
+    expect(resolveTsumoCalls).toBe(1)
+    // 専用メッセージ。「和了形不成立」ではない。
+    expect(app.eventLog).toContain('本場縛り未達のためツモ和了不可')
+    expect(app.eventLog.some(entry => entry.includes('和了形不成立'))).toBe(false)
+    // ツモ和了成立ログ ("… がツモ和了") は出ない
+    expect(app.eventLog.some(entry => entry.includes('がツモ和了'))).toBe(false)
+    // 局結果には進まない (点数移動なし)
+    expect(app.pendingRoundOutcome).toBeNull()
+    // tsumo 分岐は advanceTurnLoop を呼ばない → 手番は自家に残り CPU は回らない
+    expect(cpuTurnCalls).toBe(0)
+    expect(app.gameState?.currentTurn).toBe(0)
+    // 自家手番のままなので「ツモあがり」ボタンが再び出ている (まだツモ可能)
+    expect(findActionButton('tsumo')).toBeTruthy()
+  })
+
+  it('#143 confirmRon: resolveWinRon が SHIBARI_BLOCKED なら専用ログを出し、pendingDecision を閉じて turn loop を進める (advanceTurnLoop 発火)', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp, { cpuTurnDelayMs: 0 })
+
+    let currentPlayerId = 0
+    let canRonState = false
+    const resolveRonCalls: Array<{ winner: number; from: number }> = []
+    const cpuTurnLog: number[] = []
+
+    const bridge = createBridgeMock({
+      isCurrentPlayerHuman: () => currentPlayerId === 0,
+      isCurrentPlayerCpu: () => currentPlayerId !== 0,
+      getCurrentPlayerId: () => currentPlayerId,
+      drawTile: () => false,
+      discardTile: () => {
+        currentPlayerId = 1
+        return true
+      },
+      executeCpuTurn: () => {
+        cpuTurnLog.push(currentPlayerId)
+        // 最初の CPU 打牌で canRon=true → ループ停止、以降は false
+        canRonState = cpuTurnLog.length === 1
+        currentPlayerId = (currentPlayerId + 1) % 4
+        return '5m'
+      },
+      canRon: () => canRonState,
+      getLastDiscarder: () => 1,
+      resolveWinRon: (winner: PlayerIndex, from: PlayerIndex) => {
+        resolveRonCalls.push({ winner, from })
+        return SHIBARI_BLOCKED
+      },
+    })
+
+    app.startGame(bridge, 0)
+    getHandTile(stage, '1m-0').emit('pointertap', {} as never)
+    clickActionButton('discard')
+
+    // CPU 1 打牌後に meld-call (ロン可能) で停止
+    expect(app.pendingDecision?.kind).toBe('meld-call')
+    const cpuTurnsBeforeRon = cpuTurnLog.length
+
+    clickActionButton('ron')
+
+    expect(resolveRonCalls).toEqual([{ winner: 0, from: 1 }])
+    // 専用メッセージ。「和了形不成立」ではない。
+    expect(app.eventLog).toContain('本場縛り未達のためロン和了不可')
+    expect(app.eventLog.some(entry => entry.includes('和了形不成立'))).toBe(false)
+    // 局結果には進まない (点数移動なし)
+    expect(app.pendingRoundOutcome).toBeNull()
+    // ron 分岐は pendingDecision を閉じて advanceTurnLoop を呼ぶ → CPU ループが再開している
+    expect(app.pendingDecision).toBeNull()
+    expect(cpuTurnLog.length).toBeGreaterThan(cpuTurnsBeforeRon)
+  })
+
+  it('#143 confirmShouminkan: 槍槓ロンが SHIBARI_BLOCKED なら不成立ログを出し、加槓を続行する (completeShouminkan 発火・和了しない)', () => {
+    const stage = new Container()
+    const fakeApp = { stage } as unknown as import('pixi.js').Application
+    const app = new App(fakeApp, { cpuTurnDelayMs: 0 })
+
+    const tile: Tile = { suit: 'pin', value: 3 }
+    let chankanCalls = 0
+    let completeCalls = 0
+    let shouminkanDone = false
+
+    app.startGame(
+      createBridgeMock({
+        drawTile: () => false,
+        canRiichi: () => false,
+        canAnkan: () => [],
+        // 加槓完了後は候補が消える (再プロンプト防止 = 実機の牌消費を再現)
+        canShouminkan: () => (shouminkanDone ? [] : [tile]),
+        startShouminkan: (_idx, _t) => ({ ok: true, candidates: [1 as PlayerIndex] }),
+        resolveWinChankan: (winnerIdx, fromIdx) => {
+          chankanCalls += 1
+          expect(winnerIdx).toBe(1)
+          expect(fromIdx).toBe(0)
+          // 本場縛りで槍槓ロンがブロックされる
+          return SHIBARI_BLOCKED
+        },
+        completeShouminkan: (_idx, _t) => {
+          completeCalls += 1
+          shouminkanDone = true
+          return true
+        },
+      }),
+      0
+    )
+
+    expect(app.pendingDecision?.kind).toBe('self-kan-prompt')
+    clickActionButton('self-shouminkan')
+
+    expect(chankanCalls).toBe(1)
+    // SHIBARI_BLOCKED 分岐は return せず completeShouminkan へ落ちる (加槓続行)
+    expect(completeCalls).toBe(1)
+    // 不成立メッセージが出て、槍槓ロン成立ログ ("が槍槓ロン …") は出ない
+    expect(app.eventLog.some(entry => entry.includes('槍槓ロンは本場縛り未達で不成立'))).toBe(true)
+    expect(app.eventLog.some(entry => entry.includes('が槍槓ロン'))).toBe(false)
+    // 局結果には進まない (点数移動なし)
+    expect(app.pendingRoundOutcome).toBeNull()
+    // 加槓が完了して自家手番継続 (pendingDecision はクリア)
+    expect(app.pendingDecision).toBeNull()
   })
 
   it('eventLog は EVENT_LOG_LIMIT 件を上限に古い順から切り詰める', () => {
