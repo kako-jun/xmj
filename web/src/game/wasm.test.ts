@@ -9,6 +9,7 @@ import {
   __resetWasmForTest,
   __setWasmModuleForTest,
 } from './wasm'
+import { SHIBARI_BLOCKED } from './types'
 import type { Tile } from './types'
 
 // ---- モック WasmGame ----
@@ -245,7 +246,9 @@ describe('WasmGameBridge', () => {
     const summary = bridge.resolveWinTsumo(1)
     expect(MockWasmGame.lastResolveTsumoArg).toBe(1)
     expect(summary).not.toBeNull()
-    expect(summary?.winner).toBe(1)
+    expect(summary).not.toBe(SHIBARI_BLOCKED)
+    if (summary === null || summary === SHIBARI_BLOCKED) throw new Error('unreachable')
+    expect(summary.winner).toBe(1)
     expect(summary?.winType).toBe('tsumo')
     expect(summary?.from).toBeUndefined()
     expect(summary?.han).toBe(3)
@@ -258,9 +261,10 @@ describe('WasmGameBridge', () => {
     const bridge = WasmGameBridge.createHybrid('me', 0)
     const summary = bridge.resolveWinRon(0, 2)
     expect(MockWasmGame.lastResolveRonArgs).toEqual([0, 2])
-    expect(summary?.winType).toBe('ron')
-    expect(summary?.from).toBe(2)
-    expect(summary?.totalPoints).toBe(2600)
+    if (summary === null || summary === SHIBARI_BLOCKED) throw new Error('unreachable')
+    expect(summary.winType).toBe('ron')
+    expect(summary.from).toBe(2)
+    expect(summary.totalPoints).toBe(2600)
   })
 
   it('和了形でないとき (空文字) は null を返す', () => {

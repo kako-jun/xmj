@@ -10,8 +10,8 @@
 //   - pkg からの動的 import は vi.mock で差し替える (wasm.test.ts)
 //   - ロジック自体はラッパなので、引数の素通しと initialized フラグを確認する
 
-import type { MeldGroup, MeldKind, PlayerIndex, RoundWinSummary, Tile } from './types'
-import { parseRoundOutcome, tileFromCuiCode, tileToCuiCode } from './types'
+import type { MeldGroup, MeldKind, PlayerIndex, ResolveWinResult, Tile } from './types'
+import { parseRoundOutcome, SHIBARI_BLOCKED, tileFromCuiCode, tileToCuiCode } from './types'
 
 // pkg の型を再 export しないが、JSDoc で参照できるよう型 import だけしておく。
 // (実体は dynamic import なので tree-shaking には影響しない)
@@ -66,13 +66,14 @@ export const __setWasmModuleForTest = (mod: WasmModule | null): void => {
  * `resolveWinTsumo` / `resolveWinRon` の戻り値 JSON
  * (`{"han":n,"fu":n,"totalPoints":n,"yaku":[...]}`) を `RoundWinSummary` に整形。
  * 空文字 / パースエラーは null。
+ * #143 本場縛りブロックのセンチネル JSON は `SHIBARI_BLOCKED` を返す。
  */
 const parseSummaryAsWin = (
   json: string,
   winner: PlayerIndex,
   winType: 'tsumo' | 'ron',
   from: PlayerIndex | undefined
-): RoundWinSummary | null => {
+): ResolveWinResult => {
   if (!json) return null
   let parsed: Record<string, unknown>
   try {
@@ -80,6 +81,8 @@ const parseSummaryAsWin = (
   } catch {
     return null
   }
+  // #143 本場縛りでブロックされた合法和了。役無し(null)と区別してセンチネルを返す。
+  if (parsed.shibariBlocked === true) return SHIBARI_BLOCKED
   const yaku = Array.isArray(parsed.yaku) ? (parsed.yaku as string[]) : []
   return {
     winner,
@@ -590,17 +593,19 @@ export class WasmGameBridge {
 
   /**
    * ツモ和了を確定する。和了形でなければ null を返す。
+   * #143 本場縛りでブロックされた場合は `SHIBARI_BLOCKED` を返す（null と区別）。
    * 戻り値は ScoringResult のサマリ。`getLastOutcomeJson` 経由でも取得可能。
    */
-  resolveWinTsumo(winnerIdx: PlayerIndex): RoundWinSummary | null {
+  resolveWinTsumo(winnerIdx: PlayerIndex): ResolveWinResult {
     const json = this.game.resolveWinTsumo(winnerIdx)
     return parseSummaryAsWin(json, winnerIdx, 'tsumo', undefined)
   }
 
   /**
    * ロン和了を確定する。打牌者は fromIdx で指定。和了形でなければ null。
+   * #143 本場縛りでブロックされた場合は `SHIBARI_BLOCKED` を返す（null と区別）。
    */
-  resolveWinRon(winnerIdx: PlayerIndex, fromIdx: PlayerIndex): RoundWinSummary | null {
+  resolveWinRon(winnerIdx: PlayerIndex, fromIdx: PlayerIndex): ResolveWinResult {
     const json = this.game.resolveWinRon(winnerIdx, fromIdx)
     return parseSummaryAsWin(json, winnerIdx, 'ron', fromIdx)
   }
@@ -745,12 +750,13 @@ export class WasmGameBridge {
   /**
    * 槍槓ロン (加槓宣言中の牌でのロン) を確定する。
    * `pending_chankan` の tile を winning_tile として使う。
-   * 戻り値は通常ロンと同じ `RoundWinSummary | null`。
+   * 戻り値は通常ロンと同じ `ResolveWinResult`。
+   * #143 本場縛りでブロックされた場合は `SHIBARI_BLOCKED` を返す（null と区別）。
    */
   resolveWinChankan(
     winnerIdx: PlayerIndex,
     fromIdx: PlayerIndex
-  ): RoundWinSummary | null {
+  ): ResolveWinResult {
     const json = this.game.resolveWinChankan(winnerIdx, fromIdx)
     return parseSummaryAsWin(json, winnerIdx, 'ron', fromIdx)
   }

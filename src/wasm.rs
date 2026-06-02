@@ -23,6 +23,16 @@ pub struct WasmGame {
     human_player_index: Option<usize>, // ハイブリッドモード用：人間プレイヤーの位置（0-3）
 }
 
+/// #143 本場縛りブロック専用のセンチネル戻り値。
+///
+/// `resolve_win_*` は「役無し・和了形不成立」と「本場縛りで弾かれた合法和了」を
+/// 区別する必要がある。前者は従来通り空文字 `""` を返すが、後者はこの JSON を返す。
+/// UI 側 (parseSummaryAsWin / App.ts) はこのセンチネルを検知して
+/// 「和了形不成立」ではなく「本場縛り未達」のメッセージに分岐する。
+/// なお resolve_win 自体は呼ばれない (点数移動は発生しない)。
+#[cfg(feature = "wasm")]
+pub(crate) const SHIBARI_BLOCKED_JSON: &str = "{\"shibariBlocked\":true}";
+
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 impl WasmGame {
@@ -285,8 +295,9 @@ impl WasmGame {
             return String::new();
         };
         // #61 本場縛り: 最低点数縛りを満たさない和了は無効
+        // #143 縛りブロックは「和了形不成立」と区別するためセンチネルを返す
         if !self.game.meets_shibari(&result) {
-            return String::new();
+            return SHIBARI_BLOCKED_JSON.to_string();
         }
         let summary = scoring_summary_json(&result);
         self.game
@@ -589,8 +600,9 @@ impl WasmGame {
             return String::new();
         };
         // #61 本場縛り: 最低点数縛りを満たさない和了は無効
+        // #143 縛りブロックは「和了形不成立」と区別するためセンチネルを返す
         if !self.game.meets_shibari(&result) {
-            return String::new();
+            return SHIBARI_BLOCKED_JSON.to_string();
         }
         let summary = scoring_summary_json(&result);
         self.game
@@ -619,8 +631,9 @@ impl WasmGame {
             return String::new();
         };
         // #61 本場縛り: 最低点数縛りを満たさない和了は無効
+        // #143 縛りブロックは「和了形不成立」と区別するためセンチネルを返す
         if !self.game.meets_shibari(&result) {
-            return String::new();
+            return SHIBARI_BLOCKED_JSON.to_string();
         }
         let summary = scoring_summary_json(&result);
         self.game
@@ -1555,6 +1568,53 @@ mod tests {
         assert!(!s.is_empty(), "副露あり和了で resolve_win_tsumo が成功するはず: got {:?}", s);
         // 役牌 (白) が含まれる
         assert!(s.contains("Yakuhai") || s.contains("\"han\""), "yaku/han 情報が含まれる: {}", s);
+    }
+
+    #[test]
+    #[cfg(feature = "wasm")]
+    fn resolve_win_tsumo_shibari_blocked_returns_sentinel() {
+        // #143: 本場縛りで弾かれた合法和了は空文字ではなく
+        // SHIBARI_BLOCKED_JSON センチネルを返し、役無し (空文字) と区別する。
+        // 役牌白ポン (1飜) の手を 5 本場 + 2飜縛りに掛けるとブロックされる。
+        use crate::tile::{Tile, Suit, Honor};
+        use crate::hand::{Meld, MeldType};
+        use crate::game::ShibariRule;
+        let mut g = make_game();
+        let mut hand = crate::Hand::new();
+        for tile in [
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Man, 1, false),
+            Tile::new_number(Suit::Pin, 2, false),
+            Tile::new_number(Suit::Pin, 3, false),
+            Tile::new_number(Suit::Pin, 4, false),
+            Tile::new_number(Suit::Sou, 7, false),
+            Tile::new_number(Suit::Sou, 8, false),
+            Tile::new_number(Suit::Sou, 9, false),
+            Tile::new_honor(Honor::Ton),
+            Tile::new_honor(Honor::Ton),
+        ] {
+            hand.add_tile(tile);
+        }
+        hand.add_meld(Meld {
+            meld_type: MeldType::Pon,
+            tiles: vec![
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+                Tile::new_honor(Honor::Haku),
+            ],
+            is_open: true,
+            ..Default::default()
+        });
+        g.game.players[0].hand = hand;
+        g.game.shibari_rule = ShibariRule::TwoHanFromFiveHonba;
+        g.game.honba = 5;
+        // 天和 (役満) が乗ると 2飜縛りを満たしてしまうので進行済みにして無効化する
+        g.game.draws_this_round = 1;
+        let s = g.resolve_win_tsumo(0);
+        assert_eq!(s, SHIBARI_BLOCKED_JSON, "本場縛りブロックはセンチネルを返す: got {:?}", s);
+        // resolve_win は呼ばれていないので局結果は書かれない
+        assert_eq!(g.get_last_outcome_json(), "");
     }
 
     #[test]
