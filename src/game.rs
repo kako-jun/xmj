@@ -2220,9 +2220,13 @@ impl Game {
                 if w < deltas.len() {
                     let extra = deltas[w]; // 2 倍にした増分 = 元の額そのもの
                     deltas[w] += extra;
-                    // 反対グループ = 割れ目と符号が逆のプレイヤー（割れ目自身は除く）
+                    // 反対グループ = 割れ目とテンパイ/ノーテンの別が逆のプレイヤー
+                    // （割れ目自身は除く）。符号比較ではなくテンパイ集合のメンバーシップで
+                    // 判定することで、将来 per 値が 0 になっても意図どおり分類される。
                     let opponents: Vec<usize> = (0..deltas.len())
-                        .filter(|&i| i != w && (deltas[i] > 0) != (extra > 0))
+                        .filter(|&i| {
+                            i != w && tenpai_players.contains(&i) != tenpai_players.contains(&w)
+                        })
                         .collect();
                     if !opponents.is_empty() {
                         let comp = -extra; // 転嫁する総額（符号は反対）
@@ -4315,6 +4319,40 @@ mod tests {
         assert_eq!(game.players[1].score - before[1], -2000, "ノーテンが増分負担 (-2000)");
         assert_eq!(game.players[2].score - before[2], -2000, "ノーテンが増分負担 (-2000)");
         assert_eq!(game.players[3].score - before[3], -2000, "ノーテンが増分負担 (-2000)");
+        let sum: i32 = (0..4).map(|i| game.players[i].score - before[i]).sum();
+        assert_eq!(sum, 0, "ゼロサム維持");
+    }
+
+    /// #145 2 人テンパイ (per_tenpai=1500, per_noten=-1500)。割れ目=ノーテン者。
+    /// 複数の相手（テンパイ 2 人）へ増分を均等転嫁する経路を検証する。
+    #[test]
+    fn test_warime_noten_two_tenpai_multi_opponent() {
+        let mut game = Game::new(vec!["A".into(), "B".into(), "C".into(), "D".into()]);
+        game.warime_player = Some(2); // player 2 が割れ目でノーテン
+        let before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+        game.resolve_draw(vec![0, 1]); // player 0,1 がテンパイ
+        assert_eq!(game.players[2].score - before[2], -3000, "割れ目ノーテンは 2 倍 (-3000)");
+        assert_eq!(game.players[3].score - before[3], -1500, "他ノーテンは通常 -1500");
+        // 増分 1500 をテンパイ 2 人へ均等転嫁 → 各 +750
+        assert_eq!(game.players[0].score - before[0], 2250, "テンパイが増分も受領 (+2250)");
+        assert_eq!(game.players[1].score - before[1], 2250, "テンパイが増分も受領 (+2250)");
+        let sum: i32 = (0..4).map(|i| game.players[i].score - before[i]).sum();
+        assert_eq!(sum, 0, "ゼロサム維持");
+    }
+
+    /// #145 3 人テンパイ (per_tenpai=1000, per_noten=-3000)。割れ目=唯一のノーテン者。
+    /// 増分をテンパイ 3 人へ均等転嫁する経路を検証する。
+    #[test]
+    fn test_warime_noten_three_tenpai_multi_opponent() {
+        let mut game = Game::new(vec!["A".into(), "B".into(), "C".into(), "D".into()]);
+        game.warime_player = Some(3); // player 3 が割れ目で唯一のノーテン
+        let before: Vec<i32> = game.players.iter().map(|p| p.score).collect();
+        game.resolve_draw(vec![0, 1, 2]); // player 0,1,2 がテンパイ
+        assert_eq!(game.players[3].score - before[3], -6000, "割れ目ノーテンは 2 倍 (-6000)");
+        // 増分 3000 をテンパイ 3 人へ均等転嫁 → 各 +1000
+        assert_eq!(game.players[0].score - before[0], 2000, "テンパイが増分も受領 (+2000)");
+        assert_eq!(game.players[1].score - before[1], 2000, "テンパイが増分も受領 (+2000)");
+        assert_eq!(game.players[2].score - before[2], 2000, "テンパイが増分も受領 (+2000)");
         let sum: i32 = (0..4).map(|i| game.players[i].score - before[i]).sum();
         assert_eq!(sum, 0, "ゼロサム維持");
     }
