@@ -144,6 +144,20 @@ export interface RoundWinSummary {
   yaku: string[]
 }
 
+/**
+ * #143 本場縛りで弾かれた和了を表すセンチネル。
+ *
+ * `resolveWinTsumo/Ron/Chankan` は「役無し・和了形不成立」(null) と
+ * 「本場縛りの最低点数を満たさず合法的にブロックされた和了」を区別する。
+ * 後者ではこの値を返し、UI は「和了形不成立」ではなく「本場縛り未達」の
+ * メッセージを出す。点数移動は発生しない。
+ */
+export const SHIBARI_BLOCKED = Symbol('shibari-blocked')
+export type ShibariBlocked = typeof SHIBARI_BLOCKED
+
+/** 和了確定 API の戻り値。成立=サマリ / 縛りブロック=センチネル / 不成立=null。 */
+export type ResolveWinResult = RoundWinSummary | ShibariBlocked | null
+
 /** 流局の結果サマリ。聴牌者の座席 index 一覧。 */
 export interface RoundDrawSummary {
   tenpaiPlayers: PlayerIndex[]

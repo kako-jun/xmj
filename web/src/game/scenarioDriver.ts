@@ -21,7 +21,7 @@
 
 import { Application, Container } from 'pixi.js'
 import { App, type PendingDecision } from './App'
-import type { PlayerIndex, RoundWinSummary, Tile } from './types'
+import type { PlayerIndex, Tile } from './types'
 import type { WasmGameBridge } from './wasm'
 
 /**
@@ -89,10 +89,10 @@ export const createMockBridge = (
     startShouminkan: () => ({ ok: false, candidates: [] }),
     completeShouminkan: () => false,
     cancelShouminkan: () => undefined,
-    resolveWinChankan: () => null as RoundWinSummary | null,
+    resolveWinChankan: () => null,
     getLastDiscarder: () => undefined,
-    resolveWinTsumo: () => null as RoundWinSummary | null,
-    resolveWinRon: () => null as RoundWinSummary | null,
+    resolveWinTsumo: () => null,
+    resolveWinRon: () => null,
     computeTenpaiPlayers: () => [],
     destroy: () => undefined,
     ...overrides,

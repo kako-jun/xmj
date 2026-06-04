@@ -300,7 +300,7 @@ impl WasmGame {
 
     // --- Round loop bridge (Issue #27) ---
     pub fn resolve_draw(&mut self, tenpai_player_indices: Vec<usize>);
-    pub fn resolve_win_tsumo(&mut self, winner_idx: usize) -> String; // 役/han/fu/totalPoints の JSON
+    pub fn resolve_win_tsumo(&mut self, winner_idx: usize) -> String; // 役/han/fu/totalPoints の JSON / 縛りブロックは {"shibariBlocked":true}
     pub fn resolve_win_ron(&mut self, winner_idx: usize, from_idx: usize) -> String;
     pub fn next_round(&mut self) -> bool;          // true=続行 / false=終局
     pub fn get_round(&self) -> u32;
@@ -316,6 +316,14 @@ impl WasmGame {
 add_tile 時に自動ソートされるため末尾位置から復元できないため）。
 和了形でない手牌に対しては空文字を返し、`last_outcome` は更新しない（呼び出し側の
 安全網）。
+
+#143 本場縛り (#61) で弾かれた合法和了は、空文字（=和了形不成立）と区別するため
+センチネル JSON `{"shibariBlocked":true}` を返す。この場合 `resolve_win` は呼ばれず
+点数移動は発生せず、`pending_chankan` も維持される（加槓続行可）。`resolve_win_chankan`
+も同じセンチネルを返す。TS 側 `parseSummaryAsWin` はこのセンチネルを `SHIBARI_BLOCKED`
+（`types.ts` の Symbol）に変換し、`resolveWinTsumo/Ron/Chankan` の戻り値型は
+`RoundWinSummary | null` から `ResolveWinResult`（= サマリ / センチネル / null）に変更。
+UI (`App.ts`) は「和了形不成立」ではなく「本場縛り未達」のメッセージに分岐する。
 
 TS 側のラッパは `web/src/game/wasm.ts` の `WasmGameBridge` および
 `web/src/game/types.ts` の `RoundOutcome` / `parseRoundOutcome`。UI は

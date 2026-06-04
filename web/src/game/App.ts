@@ -9,7 +9,7 @@ import {
 import { createTableScene } from './table'
 import type { DiceRoll, GameMode, GameModeOption, GameState, PlayerIndex, Tile } from './types'
 import { createGameStateFromBridge } from './bridgeState'
-import { diceRollToHumanSeat, tileFromCuiCode, tileToCuiCode, tileToGlyph } from './types'
+import { diceRollToHumanSeat, SHIBARI_BLOCKED, tileFromCuiCode, tileToCuiCode, tileToGlyph } from './types'
 import { WasmGameBridge } from './wasm'
 import { createTitleScene } from './titleScene'
 import { createModeSelectScene } from './modeSelectScene'
@@ -1051,8 +1051,14 @@ export class App {
     if (!this.bridge.isCurrentPlayerHuman()) return
     if (!this.bridge.canTsumo(this.humanPlayerIndex)) return
     const summary = this.bridge.resolveWinTsumo(this.humanPlayerIndex)
+    if (summary === SHIBARI_BLOCKED) {
+      // #143 本場縛りで弾かれた合法和了。和了形不成立ではないので専用メッセージにする。
+      // 自家のツモ番なので、和了せずそのまま打牌に戻る（advanceTurnLoop は呼ばない）。
+      this.appendLog('本場縛り未達のためツモ和了不可')
+      return
+    }
     if (!summary) {
-      this.appendLog('ツモ宣言失敗')
+      this.appendLog('ツモ宣言失敗（和了形不成立）')
       return
     }
     this.appendLog(`${this.getPlayerName(this.humanPlayerIndex)} がツモ和了`)
@@ -1073,6 +1079,12 @@ export class App {
     }
     const summary = this.bridge.resolveWinRon(this.humanPlayerIndex, fromIdx)
     this.pendingDecision = null
+    if (summary === SHIBARI_BLOCKED) {
+      // #143 本場縛りで弾かれた合法和了。和了形不成立ではないので専用メッセージにする。
+      this.appendLog('本場縛り未達のためロン和了不可')
+      this.advanceTurnLoop()
+      return
+    }
     if (!summary) {
       this.appendLog('ロン宣言失敗（和了形不成立）')
       this.advanceTurnLoop()
@@ -1245,7 +1257,12 @@ export class App {
         const summary = typeof this.bridge.resolveWinChankan === 'function'
           ? this.bridge.resolveWinChankan(winnerIdx, this.humanPlayerIndex)
           : null
-        if (summary) {
+        if (summary === SHIBARI_BLOCKED) {
+          // #143 本場縛りで弾かれた槍槓ロン。和了は成立せず加槓はそのまま続行する。
+          this.appendLog(
+            `${this.getPlayerName(winnerIdx)} の槍槓ロンは本場縛り未達で不成立`
+          )
+        } else if (summary) {
           this.appendLog(
             `${this.getPlayerName(winnerIdx)} が槍槓ロン ${tileToGlyph(tile)}`
           )
@@ -1253,11 +1270,15 @@ export class App {
           this.showRoundResultIfPending()
           return
         }
+      } else {
+        // 人間だけが候補 → 後続で pending を立てて選ばせる（現状は見逃し扱い・将来実装）。
+        // #143: CPU 候補がブロック/不成立だったときにこのログを併発させない。
+        // 人間が候補でないのに「人間プレイヤーが槍槓可能」と矛盾表示するのを防ぐため、
+        // CPU 候補が居ない (= 人間のみ候補) ケースに限定する。
+        this.appendLog(
+          `加槓 ${tileToGlyph(tile)}: 人間プレイヤーが槍槓可能（本実装では見逃し扱い）`
+        )
       }
-      // 人間だけが候補 → 後続で pending を立てて選ばせる（現状は見逃し扱い・将来実装）
-      this.appendLog(
-        `加槓 ${tileToGlyph(tile)}: 人間プレイヤーが槍槓可能（本実装では見逃し扱い）`
-      )
     }
 
     const beforeHand = this.gameState
