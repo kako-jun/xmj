@@ -3536,6 +3536,12 @@ mod tests {
         game.uso_riichi_enabled = true;
         let idx = 0;
         game.players[idx].score = 1000;
+        // 配牌は thread_rng でシャッフルされる。持ち点ちょうど 1000 のときは
+        // 嘘リーチ判定が「非テンパイ」だけに依存するため、ランダムにテンパイ手が
+        // 配られると `Player::can_riichi()` が true になり通常立直に倒れてテストが
+        // 非決定的に落ちる (#144 flaky)。空手牌で非テンパイを固定し、is_uso 経路を
+        // 決定論化する（Game::can_riichi は uso 有効時テンパイを見ないので宣言は通る）。
+        game.players[idx].hand = crate::hand::Hand::new();
         let before = game.clone();
 
         assert!(game.declare_riichi(idx), "持ち点 1000 でも宣言できる");
