@@ -1270,11 +1270,15 @@ export class App {
           this.showRoundResultIfPending()
           return
         }
+      } else {
+        // 人間だけが候補 → 後続で pending を立てて選ばせる（現状は見逃し扱い・将来実装）。
+        // #143: CPU 候補がブロック/不成立だったときにこのログを併発させない。
+        // 人間が候補でないのに「人間プレイヤーが槍槓可能」と矛盾表示するのを防ぐため、
+        // CPU 候補が居ない (= 人間のみ候補) ケースに限定する。
+        this.appendLog(
+          `加槓 ${tileToGlyph(tile)}: 人間プレイヤーが槍槓可能（本実装では見逃し扱い）`
+        )
       }
-      // 人間だけが候補 → 後続で pending を立てて選ばせる（現状は見逃し扱い・将来実装）
-      this.appendLog(
-        `加槓 ${tileToGlyph(tile)}: 人間プレイヤーが槍槓可能（本実装では見逃し扱い）`
-      )
     }
 
     const beforeHand = this.gameState

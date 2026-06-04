@@ -2132,6 +2132,9 @@ Dora indicators: 5p 1p
     // 不成立メッセージが出て、槍槓ロン成立ログ ("が槍槓ロン …") は出ない
     expect(app.eventLog.some(entry => entry.includes('槍槓ロンは本場縛り未達で不成立'))).toBe(true)
     expect(app.eventLog.some(entry => entry.includes('が槍槓ロン'))).toBe(false)
+    // #143: CPU 候補がブロックされただけなので「人間プレイヤーが槍槓可能（見逃し扱い）」の
+    // 矛盾ログは併発しない (人間は候補ではない)
+    expect(app.eventLog.some(entry => entry.includes('見逃し扱い'))).toBe(false)
     // 局結果には進まない (点数移動なし)
     expect(app.pendingRoundOutcome).toBeNull()
     // 加槓が完了して自家手番継続 (pendingDecision はクリア)
